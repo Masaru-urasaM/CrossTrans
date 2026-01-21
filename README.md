@@ -4,10 +4,10 @@ A Windows desktop application for instant text translation using Google's Gemini
 
 ## Features
 
-- **Hotkey Translation**: Triple-tap special keys to translate selected text instantly
-  - `Scroll Lock × 3` → Vietnamese
-  - `Pause × 3` → English
-  - `Insert × 3` → Japanese
+- **Hotkey Translation**: Press simple hotkeys to translate selected text instantly
+  - `Win+Alt+V` → Vietnamese
+  - `Win+Alt+E` → English
+  - `Win+Alt+J` → Japanese
 - **Compact Tooltip**: Translation appears near your cursor, not in a separate window
 - **Full Translator Window**: Open the complete interface for more options
 - **30+ Languages**: Support for major world languages
@@ -29,11 +29,19 @@ A Windows desktop application for instant text translation using Google's Gemini
 - Windows 10/11
 - Gemini API key (free)
 
-### Steps
+### Option 1: Download .exe (Recommended)
+
+1. Go to [Releases](https://github.com/sytacxinh/gemini-translator/releases)
+2. Download `GeminiTranslator.exe` and `.env`
+3. Edit `.env` file and replace `your_api_key_here` with your actual API key
+4. Get your free API key at: https://aistudio.google.com/app/apikey
+5. Run `GeminiTranslator.exe`
+
+### Option 2: Run from source
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/gemini-translator.git
+   git clone https://github.com/sytacxinh/gemini-translator.git
    cd gemini-translator
    ```
 
@@ -53,11 +61,6 @@ A Windows desktop application for instant text translation using Google's Gemini
    GEMINI_API_KEY=your_api_key_here
    ```
 
-   Or set an environment variable:
-   ```bash
-   set GEMINI_API_KEY=your_api_key_here
-   ```
-
 5. **Run the application**
    ```bash
    python translator.py
@@ -71,10 +74,10 @@ A Windows desktop application for instant text translation using Google's Gemini
 
 2. **Translate text**:
    - Select any text in any application
-   - Triple-tap one of the hotkeys:
-     - `Scroll Lock` → Vietnamese
-     - `Pause` → English
-     - `Insert` → Japanese
+   - Press one of the hotkeys:
+     - `Win+Alt+V` → Vietnamese
+     - `Win+Alt+E` → English
+     - `Win+Alt+J` → Japanese
    - A tooltip with the translation will appear near your cursor
 
 3. **Tooltip actions**:
@@ -93,24 +96,22 @@ A Windows desktop application for instant text translation using Google's Gemini
 ## Auto-start with Windows (Optional)
 
 1. Press `Win + R`, type `shell:startup`, press Enter
-2. Create a shortcut to `run_silent.vbs` in that folder
+2. Create a shortcut to `run_silent.vbs` (or `GeminiTranslator.exe`) in that folder
 
 ## Configuration
 
-Edit these values in `translator.py` to customize:
+Edit the hotkeys in `translator.py` if needed:
 
 ```python
-# Hotkey mappings
-TRIPLE_TAP_KEYS = {
-    keyboard.Key.scroll_lock: "Vietnamese",
-    keyboard.Key.pause: "English",
-    keyboard.Key.insert: "Japanese",
-}
+# In the run() method, modify the GlobalHotKeys:
+hotkeys = GlobalHotKeys({
+    '<cmd>+<alt>+v': lambda: ...,  # Win+Alt+V → Vietnamese
+    '<cmd>+<alt>+e': lambda: ...,  # Win+Alt+E → English
+    '<cmd>+<alt>+j': lambda: ...,  # Win+Alt+J → Japanese
+})
 
-# Timing
-TAP_TIMEOUT = 0.6      # Max time between taps (seconds)
-REQUIRED_TAPS = 3      # Number of taps required
-COOLDOWN = 2.0         # Cooldown between translations
+# Cooldown between translations (seconds)
+COOLDOWN = 2.0
 ```
 
 ## Requirements
@@ -124,15 +125,19 @@ COOLDOWN = 2.0         # Cooldown between translations
 ## Troubleshooting
 
 ### "GEMINI_API_KEY not found"
-Make sure you've created the `.env` file or set the environment variable correctly.
+Make sure you've created the `.env` file in the same folder as the app with your API key.
 
 ### Translation not working
 - Check if text is actually selected (try Ctrl+C manually)
 - Some applications may block clipboard access
 - Wait for the cooldown period (2 seconds between translations)
 
+### Hotkeys not working
+- Make sure no other app is using the same hotkey combination
+- Try running the app as administrator
+
 ### Multiple instances running
-The app should prevent this automatically. If it happens, check Task Manager and end extra `python.exe` processes.
+The app should prevent this automatically. If it happens, check Task Manager and end extra processes.
 
 ## Contributing
 

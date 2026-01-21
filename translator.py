@@ -9,10 +9,9 @@ import sys
 import queue
 import socket
 from pynput import keyboard
-from pynput.keyboard import Controller as KeyboardController
+from pynput.keyboard import Controller as KeyboardController, GlobalHotKeys
 from pystray import Icon, MenuItem, Menu
 from PIL import Image, ImageDraw
-from collections import deque
 import webbrowser
 
 # ============== SINGLE INSTANCE LOCK ==============
@@ -109,15 +108,7 @@ LANGUAGES = [
     ("Ukrainian", "uk", "Українська Ukraina"),
 ]
 
-# Triple-tap configuration
-TRIPLE_TAP_KEYS = {
-    keyboard.Key.scroll_lock: "Vietnamese",
-    keyboard.Key.pause: "English",
-    keyboard.Key.insert: "Japanese",
-}
-
-TAP_TIMEOUT = 0.6
-REQUIRED_TAPS = 3
+# Hotkey configuration (Win+Alt+V/E/J)
 COOLDOWN = 2.0
 
 # ============== SETUP GEMINI ==============
@@ -125,7 +116,6 @@ genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-2.0-flash-lite')
 
 # ============== GLOBAL STATE ==============
-tap_times = {}
 last_translation_time = 0
 translation_queue = queue.Queue()
 keyboard_controller = KeyboardController()
@@ -214,45 +204,23 @@ def do_translation(target_language):
     except Exception as e:
         print(f"[{time.strftime('%H:%M:%S')}] Error: {e}")
 
-# ============== TRIPLE-TAP DETECTION ==============
-def on_key_release(key):
-    global tap_times
-    
-    if key not in TRIPLE_TAP_KEYS:
-        return
-    
-    current_time = time.time()
-    
-    if key not in tap_times:
-        tap_times[key] = deque(maxlen=REQUIRED_TAPS)
-    
-    tap_times[key].append(current_time)
-    
-    if len(tap_times[key]) == REQUIRED_TAPS:
-        time_diff = tap_times[key][-1] - tap_times[key][0]
-        
-        if time_diff <= TAP_TIMEOUT:
-            target_language = TRIPLE_TAP_KEYS[key]
-            tap_times[key].clear()
-            threading.Thread(target=lambda: do_translation(target_language), daemon=True).start()
-
 # ============== SYSTEM TRAY ==============
 def create_tray_icon(quit_callback):
     image = Image.new('RGB', (64, 64), color='#0078d4')
     draw = ImageDraw.Draw(image)
     draw.text((20, 20), "GT", fill='white')
-    
+
     menu = Menu(
-        MenuItem('Gemini Translator v4', lambda: None, enabled=False),
+        MenuItem('Gemini Translator v1.1.0', lambda: None, enabled=False),
         MenuItem('─────────────', lambda: None, enabled=False),
-        MenuItem('Scroll Lock ×3 → Vietnamese', lambda: None, enabled=False),
-        MenuItem('Pause ×3 → English', lambda: None, enabled=False),
-        MenuItem('Insert ×3 → Japanese', lambda: None, enabled=False),
+        MenuItem('Win+Alt+V → Vietnamese', lambda: None, enabled=False),
+        MenuItem('Win+Alt+E → English', lambda: None, enabled=False),
+        MenuItem('Win+Alt+J → Japanese', lambda: None, enabled=False),
         MenuItem('─────────────', lambda: None, enabled=False),
         MenuItem('Quit', quit_callback)
     )
-    
-    icon = Icon("Gemini Translator", image, "Gemini Translator", menu)
+
+    icon = Icon("Gemini Translator", image, "Gemini Translator v1.1.0", menu)
     return icon
 
 # ============== MAIN APP ==============
@@ -664,22 +632,26 @@ class TranslatorApp:
     
     def run(self):
         print("=" * 50)
-        print("Gemini Translator v4")
+        print("Gemini Translator v1.1.0")
         print("=" * 50)
         print("")
-        print("How to use:")
-        print("  1. Select any text")
-        print("  2. Tap Scroll Lock 3 times → Vietnamese")
-        print("  3. Tap Pause        3 times → English")
-        print("  4. Tap Insert       3 times → Japanese")
+        print("Hotkeys:")
+        print("  Win+Alt+V → Vietnamese")
+        print("  Win+Alt+E → English")
+        print("  Win+Alt+J → Japanese")
         print("")
-        print("Or use the popup to select any language!")
+        print("Select any text, then press a hotkey to translate!")
         print("")
         print("Listening...")
         print("-" * 50)
-        
-        listener = keyboard.Listener(on_release=on_key_release)
-        listener.start()
+
+        # Setup global hotkeys (Win+Alt+V/E/J)
+        hotkeys = GlobalHotKeys({
+            '<cmd>+<alt>+v': lambda: threading.Thread(target=lambda: do_translation("Vietnamese"), daemon=True).start(),
+            '<cmd>+<alt>+e': lambda: threading.Thread(target=lambda: do_translation("English"), daemon=True).start(),
+            '<cmd>+<alt>+j': lambda: threading.Thread(target=lambda: do_translation("Japanese"), daemon=True).start(),
+        })
+        hotkeys.start()
         
         self.tray_icon = create_tray_icon(self.quit_app)
         tray_thread = threading.Thread(target=self.tray_icon.run, daemon=True)
