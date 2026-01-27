@@ -1,5 +1,5 @@
 """
-Utility modules for AI Translator.
+Utility modules for CrossTrans.
 """
 from src.utils.logging_setup import setup_logging
 from src.utils.updates import check_for_updates, download_and_install_update, execute_update

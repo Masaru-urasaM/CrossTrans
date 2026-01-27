@@ -1,5 +1,5 @@
 """
-Toast Notification System for AI Translator.
+Toast Notification System for CrossTrans.
 Provides non-intrusive visual feedback for user actions.
 """
 import tkinter as tk

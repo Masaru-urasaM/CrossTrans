@@ -1,5 +1,5 @@
 """
-Settings Window for AI Translator.
+Settings Window for CrossTrans.
 """
 import os
 import sys
@@ -21,19 +21,121 @@ except ImportError:
     from tkinter import ttk
     HAS_TTKBOOTSTRAP = False
 
-from src.constants import VERSION, GITHUB_REPO, LANGUAGES, PROVIDERS_LIST
+from src.constants import VERSION, GITHUB_REPO, LANGUAGES, PROVIDERS_LIST, FEEDBACK_URL, MODEL_PROVIDER_MAP
 from src.core.api_manager import AIAPIManager
 from src.utils.updates import check_for_updates, download_and_install_update, execute_update
 from src.core.multimodal import MultimodalProcessor
 from src.core.auth import require_auth
 
 
+def set_dark_title_bar(window):
+    """Set dark title bar for Windows 10/11 windows."""
+    try:
+        import ctypes
+        hwnd = ctypes.windll.user32.GetParent(window.winfo_id())
+        if not hwnd:
+            hwnd = window.winfo_id()
+
+        DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+        DWMWA_CAPTION_COLOR = 35
+        dwmapi = ctypes.windll.dwmapi
+
+        value = ctypes.c_int(1)
+        dwmapi.DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
+                                     ctypes.byref(value), ctypes.sizeof(value))
+        caption_color = ctypes.c_int(0x002b2b2b)
+        dwmapi.DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR,
+                                     ctypes.byref(caption_color), ctypes.sizeof(caption_color))
+    except Exception:
+        pass
+
+
+def get_all_models_list(provider: str = "Auto") -> list:
+    """Get list of models for dropdown, filtered by provider and sorted alphabetically.
+
+    Args:
+        provider: Provider name or "Auto" for all models
+
+    Returns:
+        List of model names starting with "Auto", then sorted A-Z
+    """
+    models = []
+
+    if provider == "Auto":
+        # Add all models from all providers
+        for prov, model_list in MODEL_PROVIDER_MAP.items():
+            models.extend(model_list)
+    else:
+        # Add models for specific provider only
+        provider_key = provider.lower()
+        if provider_key in MODEL_PROVIDER_MAP:
+            models.extend(MODEL_PROVIDER_MAP[provider_key])
+
+    # Sort alphabetically (case-insensitive)
+    models.sort(key=lambda x: x.lower())
+
+    # "Auto" always first
+    return ["Auto"] + models
+
+
+class AutocompleteCombobox(ttk.Combobox):
+    """Combobox with autocomplete filtering.
+
+    As the user types, the dropdown list is filtered to show only
+    matching options. Supports both selection and custom input.
+    """
+
+    def __init__(self, master, **kwargs):
+        self._all_values = list(kwargs.pop('values', []))
+        super().__init__(master, **kwargs)
+        self['values'] = self._all_values
+
+        # Bind key release for filtering
+        self.bind('<KeyRelease>', self._on_key_release)
+        self.bind('<FocusIn>', self._on_focus_in)
+
+    def set_values(self, values):
+        """Update the full list of values.
+
+        Args:
+            values: List of all possible values
+        """
+        self._all_values = list(values)
+        self['values'] = self._all_values
+
+    def _on_key_release(self, event):
+        """Filter dropdown based on typed text."""
+        # Ignore navigation and special keys
+        if event.keysym in ('Up', 'Down', 'Left', 'Right', 'Return', 'Tab',
+                            'Escape', 'Shift_L', 'Shift_R', 'Control_L',
+                            'Control_R', 'Alt_L', 'Alt_R', 'BackSpace'):
+            if event.keysym == 'BackSpace':
+                # Still filter on backspace
+                pass
+            else:
+                return
+
+        typed = self.get().strip().lower()
+        if not typed or typed == 'auto':
+            # Show all values when empty or "Auto"
+            self['values'] = self._all_values
+        else:
+            # Filter values that contain the typed text
+            filtered = [v for v in self._all_values if typed in v.lower()]
+            self['values'] = filtered if filtered else self._all_values
+
+    def _on_focus_in(self, event):
+        """Show full list on focus."""
+        self['values'] = self._all_values
+
+
 class SettingsWindow:
     """Settings dialog for configuring the application."""
 
-    def __init__(self, parent, config, on_save_callback=None):
+    def __init__(self, parent, config, on_save_callback=None, on_api_change_callback=None):
         self.config = config
         self.on_save_callback = on_save_callback
+        self.on_api_change_callback = on_api_change_callback  # Called when API keys change (for trial mode)
         self.hotkey_entries = {}
         self.custom_rows = []
         self.api_rows = []
@@ -41,7 +143,7 @@ class SettingsWindow:
 
         # Use tk.Toplevel for better compatibility
         self.window = tk.Toplevel(parent)
-        self.window.title("Settings - AI Translator")
+        self.window.title("Settings - CrossTrans")
         self.window.geometry("1400x650")
         self.window.resizable(True, True)
         self.window.configure(bg='#2b2b2b')
@@ -51,6 +153,9 @@ class SettingsWindow:
         x = (self.window.winfo_screenwidth() - 1400) // 2
         y = (self.window.winfo_screenheight() - 650) // 2
         self.window.geometry(f"+{x}+{y}")
+
+        # Apply dark title bar (Windows 10/11)
+        set_dark_title_bar(self.window)
 
         # Make window modal and handle close properly
         self.window.protocol("WM_DELETE_WINDOW", self.window.destroy)
@@ -86,6 +191,11 @@ class SettingsWindow:
         notebook.add(api_frame, text="  API Key  ")
         self._create_api_tab(api_frame)
 
+        # Tab 4: Guide
+        guide_frame = ttk.Frame(notebook, padding=20) if HAS_TTKBOOTSTRAP else ttk.Frame(notebook)
+        notebook.add(guide_frame, text="  Guide  ")
+        self._create_guide_tab(guide_frame)
+
         # Buttons
         btn_frame = ttk.Frame(self.window)
         btn_frame.pack(fill=X, padx=10, pady=(0, 10))
@@ -111,7 +221,9 @@ class SettingsWindow:
         ttk.Label(parent, text="Configure multiple models and keys for failover redundancy.",
                   font=('Segoe UI', 9)).pack(anchor=W, pady=(5, 5))
         ttk.Label(parent, text="⚠ Note: Each 'Test' counts as 1 API request toward your quota.",
-                  font=('Segoe UI', 9, 'italic'), foreground='#ff9900').pack(anchor=W, pady=(0, 10))
+                  font=('Segoe UI', 9, 'italic'), foreground='#ff9900').pack(anchor=W, pady=(0, 3))
+        ttk.Label(parent, text="💡 Model = Auto: System will try models until one works (may not be optimal for your task).",
+                  font=('Segoe UI', 9, 'italic'), foreground='#888888').pack(anchor=W, pady=(0, 10))
 
         # Scrollable container for API keys (no visible scrollbar)
         canvas = tk.Canvas(parent, highlightthickness=0, height=380)
@@ -284,30 +396,26 @@ class SettingsWindow:
         provider_cb = ttk.Combobox(row, textvariable=provider_var, values=PROVIDERS_LIST, width=10, state="readonly")
         provider_cb.pack(side=LEFT, padx=(3, 8))
 
-        # Model Name with placeholder
-        model_var = tk.StringVar(value=model)
+        # Model Combobox (autocomplete - can select or type to filter)
+        model_var = tk.StringVar(value=model if model else "Auto")
         ttk.Label(row, text="Model:", font=('Segoe UI', 9)).pack(side=LEFT)
-        model_entry = ttk.Entry(row, textvariable=model_var, width=25)
-        model_entry.pack(side=LEFT, padx=(3, 8))
+        model_values = get_all_models_list(provider)
+        model_cb = AutocompleteCombobox(row, textvariable=model_var, width=28)
+        model_cb.set_values(model_values)
+        model_cb.pack(side=LEFT, padx=(3, 8))
 
-        # Add placeholder for model entry
-        model_placeholder = "gemini-2.0-flash"
-        if not model:
-            model_entry.insert(0, model_placeholder)
-            model_entry.config(foreground='#888888')
+        # Update model list when provider changes
+        def on_provider_change(event=None):
+            current_provider = provider_var.get()
+            new_values = get_all_models_list(current_provider)
+            model_cb.set_values(new_values)
+            # If current model is not in new list and not custom, reset to Auto
+            current_model = model_var.get()
+            if current_model not in new_values and current_model != "Auto":
+                # Keep custom models, only reset if it was from a different provider's list
+                pass  # Allow custom input
 
-        def on_model_focus_in(e):
-            if model_entry.get() == model_placeholder:
-                model_entry.delete(0, END)
-                model_entry.config(foreground='white' if HAS_TTKBOOTSTRAP else 'black')
-
-        def on_model_focus_out(e):
-            if not model_entry.get():
-                model_entry.insert(0, model_placeholder)
-                model_entry.config(foreground='#888888')
-
-        model_entry.bind('<FocusIn>', on_model_focus_in)
-        model_entry.bind('<FocusOut>', on_model_focus_out)
+        provider_cb.bind('<<ComboboxSelected>>', on_provider_change)
 
         # API Key with placeholder
         key_var = tk.StringVar(value=key)
@@ -363,11 +471,11 @@ class SettingsWindow:
 
         if HAS_TTKBOOTSTRAP:
             ttk.Button(row, text="Test",
-                       command=lambda: self._test_single_api(model_var.get(), key_var.get(), provider_var.get(), test_label, model_placeholder),
+                       command=lambda: self._test_single_api(model_var.get(), key_var.get(), provider_var.get(), test_label),
                        bootstyle="info-outline", width=5).pack(side=LEFT, padx=2)
         else:
             ttk.Button(row, text="Test",
-                       command=lambda: self._test_single_api(model_var.get(), key_var.get(), provider_var.get(), test_label, model_placeholder),
+                       command=lambda: self._test_single_api(model_var.get(), key_var.get(), provider_var.get(), test_label),
                        width=5).pack(side=LEFT, padx=2)
 
         # Delete Button (only for backups)
@@ -401,13 +509,11 @@ class SettingsWindow:
             'frame': row,
             'model_var': model_var,
             'provider_var': provider_var,
-            'model_entry': model_entry,
-            'model_placeholder': model_placeholder,
+            'model_cb': model_cb,
             'key_var': key_var,
             'key_entry': key_entry,
             'is_primary': is_primary,
             'test_label': test_label,
-            'model_placeholder': model_placeholder,
             'show_btn': show_btn,
             'show_state': show_state
         })
@@ -534,20 +640,29 @@ class SettingsWindow:
                 self.show_all_btn.configure(bootstyle="secondary-outline")
             self.show_all_state['showing'] = False
 
-    def _save_api_keys_to_config(self, secure=False):
-        """Save current API keys to config."""
+    def _save_api_keys_to_config(self, secure=False, notify_change=True):
+        """Save current API keys to config.
+
+        Args:
+            secure: Whether to use secure storage
+            notify_change: Whether to trigger API change callback (for trial mode switching)
+        """
         try:
             api_keys_list = []
             for row in self.api_rows:
                 model = row['model_var'].get().strip()
                 key = row['key_var'].get().strip()
                 provider = row['provider_var'].get()
-                # Don't save placeholder as model name
-                if model == row.get('model_placeholder', ''):
+                # Save "Auto" as empty string (will trigger auto-detection)
+                if model == "Auto":
                     model = ''
                 if model or key:  # Only save if there's actual data
                     api_keys_list.append({'model_name': model, 'api_key': key, 'provider': provider})
             self.config.set_api_keys(api_keys_list, secure=secure)
+
+            # Trigger API change callback to update trial mode status
+            if notify_change and self.on_api_change_callback:
+                self.on_api_change_callback()
         except Exception as e:
             print(f"Error saving API keys to config: {e}")
             import traceback
@@ -573,20 +688,19 @@ class SettingsWindow:
                         r['key_var'].get(),
                         r['provider_var'].get(),
                         r['test_label'],
-                        r['model_placeholder'],
                         silent=True
                     ))
                 except Exception:
                     pass
-        
+
         threading.Thread(target=run_tests, daemon=True).start()
 
-    def _test_single_api(self, model_name, api_key, provider, result_label, model_placeholder="gemini-2.0-flash", silent=False):
+    def _test_single_api(self, model_name, api_key, provider, result_label, silent=False):
         """Test API connection."""
         model_name = model_name.strip()
-        # Use placeholder as default if model is empty or is the placeholder text
-        if not model_name or model_name == model_placeholder:
-            model_name = model_placeholder
+        # Use default model if "Auto" is selected
+        if not model_name or model_name == "Auto":
+            model_name = "gemini-2.0-flash"  # Default for testing
         api_key = api_key.strip()
 
         if HAS_TTKBOOTSTRAP:
@@ -792,13 +906,13 @@ class SettingsWindow:
         self.hotkey_entries[language] = entry_var
 
         if HAS_TTKBOOTSTRAP:
-            ttk.Button(row, text="Edit", command=lambda: self._start_record(entry, entry_var),
+            ttk.Button(row, text="Edit", command=lambda l=language: self._start_record(entry, entry_var, l),
                        bootstyle="info-outline", width=8).pack(side=LEFT, padx=2)
             ttk.Button(row, text="Restore",
                        command=lambda: entry_var.set(self.config.DEFAULT_HOTKEYS.get(language, "")),
                        bootstyle="secondary-outline", width=8).pack(side=LEFT, padx=2)
         else:
-            ttk.Button(row, text="Edit", command=lambda: self._start_record(entry, entry_var),
+            ttk.Button(row, text="Edit", command=lambda l=language: self._start_record(entry, entry_var, l),
                        width=8).pack(side=LEFT, padx=2)
             ttk.Button(row, text="Restore",
                        command=lambda: entry_var.set(self.config.DEFAULT_HOTKEYS.get(language, "")),
@@ -829,13 +943,13 @@ class SettingsWindow:
         entry.pack(side=LEFT, padx=5)
 
         if HAS_TTKBOOTSTRAP:
-            ttk.Button(row, text="Edit", command=lambda: self._start_record(entry, entry_var),
+            ttk.Button(row, text="Edit", command=lambda lv=lang_var: self._start_record(entry, entry_var, lv.get()),
                        bootstyle="info-outline", width=8).pack(side=LEFT, padx=2)
             ttk.Button(row, text="Delete",
                        command=lambda: self._delete_custom_row(row, lang_var),
                        bootstyle="danger-outline", width=8).pack(side=LEFT, padx=2)
         else:
-            ttk.Button(row, text="Edit", command=lambda: self._start_record(entry, entry_var),
+            ttk.Button(row, text="Edit", command=lambda lv=lang_var: self._start_record(entry, entry_var, lv.get()),
                        width=8).pack(side=LEFT, padx=2)
             ttk.Button(row, text="Delete",
                        command=lambda: self._delete_custom_row(row, lang_var),
@@ -844,7 +958,7 @@ class SettingsWindow:
         self.custom_rows.append({
             'frame': row,
             'lang_var': lang_var,
-            'hotkey_var': entry_var
+            'key_var': entry_var
         })
         # Only update button if it exists (button is created after initial rows)
         if hasattr(self, 'add_btn'):
@@ -870,8 +984,12 @@ class SettingsWindow:
         else:
             self.add_btn.configure(state='normal')
 
-    def _start_record(self, entry, entry_var):
+    def _start_record(self, entry, entry_var, language=None):
         """Start recording hotkey."""
+        # Store the previous hotkey value in case we need to revert
+        self._previous_hotkey = entry_var.get()
+        self._recording_language = language
+
         entry.config(state='normal')
         entry.delete(0, END)
         entry.insert(0, "Press keys...")
@@ -884,6 +1002,41 @@ class SettingsWindow:
 
         # Hook with specific callback for this entry
         keyboard.hook(lambda e: self._on_key_record(e, entry_var, entry))
+
+    def _validate_hotkey(self, hotkey: str, current_language: str) -> tuple:
+        """Validate hotkey is valid and not duplicate.
+
+        Returns:
+            tuple: (is_valid: bool, error_message: str)
+        """
+        if not hotkey or hotkey == "Press keys...":
+            return False, "No hotkey recorded"
+
+        # Check for reserved system hotkeys
+        reserved_hotkeys = [
+            'alt+f4', 'ctrl+alt+delete', 'ctrl+alt+del',
+            'windows+l', 'win+l', 'ctrl+esc',
+            'alt+tab', 'windows+tab', 'win+tab',
+            'ctrl+shift+esc', 'windows+d', 'win+d'
+        ]
+        if hotkey.lower() in reserved_hotkeys:
+            return False, f"'{hotkey}' is a reserved system hotkey"
+
+        # Check for duplicates across all hotkeys
+        for lang, entry_var in self.hotkey_entries.items():
+            if lang != current_language:
+                existing = entry_var.get().strip()
+                if existing and existing.lower() == hotkey.lower():
+                    return False, f"'{hotkey}' is already used for {lang}"
+
+        # Check custom rows for duplicates
+        for row_data in self.custom_rows:
+            row_lang = row_data['lang_var'].get().strip()
+            row_hotkey = row_data['key_var'].get().strip()
+            if row_lang != current_language and row_hotkey.lower() == hotkey.lower():
+                return False, f"'{hotkey}' is already used for {row_lang}"
+
+        return True, ""
 
     def _on_key_record(self, event, entry_var, entry=None):
         """Handle key press during recording."""
@@ -901,6 +1054,23 @@ class SettingsWindow:
             # If not a modifier, we assume the combo is complete
             if not is_modifier:
                 keyboard.unhook_all()
+
+                # Validate the recorded hotkey
+                current_lang = getattr(self, '_recording_language', None) or ''
+                is_valid, error_msg = self._validate_hotkey(name, current_lang)
+
+                if not is_valid:
+                    # Show warning and revert to previous value
+                    from tkinter import messagebox
+                    messagebox.showwarning(
+                        "Invalid Hotkey",
+                        f"{error_msg}\n\nPlease choose a different hotkey.",
+                        parent=self.window
+                    )
+                    # Revert to previous value
+                    previous = getattr(self, '_previous_hotkey', '')
+                    entry_var.set(previous if previous and previous != "Press keys..." else "")
+
                 if entry:
                     entry.config(state='readonly')
 
@@ -912,11 +1082,11 @@ class SettingsWindow:
         ttk.Separator(parent).pack(fill=X, pady=15)
         self.autostart_var = tk.BooleanVar(value=self.config.is_autostart_enabled())
         if HAS_TTKBOOTSTRAP:
-            ttk.Checkbutton(parent, text="Start AI Translator with Windows",
+            ttk.Checkbutton(parent, text="Start CrossTrans with Windows",
                             variable=self.autostart_var,
                             bootstyle="round-toggle-success").pack(anchor=W, pady=5)
         else:
-            ttk.Checkbutton(parent, text="Start AI Translator with Windows",
+            ttk.Checkbutton(parent, text="Start CrossTrans with Windows",
                             variable=self.autostart_var).pack(anchor=W, pady=5)
 
         # Check for updates
@@ -959,7 +1129,7 @@ class SettingsWindow:
         # About section
         ttk.Separator(parent).pack(fill=X, pady=20)
         ttk.Label(parent, text="About", font=('Segoe UI', 11, 'bold')).pack(anchor=W)
-        ttk.Label(parent, text=f"AI Translator v{VERSION}").pack(anchor=W, pady=(5, 0))
+        ttk.Label(parent, text=f"CrossTrans v{VERSION}").pack(anchor=W, pady=(5, 0))
         ttk.Label(parent, text="Supports multiple AI models with failover").pack(anchor=W)
 
         if HAS_TTKBOOTSTRAP:
@@ -971,6 +1141,262 @@ class SettingsWindow:
                                   command=lambda: webbrowser.open(f"https://github.com/{GITHUB_REPO}"))
         link_btn.pack(anchor=W, pady=5)
 
+        # Feedback button
+        if HAS_TTKBOOTSTRAP:
+            feedback_btn = ttk.Button(parent, text="Send Feedback / Report Bug",
+                                      command=lambda: webbrowser.open(FEEDBACK_URL),
+                                      bootstyle="info-outline")
+        else:
+            feedback_btn = ttk.Button(parent, text="Send Feedback / Report Bug",
+                                      command=lambda: webbrowser.open(FEEDBACK_URL))
+        feedback_btn.pack(anchor=W, pady=5)
+
+    def _create_guide_tab(self, parent):
+        """Create user guide tab with helpful instructions."""
+        # Scrollable container
+        canvas = tk.Canvas(parent, highlightthickness=0)
+        guide_container = ttk.Frame(canvas)
+
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side=RIGHT, fill='y')
+        canvas.pack(side=LEFT, fill=BOTH, expand=True)
+
+        window_id = canvas.create_window((0, 0), window=guide_container, anchor=NW)
+
+        def _configure_canvas(event):
+            canvas.itemconfig(window_id, width=event.width)
+        canvas.bind('<Configure>', _configure_canvas)
+
+        def _on_mousewheel(event):
+            if canvas.winfo_exists() and canvas.winfo_ismapped():
+                try:
+                    canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+                except tk.TclError:
+                    pass
+        canvas.bind("<MouseWheel>", _on_mousewheel)
+        guide_container.bind("<MouseWheel>", _on_mousewheel)
+
+        # Header
+        ttk.Label(guide_container, text="User Guide", font=('Segoe UI', 14, 'bold')).pack(anchor=W, pady=(0, 5))
+        ttk.Label(guide_container, text="Everything you need to know about CrossTrans",
+                  font=('Segoe UI', 9), foreground='#888888').pack(anchor=W, pady=(0, 15))
+
+        # === Section 1: Quick Start ===
+        self._create_guide_section(guide_container, "Quick Start", [
+            "1. Select any text in any application (browser, Word, PDF viewer, etc.)",
+            "2. Press a hotkey (e.g., Win+Alt+V for Vietnamese)",
+            "3. Translation appears in a tooltip near your cursor",
+            "4. Click 'Copy' to copy the translation, or press Escape to close",
+        ])
+
+        # === Section 2: How to Get Free API Key ===
+        self._create_guide_section(guide_container, "How to Get a Free API Key", [
+            "Google Gemini offers a generous free tier (1,500 requests/day):",
+            "",
+            "1. Go to Google AI Studio:",
+        ])
+
+        # Clickable link for Google AI Studio
+        link_frame = ttk.Frame(guide_container)
+        link_frame.pack(anchor=W, padx=20)
+        if HAS_TTKBOOTSTRAP:
+            link_btn = ttk.Button(link_frame, text="https://aistudio.google.com/app/apikey",
+                                  command=lambda: webbrowser.open("https://aistudio.google.com/app/apikey"),
+                                  bootstyle="link")
+        else:
+            link_btn = ttk.Button(link_frame, text="https://aistudio.google.com/app/apikey",
+                                  command=lambda: webbrowser.open("https://aistudio.google.com/app/apikey"))
+        link_btn.pack(anchor=W)
+
+        self._create_guide_content(guide_container, [
+            "",
+            "2. Sign in with your Google account",
+            "3. Click 'Create API Key' button",
+            "4. Copy the generated key",
+            "5. Open Settings > API Key tab > Paste in 'API Key' field",
+            "6. Click 'Test' to verify the connection",
+            "",
+            "[Screenshots will be added here]",
+        ])
+
+        # === Section 3: Default Hotkeys ===
+        self._create_guide_section(guide_container, "Default Hotkeys", [
+            "Translation Hotkeys:",
+            "  • Win + Alt + V  →  Translate to Vietnamese",
+            "  • Win + Alt + E  →  Translate to English",
+            "  • Win + Alt + J  →  Translate to Japanese",
+            "  • Win + Alt + C  →  Translate to Chinese (Simplified)",
+            "",
+            "Special Hotkeys:",
+            "  • Win + Alt + S  →  Screenshot OCR (capture & translate image)",
+            "",
+            "You can customize hotkeys in the 'Hotkeys' tab.",
+        ])
+
+        # === Section 4: Screenshot OCR ===
+        self._create_guide_section(guide_container, "Screenshot OCR", [
+            "Capture any area of your screen and translate text from images:",
+            "",
+            "Requirements:",
+            "  • A vision-capable API (e.g., Gemini 2.0 Flash, GPT-4o)",
+            "  • Test your API - it should show 'Image OK'",
+            "",
+            "How to use:",
+            "1. Press Win + Alt + S",
+            "2. Click and drag to select the area containing text",
+            "3. Release mouse button - translation appears automatically",
+            "",
+            "Works great for:",
+            "  • Images, screenshots, scanned documents",
+            "  • Text in videos (pause first)",
+            "  • Non-selectable text in applications",
+        ])
+
+        # === Section 5: File Translation ===
+        self._create_guide_section(guide_container, "File Translation", [
+            "Translate entire documents with a single click:",
+            "",
+            "Supported formats:",
+            "  • .txt   - Plain text files",
+            "  • .docx  - Microsoft Word documents",
+            "  • .srt   - Subtitle files",
+            "  • .pdf   - PDF documents (text-based and scanned)",
+            "",
+            "How to use:",
+            "1. Right-click tray icon > 'Open Translator'",
+            "2. Click the '+' button or drag & drop files",
+            "3. Select target language",
+            "4. Click 'Translate'",
+            "",
+            "Tips:",
+            "  • You can add multiple files at once",
+            "  • Images (PNG, JPG) are also supported for OCR",
+        ])
+
+        # === Section 6: Tips & Tricks ===
+        self._create_guide_section(guide_container, "Tips & Tricks", [
+            "Custom Prompts:",
+            "  • Add instructions in the 'Custom prompt' field",
+            "  • Examples: 'formal tone', 'casual', 'technical terms'",
+            "",
+            "Translation History:",
+            "  • Click the clock icon to view past translations",
+            "  • Search through history with keywords",
+            "  • Copy any previous translation",
+            "",
+            "Multiple API Keys:",
+            "  • Add backup keys for failover redundancy",
+            "  • If primary API fails, backup is used automatically",
+            "",
+            "Dictionary Mode:",
+            "  • Select a single word for definitions & examples",
+            "  • Works best with short text",
+        ])
+
+        # === Section 7: Troubleshooting ===
+        self._create_guide_section(guide_container, "Troubleshooting", [
+            "Hotkey not working?",
+            "  • Check if another app is using the same hotkey",
+            "  • Try running CrossTrans as Administrator",
+            "  • Reconfigure hotkeys in Settings > Hotkeys",
+            "",
+            "API Error / Connection Failed?",
+            "  • Verify your API key is correct",
+            "  • Click 'Test' to check the connection",
+            "  • Make sure you have internet access",
+            "  • Check if you've exceeded API quota",
+            "",
+            "Translation not appearing?",
+            "  • Make sure text is selected before pressing hotkey",
+            "  • Try copying text manually (Ctrl+C) first",
+            "  • Some applications block clipboard access",
+            "",
+            "Vision/Screenshot not working?",
+            "  • Use a vision-capable model (Gemini 2.0, GPT-4o)",
+            "  • Test your API - look for 'Image OK'",
+        ])
+
+        # === Section 8: Supported Providers ===
+        self._create_guide_section(guide_container, "Supported AI Providers", [
+            "Free Tier Available:",
+            "  • Google Gemini - 1,500 req/day (Recommended)",
+            "  • Groq - Fast inference, Llama models",
+            "  • Cerebras - High throughput",
+            "  • DeepSeek - Good quality, affordable",
+            "",
+            "Premium Providers:",
+            "  • OpenAI (GPT-4, GPT-4o)",
+            "  • Anthropic (Claude 3.5, Claude 3)",
+            "  • xAI (Grok)",
+            "  • Mistral AI",
+            "  • And 5+ more via OpenRouter",
+            "",
+            "Auto-detection:",
+            "  • The app automatically detects provider from your API key",
+            "  • You can also manually select provider in Settings",
+        ])
+
+        # Footer
+        ttk.Separator(guide_container).pack(fill=X, pady=20)
+        footer_frame = ttk.Frame(guide_container)
+        footer_frame.pack(fill=X)
+
+        ttk.Label(footer_frame, text="Need more help?", font=('Segoe UI', 9, 'bold')).pack(anchor=W)
+
+        links_frame = ttk.Frame(footer_frame)
+        links_frame.pack(anchor=W, pady=5)
+
+        if HAS_TTKBOOTSTRAP:
+            ttk.Button(links_frame, text="View on GitHub",
+                       command=lambda: webbrowser.open(f"https://github.com/{GITHUB_REPO}"),
+                       bootstyle="link").pack(side=LEFT)
+            ttk.Label(links_frame, text="  |  ").pack(side=LEFT)
+            ttk.Button(links_frame, text="Report an Issue",
+                       command=lambda: webbrowser.open(FEEDBACK_URL),
+                       bootstyle="link").pack(side=LEFT)
+        else:
+            ttk.Button(links_frame, text="View on GitHub",
+                       command=lambda: webbrowser.open(f"https://github.com/{GITHUB_REPO}")).pack(side=LEFT)
+            ttk.Label(links_frame, text="  |  ").pack(side=LEFT)
+            ttk.Button(links_frame, text="Report an Issue",
+                       command=lambda: webbrowser.open(FEEDBACK_URL)).pack(side=LEFT)
+
+        # Update scroll region
+        def update_scroll():
+            guide_container.update_idletasks()
+            canvas.config(scrollregion=canvas.bbox("all"))
+        self.window.after(100, update_scroll)
+
+    def _create_guide_section(self, parent, title, content_lines):
+        """Create a collapsible section in the guide."""
+        # Section header
+        ttk.Separator(parent).pack(fill=X, pady=10)
+        ttk.Label(parent, text=title, font=('Segoe UI', 11, 'bold')).pack(anchor=W, pady=(5, 10))
+
+        # Content
+        self._create_guide_content(parent, content_lines)
+
+    def _create_guide_content(self, parent, content_lines):
+        """Create content lines for a guide section."""
+        for line in content_lines:
+            if line == "":
+                # Empty line for spacing
+                ttk.Label(parent, text="").pack(anchor=W)
+            elif line.startswith("  •"):
+                # Bullet point with indent
+                ttk.Label(parent, text=line, font=('Segoe UI', 9),
+                         foreground='#cccccc').pack(anchor=W, padx=(20, 0))
+            elif line.startswith("[") and line.endswith("]"):
+                # Placeholder text (italic, gray)
+                ttk.Label(parent, text=line, font=('Segoe UI', 9, 'italic'),
+                         foreground='#666666').pack(anchor=W, padx=20, pady=5)
+            else:
+                # Normal text
+                ttk.Label(parent, text=line, font=('Segoe UI', 9),
+                         foreground='#aaaaaa').pack(anchor=W, padx=20)
+
     def _save(self):
         """Save all settings."""
         # Save API keys list
@@ -978,11 +1404,11 @@ class SettingsWindow:
         for row in self.api_rows:
             model = row['model_var'].get().strip()
             key = row['key_var'].get().strip()
-            # Don't save placeholder as model name
-            model_placeholder = row.get('model_placeholder', 'gemini-2.0-flash')
-            if model == model_placeholder:
+            provider = row['provider_var'].get()
+            # Save "Auto" as empty string (will trigger auto-detection)
+            if model == "Auto":
                 model = ''
-            api_keys_list.append({'model_name': model, 'api_key': key})
+            api_keys_list.append({'model_name': model, 'api_key': key, 'provider': provider})
         self.config.set_api_keys(api_keys_list)
 
         # Save all hotkeys
@@ -997,7 +1423,7 @@ class SettingsWindow:
         # 2. Custom languages
         for row in self.custom_rows:
             lang = row['lang_var'].get().strip()
-            value = row['hotkey_var'].get().strip()
+            value = row['key_var'].get().strip()
             if lang and value and value != "Press keys...":
                 hotkeys[lang] = value
 
@@ -1119,7 +1545,7 @@ class SettingsWindow:
         frame = ttk.Frame(self.progress_window, padding=20)
         frame.pack(fill=BOTH, expand=True)
 
-        ttk.Label(frame, text=f"Downloading AI Translator v{new_version}...",
+        ttk.Label(frame, text=f"Downloading CrossTrans v{new_version}...",
                   font=('Segoe UI', 10, 'bold')).pack(anchor=W)
 
         self.progress_label = ttk.Label(frame, text="Starting download...")
@@ -1166,7 +1592,7 @@ class SettingsWindow:
             if HAS_TTKBOOTSTRAP:
                 answer = Messagebox.yesno(
                     f"Download complete!\n\n"
-                    f"AI Translator v{new_version} is ready to install.\n\n"
+                    f"CrossTrans v{new_version} is ready to install.\n\n"
                     f"The application will close and restart automatically.\n"
                     f"Install now?",
                     title="Install Update",
@@ -1179,7 +1605,7 @@ class SettingsWindow:
                 answer = messagebox.askyesno(
                     "Install Update",
                     f"Download complete!\n\n"
-                    f"AI Translator v{new_version} is ready to install.\n\n"
+                    f"CrossTrans v{new_version} is ready to install.\n\n"
                     f"The application will close and restart automatically.\n"
                     f"Install now?",
                     parent=self.window

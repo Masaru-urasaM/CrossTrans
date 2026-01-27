@@ -1,5 +1,5 @@
 """
-Logging setup for AI Translator.
+Logging setup for CrossTrans.
 """
 import os
 import sys
@@ -34,7 +34,7 @@ def setup_logging():
         logging.critical("".join(traceback.format_exception(exc_type, exc_value, exc_tb)))
 
     sys.excepthook = exception_handler
-    logging.info(f"AI Translator v{VERSION} started")
+    logging.info(f"CrossTrans v{VERSION} started")
     logging.info(f"Log file: {log_file}")
 
     return log_file

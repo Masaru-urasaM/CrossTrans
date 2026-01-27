@@ -1,5 +1,5 @@
 """
-Core modules for AI Translator.
+Core modules for CrossTrans.
 """
 from src.core.clipboard import ClipboardManager
 from src.core.api_manager import AIAPIManager

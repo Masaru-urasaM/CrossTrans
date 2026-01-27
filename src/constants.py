@@ -1,11 +1,12 @@
 """
-Constants and configuration values for AI Translator.
+Constants and configuration values for CrossTrans.
 """
 
 # ============== VERSION ==============
-VERSION = "1.7.0"
-APP_NAME = "AI Translator"
-GITHUB_REPO = "sytacxinh/ai-translator"
+VERSION = "1.9.0"
+APP_NAME = "CrossTrans"
+GITHUB_REPO = "Masaru-urasaM/CrossTrans"
+FEEDBACK_URL = f"https://github.com/{GITHUB_REPO}/issues/new"
 
 # ============== NETWORK ==============
 LOCK_PORT = 47823  # Port for single instance lock
@@ -48,7 +49,7 @@ LANGUAGES = [
     ("Afrikaans", "af", "Afrikaans"),
     ("Albanian", "sq", "Shqip"),
     ("Amharic", "am", "አማርኛ"),
-    ("Armenian", "hy", "Հdelays"),
+    ("Armenian", "hy", "Հայերեն"),
     ("Azerbaijani", "az", "Azərbaycan"),
     ("Basque", "eu", "Euskara"),
     ("Belarusian", "be", "Беларуская"),
@@ -219,3 +220,19 @@ VISION_MODELS = {
     'siliconflow': ['Qwen/Qwen2-VL-*', '*-VL-*'],
     'openrouter': ['*'],  # OpenRouter aggregates models - rely on naming heuristics
 }
+
+# ============== TRIAL MODE ==============
+# Configuration for trial mode (users without API keys)
+TRIAL_MODE_ENABLED = True  # Set to False to disable trial mode completely
+TRIAL_DAILY_QUOTA = 50  # Maximum translations per day
+TRIAL_PROVIDER = "cerebras"  # Provider for trial mode (Cerebras has generous free tier)
+TRIAL_MODEL = "llama-3.3-70b"  # Model for trial mode
+
+# Proxy server URL for trial mode (protects your API key)
+# Set this to your deployed Cloudflare Worker URL
+# TRIAL_PROXY_URL = ""  # e.g., "https://your-translator-proxy.workers.dev/v1/translate"
+TRIAL_PROXY_URL = "https://crossname.trial-api.workers.dev"
+
+# Trial mode restrictions
+TRIAL_VISION_ENABLED = False  # Vision/OCR disabled in trial mode
+TRIAL_FILE_ENABLED = False  # File translation disabled in trial mode

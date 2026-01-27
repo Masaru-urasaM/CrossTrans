@@ -1,5 +1,5 @@
 """
-Shared pytest fixtures for AI Translator tests.
+Shared pytest fixtures for CrossTrans tests.
 """
 import os
 import sys

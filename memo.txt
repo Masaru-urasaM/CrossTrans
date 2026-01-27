@@ -1,4 +1,4 @@
-AI Translator v1.7.0 - Project Structure
+CrossTrans v1.9.0 - Project Structure
 ========================================
 
 gemini_translator_v4/
@@ -20,19 +20,23 @@ gemini_translator_v4/
     │   ├── multimodal.py    # Vision processing (OCR)
     │   ├── screenshot.py    # Screen capture for OCR
     │   ├── file_processor.py # Document text extraction
-    │   ├── pdf_ocr.py       # [NEW] Scanned PDF OCR support
+    │   ├── pdf_ocr.py       # Scanned PDF OCR support
     │   ├── crypto.py        # Secure API key storage (DPAPI)
     │   ├── ssl_pinning.py   # SSL certificate pinning
-    │   ├── auth.py          # [NEW] Windows Hello authentication
-    │   └── provider_health.py # [NEW] Smart provider fallback
+    │   ├── auth.py          # Windows Hello authentication
+    │   ├── provider_health.py # Smart provider fallback
+    │   ├── quota_manager.py # Trial mode quota tracking
+    │   └── trial_api.py     # Trial mode API handler
     │
     ├── ui/
     │   ├── settings.py      # SettingsWindow (with Show All API Keys)
-    │   ├── dialogs.py       # APIErrorDialog
+    │   ├── dialogs.py       # APIErrorDialog, TrialExhaustedDialog, TrialFeatureDialog
     │   ├── attachments.py   # File attachment widget
     │   ├── history_dialog.py # History viewer (with search)
     │   ├── progress_dialog.py # Progress indicator
-    │   └── toast.py         # [NEW] Toast notifications
+    │   ├── toast.py         # Toast notifications
+    │   ├── tray.py          # System tray manager
+    │   └── tooltip.py       # Tooltip widget
     │
     └── utils/
         ├── logging_setup.py # setup_logging()
@@ -46,7 +50,7 @@ How to Use
 Task                    Command/File
 ----                    ------------
 Run app                 python main.py
-Build exe               pyinstaller AITranslator.spec
+Build exe               pyinstaller CrossTrans.spec
 Run tests               pytest tests/ --cov=src
 
 ========================================
@@ -69,45 +73,51 @@ API key encryption             src/core/crypto.py
 SSL pinning                    src/core/ssl_pinning.py
 Windows Hello auth             src/core/auth.py
 Provider fallback logic        src/core/provider_health.py
+Trial mode quota               src/core/quota_manager.py
+Trial mode API                 src/core/trial_api.py
 Settings UI                    src/ui/settings.py
 Error dialogs                  src/ui/dialogs.py
 File attachments widget        src/ui/attachments.py
 History dialog (with search)   src/ui/history_dialog.py
 Progress indicator             src/ui/progress_dialog.py
 Toast notifications            src/ui/toast.py
+System tray                    src/ui/tray.py
+Tooltip widget                 src/ui/tooltip.py
 Main app (tray, tooltip, popup) src/app.py
 Update checker                 src/utils/updates.py
 
 ========================================
-New Features in v1.7.0
+New Features in v1.9.0
 ========================================
 
-1. Windows Hello Authentication
-   - PIN, Fingerprint, Face recognition
-   - Protects "Show All API Keys" and "Delete All API Keys" buttons
-   - Falls back to Windows password if Windows Hello unavailable
-   - Soft rate limit: 5 attempts per dialog
+1. Trial Mode
+   - 100 free translations per day without API key
+   - Smart quota management with device-based tracking
+   - Cloudflare Worker proxy for secure API key protection
 
-2. Show All API Keys Button
-   - One-click to show/hide all API keys
-   - Syncs with individual Show/Hide buttons
-   - Requires authentication only when showing
+2. Rebranding
+   - App renamed from "AI Translator" to "CrossTrans"
+   - New logo and visual identity
+   - Updated GitHub repository
 
-3. Smart Provider Fallback
-   - Auto-switch to backup API when primary fails
-   - Provider health tracking
-   - Configurable retry logic
+3. UI Improvements
+   - Trial mode indicator in tooltip
+   - TrialExhaustedDialog when quota is used up
+   - TrialFeatureDialog for disabled features in trial mode
 
-4. Toast Notifications
-   - Non-intrusive notifications
-   - Auto-dismiss with timer
-   - Click to dismiss
+========================================
+Previous Features
+========================================
 
-5. Scanned PDF OCR
-   - Extract text from scanned/image-based PDFs
-   - Uses AI vision for text recognition
-   - Falls back to standard PDF text extraction
+v1.8.0:
+- Attachments UI improvements with smart button colors
+- System tray menu reorganization
+- Drag-drop visual feedback
 
-6. Search History
-   - Filter translation history by keyword
-   - Search in both original and translated text
+v1.7.0:
+- Windows Hello Authentication (PIN, Fingerprint, Face)
+- Show All API Keys Button with authentication
+- Smart Provider Fallback (auto-switch to backup)
+- Toast Notifications
+- Scanned PDF OCR
+- Search History

@@ -1,5 +1,5 @@
 """
-Attachment Area Widget for AI Translator.
+Attachment Area Widget for CrossTrans.
 Handles file and image attachments with drag-and-drop support.
 """
 import os
@@ -7,6 +7,9 @@ import logging
 import tkinter as tk
 from tkinter import ttk, filedialog
 from PIL import Image, ImageTk
+
+# Get assets directory path
+ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'assets')
 
 try:
     from tkinterdnd2 import DND_FILES
@@ -41,18 +44,33 @@ class AttachmentArea(ttk.Frame):
 
         ttk.Label(self.top_frame, text="Attachments:", font=('Segoe UI', 9, 'bold')).pack(side=tk.LEFT)
 
-        self.clear_btn = ttk.Button(self.top_frame, text="Clear Attachments", command=self.clear, width=15)
+        # Clear button with bootstyle if available (rightmost position)
+        clear_kwargs = {"text": "Clear All", "command": self.clear, "width": 10}
+        if HAS_TTKBOOTSTRAP:
+            clear_kwargs["bootstyle"] = "danger-outline"
+        self.clear_btn = ttk.Button(self.top_frame, **clear_kwargs)
         # Pack clear_btn later when items exist
 
-        # Container for items
-        self.items_frame = ttk.Frame(self)
-        self.items_frame.pack(fill=tk.BOTH, expand=True)
+        # Scrollable container for items (no visible scrollbar)
+        self.scroll_canvas = tk.Canvas(self, bg='#2b2b2b', highlightthickness=0, height=95)
+        self.scroll_canvas.pack(fill=tk.X, expand=False)
 
-        # Add button (Menu dropdown) - style based on enabled features
-        if HAS_TTKBOOTSTRAP:
-            self.add_btn = ttk.Button(self.items_frame, text="+", command=self._show_add_menu, width=3)
-        else:
-            self.add_btn = ttk.Button(self.items_frame, text="+", command=self._show_add_menu, width=3)
+        # Inner frame for items
+        self.items_frame = tk.Frame(self.scroll_canvas, bg='#2b2b2b')
+        self.canvas_window = self.scroll_canvas.create_window((0, 0), window=self.items_frame, anchor='nw')
+
+        # Update scroll region when items change
+        self.items_frame.bind('<Configure>', self._on_items_configure)
+        self.scroll_canvas.bind('<Configure>', self._on_canvas_configure)
+
+        # Mouse wheel horizontal scroll
+        self.scroll_canvas.bind('<MouseWheel>', self._on_mousewheel)
+        self.items_frame.bind('<MouseWheel>', self._on_mousewheel)
+        # Also bind to self for when hovering over the area
+        self.bind('<MouseWheel>', self._on_mousewheel)
+
+        # Add button - Professional styled container matching file items
+        self._create_add_button()
 
         # Create Menu with icons
         self.add_menu = tk.Menu(self, tearoff=0, font=('Segoe UI', 10))
@@ -62,6 +80,25 @@ class AttachmentArea(ttk.Frame):
 
         # Register for drag-and-drop with tkinterdnd2 if available
         self._setup_dnd()
+
+    def _on_items_configure(self, event):
+        """Update scroll region when items frame changes."""
+        self.scroll_canvas.configure(scrollregion=self.scroll_canvas.bbox('all'))
+
+    def _on_canvas_configure(self, event):
+        """Adjust canvas window height to match canvas."""
+        self.scroll_canvas.itemconfig(self.canvas_window, height=event.height)
+
+    def _on_mousewheel(self, event):
+        """Handle mouse wheel for horizontal scrolling."""
+        # Check if scrolling is needed (items wider than canvas)
+        canvas_width = self.scroll_canvas.winfo_width()
+        items_width = self.items_frame.winfo_reqwidth()
+
+        if items_width > canvas_width:
+            # Scroll horizontally (negative delta = scroll right)
+            self.scroll_canvas.xview_scroll(int(-1 * (event.delta / 120)), 'units')
+        return 'break'  # Prevent event propagation
 
     def _setup_dnd(self):
         """Setup drag-and-drop bindings with tkinterdnd2."""
@@ -92,22 +129,94 @@ class AttachmentArea(ttk.Frame):
         except Exception as e:
             logging.warning(f"Could not setup tkinterdnd2 for AttachmentArea: {e}")
 
-    def _update_add_button_style(self):
-        """Update the add button visibility and style based on config."""
-        vision_enabled = self.config.get('vision_enabled', False)
-        file_enabled = self.config.get('file_processing_enabled', False)
+    def _create_add_button(self):
+        """Create add button using image icons."""
+        # Load icon images
+        self._load_add_button_icons()
 
-        # Always show button, but change style based on state
-        if not vision_enabled and not file_enabled:
-            # Gray/inactive style - no features enabled
-            if HAS_TTKBOOTSTRAP:
-                self.add_btn.configure(bootstyle="secondary")
-            self.add_btn.pack(side=tk.LEFT, padx=(0, 5), anchor='n')
+        # Create label to display the icon
+        self.add_btn = tk.Label(self.items_frame, bg='#2b2b2b', cursor='hand2')
+        self.add_btn.pack(side=tk.LEFT, padx=14, pady=14)
+
+        # Set initial image
+        self._update_add_button_style()
+
+        # Bind events
+        self.add_btn.bind("<Button-1>", lambda e: self._show_add_menu())
+        self.add_btn.bind("<Enter>", self._on_add_btn_enter)
+        self.add_btn.bind("<Leave>", self._on_add_btn_leave)
+
+        # Keep reference for compatibility
+        self.add_btn_canvas = self.add_btn
+
+    def _load_add_button_icons(self):
+        """Load add button icon images."""
+        self._add_btn_icons = {}
+
+        icon_files = {
+            'gray': 'add_btn_gray.png',
+            'blue': 'add_btn_blue.png',
+            'light': 'add_btn_light.png',
+            'light_blue': 'add_btn_light_blue.png',  # Drag-drop hover
+        }
+
+        for key, filename in icon_files.items():
+            path = os.path.join(ASSETS_DIR, filename)
+            if os.path.exists(path):
+                try:
+                    img = Image.open(path)
+                    self._add_btn_icons[key] = ImageTk.PhotoImage(img)
+                except Exception as e:
+                    logging.warning(f"Failed to load icon {filename}: {e}")
+
+        # Fallback: generate icons if files don't exist
+        if not self._add_btn_icons:
+            self._generate_fallback_icons()
+
+    def _generate_fallback_icons(self):
+        """Generate fallback icons if image files don't exist."""
+        try:
+            from src.assets.generate_icons import create_add_button_icon
+
+            self._add_btn_icons['gray'] = ImageTk.PhotoImage(
+                create_add_button_icon(56, '#888888'))
+            self._add_btn_icons['blue'] = ImageTk.PhotoImage(
+                create_add_button_icon(56, '#0d6efd'))
+            self._add_btn_icons['light'] = ImageTk.PhotoImage(
+                create_add_button_icon(56, '#aaaaaa'))
+            self._add_btn_icons['light_blue'] = ImageTk.PhotoImage(
+                create_add_button_icon(56, '#5a9fd4'))
+        except Exception as e:
+            logging.warning(f"Failed to generate fallback icons: {e}")
+
+    def _on_add_btn_enter(self, event):
+        """Hover effect - show light icon."""
+        # Hover always shows light color (unless has attachments)
+        if self.attachments:
+            icon = self._add_btn_icons.get('blue')
         else:
-            # Light blue/active style - at least one feature enabled
-            if HAS_TTKBOOTSTRAP:
-                self.add_btn.configure(bootstyle="info")
-            self.add_btn.pack(side=tk.LEFT, padx=(0, 5), anchor='n')
+            icon = self._add_btn_icons.get('light')
+
+        if icon:
+            self.add_btn.configure(image=icon)
+
+    def _on_add_btn_leave(self, event):
+        """Reset hover effect."""
+        self._update_add_button_style()
+
+    def _update_add_button_style(self):
+        """Update the add button image based on attachments state.
+
+        - Gray: no attachments (empty state)
+        - Blue: has attachments
+        """
+        if self.attachments:
+            icon = self._add_btn_icons.get('blue')
+        else:
+            icon = self._add_btn_icons.get('gray')
+
+        if icon:
+            self.add_btn.configure(image=icon)
 
     def _update_add_button_visibility(self):
         """Alias for backwards compatibility."""
@@ -130,7 +239,7 @@ class AttachmentArea(ttk.Frame):
                 self.add_menu.add_command(label="📷  Upload Images", command=self._browse_images)
 
             if file_enabled:
-                self.add_menu.add_command(label="📄  Upload Files (.txt, .docx, .srt)", command=self._browse_documents)
+                self.add_menu.add_command(label="📄  Upload Files (.txt, .docx, .srt, .pdf)", command=self._browse_documents)
 
         # Position menu below button
         try:
@@ -187,7 +296,7 @@ class AttachmentArea(ttk.Frame):
                                       f"File type '{ext}' is not supported.\n\n"
                                       "Supported formats:\n"
                                       "• Images: .jpg, .jpeg, .png, .webp, .gif, .bmp\n"
-                                      "• Documents: .txt, .docx, .srt",
+                                      "• Documents: .txt, .docx, .srt, .pdf",
                                       parent=self)
             return False
 
@@ -202,34 +311,121 @@ class AttachmentArea(ttk.Frame):
         return True
 
     def _render_item(self, file_path, is_image):
-        """Render a single attachment item."""
-        frame = ttk.Frame(self.items_frame, borderwidth=1, relief="solid")
-        frame.pack(side=tk.LEFT, padx=5, anchor='n')
+        """Render a single attachment item with uniform size."""
+        # Fixed size container for uniform appearance
+        ITEM_WIDTH = 90
+        ITEM_HEIGHT = 85
 
-        # Content
+        # Main container with fixed size
+        frame = tk.Frame(self.items_frame, width=ITEM_WIDTH, height=ITEM_HEIGHT,
+                         bg='#3a3a3a', highlightbackground='#555555',
+                         highlightthickness=1)
+        frame.pack(side=tk.LEFT, padx=4, pady=2)
+        frame.pack_propagate(False)  # Prevent resizing
+
+        # Get filename
+        filename = os.path.basename(file_path)
+
+        # Content area
+        content_frame = tk.Frame(frame, bg='#3a3a3a')
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=3, pady=3)
+
         if is_image:
             try:
                 img = Image.open(file_path)
-                img.thumbnail((60, 60))
+                img.thumbnail((55, 50))
                 photo = ImageTk.PhotoImage(img)
                 self.thumbnails.append(photo)
-                lbl = ttk.Label(frame, image=photo)
-                lbl.pack(padx=2, pady=2)
+                img_label = tk.Label(content_frame, image=photo, bg='#3a3a3a')
+                img_label.pack(pady=(2, 0))
             except:
-                ttk.Label(frame, text="IMG").pack(padx=5, pady=15)
+                # Fallback for broken images
+                tk.Label(content_frame, text="🖼", font=('Segoe UI', 20),
+                         bg='#3a3a3a', fg='#888888').pack(pady=(5, 0))
         else:
-            # File icon/text
+            # File type icon with color coding
             ext = os.path.splitext(file_path)[1].lower()
-            ttk.Label(frame, text=ext, font=('Segoe UI', 10, 'bold')).pack(padx=5, pady=5)
-            name = os.path.basename(file_path)
-            if len(name) > 10: name = name[:7] + "..."
-            ttk.Label(frame, text=name, font=('Segoe UI', 7)).pack(padx=2, pady=(0, 2))
+            icon_colors = {
+                '.txt': '#4CAF50',   # Green
+                '.docx': '#2196F3',  # Blue
+                '.pdf': '#F44336',   # Red
+                '.srt': '#FF9800',   # Orange
+            }
+            icon_color = icon_colors.get(ext, '#9E9E9E')
 
-        # Remove button (overlay or below)
-        # Simple 'x' button below
-        x_btn = ttk.Label(frame, text="✕", foreground="red", cursor="hand2")
-        x_btn.pack(side=tk.BOTTOM, pady=1)
+            # File icon
+            icon_text = {
+                '.txt': '📄',
+                '.docx': '📝',
+                '.pdf': '📕',
+                '.srt': '🎬',
+            }.get(ext, '📁')
+
+            tk.Label(content_frame, text=icon_text, font=('Segoe UI', 18),
+                     bg='#3a3a3a', fg=icon_color).pack(pady=(3, 0))
+
+            # Extension badge
+            ext_label = tk.Label(content_frame, text=ext.upper(),
+                                 font=('Segoe UI', 7, 'bold'),
+                                 bg=icon_color, fg='white', padx=3)
+            ext_label.pack(pady=(2, 0))
+
+        # Filename (truncated with tooltip)
+        display_name = filename
+        if len(display_name) > 12:
+            display_name = filename[:10] + "…"
+
+        name_label = tk.Label(frame, text=display_name, font=('Segoe UI', 7),
+                              bg='#3a3a3a', fg='#cccccc')
+        name_label.pack(side=tk.BOTTOM, pady=(0, 2))
+
+        # Tooltip for full filename
+        self._create_tooltip(name_label, filename)
+        self._create_tooltip(frame, filename)
+
+        # Remove button (top-right corner)
+        x_btn = tk.Label(frame, text="×", font=('Segoe UI', 10, 'bold'),
+                         bg='#3a3a3a', fg='#ff6666', cursor='hand2')
+        x_btn.place(relx=1.0, rely=0, x=-2, y=2, anchor='ne')
         x_btn.bind("<Button-1>", lambda e, p=file_path: self._remove_item(p, frame))
+        x_btn.bind("<Enter>", lambda e: x_btn.configure(fg='#ff0000'))
+        x_btn.bind("<Leave>", lambda e: x_btn.configure(fg='#ff6666'))
+
+        # Bind mousewheel to all widgets in this item for horizontal scrolling
+        self._bind_mousewheel_recursive(frame)
+
+    def _bind_mousewheel_recursive(self, widget):
+        """Bind mousewheel event to widget and all its children."""
+        widget.bind('<MouseWheel>', self._on_mousewheel)
+        for child in widget.winfo_children():
+            self._bind_mousewheel_recursive(child)
+
+    def _create_tooltip(self, widget, text):
+        """Create a simple tooltip for a widget."""
+        tooltip = None
+
+        def show_tooltip(event):
+            nonlocal tooltip
+            if tooltip:
+                return
+            x = widget.winfo_rootx() + 10
+            y = widget.winfo_rooty() + widget.winfo_height() + 5
+            tooltip = tk.Toplevel(widget)
+            tooltip.wm_overrideredirect(True)
+            tooltip.wm_geometry(f"+{x}+{y}")
+            label = tk.Label(tooltip, text=text, bg='#ffffe0', fg='#000000',
+                             relief='solid', borderwidth=1, font=('Segoe UI', 9),
+                             padx=5, pady=2)
+            label.pack()
+
+        def hide_tooltip(event):
+            nonlocal tooltip
+            if tooltip:
+                tooltip.destroy()
+                tooltip = None
+
+        widget.bind("<Enter>", show_tooltip)
+        widget.bind("<Leave>", hide_tooltip)
 
     def _remove_item(self, path, widget):
         """Remove an attachment."""
@@ -246,6 +442,8 @@ class AttachmentArea(ttk.Frame):
         for widget in self.items_frame.winfo_children():
             if widget != self.add_btn:
                 widget.destroy()
+        # Reset scroll position
+        self.scroll_canvas.xview_moveto(0)
         self._update_visibility()
         if self.on_change:
             self.on_change()
@@ -255,11 +453,29 @@ class AttachmentArea(ttk.Frame):
         return self.attachments
 
     def _update_visibility(self):
-        """Update UI state."""
+        """Update UI state: show/hide Clear All button and update add button style.
+
+        Screenshot button stays fixed at rightmost position (packed by app.py).
+        Clear All appears to its LEFT when there are attachments.
+        """
         if self.attachments:
-            self.clear_btn.pack(side=tk.RIGHT)
+            # Show Clear All button (to the left of Screenshot)
+            # Screenshot was packed first with side=RIGHT, so it's rightmost
+            # Clear All packed with side=RIGHT will appear to its LEFT
+            try:
+                self.clear_btn.pack_forget()
+            except tk.TclError:
+                pass
+            self.clear_btn.pack(side=tk.RIGHT, padx=(0, 5))
         else:
-            self.clear_btn.pack_forget()
+            # Hide Clear All button when no attachments
+            try:
+                self.clear_btn.pack_forget()
+            except tk.TclError:
+                pass
+
+        # Update add button color based on attachment state
+        self._update_add_button_style()
 
     def _browse_images(self):
         """Browse for images."""
@@ -286,7 +502,7 @@ class AttachmentArea(ttk.Frame):
                                   parent=self)
             return
 
-        filetypes = [("Documents", "*.txt *.docx *.srt")]
+        filetypes = [("Documents", "*.txt *.docx *.srt *.pdf")]
         files = filedialog.askopenfilenames(filetypes=filetypes, parent=self)
         for f in files:
             self.add_file(f, show_warning=True)
@@ -298,39 +514,22 @@ class AttachmentArea(ttk.Frame):
     def _on_drag_enter(self, event):
         """Visual feedback when dragging over the drop zone."""
         logging.debug("Drag enter detected on AttachmentArea")
-        try:
-            if HAS_TTKBOOTSTRAP:
-                self.add_btn.configure(bootstyle="success")
-            else:
-                self.add_btn.configure(text="↓", relief="sunken")
-            # Change background to indicate drop zone
-            self.configure(style="DragOver.TFrame")
-        except Exception as e:
-            logging.debug(f"Error in drag_enter: {e}")
+        # Show light blue icon for drag-drop hover state
+        icon = self._add_btn_icons.get('light_blue')
+        if icon:
+            self.add_btn.configure(image=icon)
         return event.action
 
     def _on_drag_leave(self, event):
         """Reset visual feedback when leaving drop zone."""
         logging.debug("Drag leave detected on AttachmentArea")
-        try:
-            self._update_add_button_style()
-            if not HAS_TTKBOOTSTRAP:
-                self.add_btn.configure(text="+", relief="raised")
-            # Reset background
-            self.configure(style="TFrame")
-        except Exception as e:
-            logging.debug(f"Error in drag_leave: {e}")
+        # Reset to appropriate color based on attachment state
+        self._update_add_button_style()
         return event.action
 
     def _on_drop(self, event):
         """Handle drag and drop."""
         logging.info(f"Drop detected on AttachmentArea, data: {event.data[:100] if event.data else 'None'}...")
-
-        # Reset visual feedback
-        self._update_add_button_style()
-        if not HAS_TTKBOOTSTRAP:
-            self.add_btn.configure(text="+", relief="raised")
-        self.configure(style="TFrame")
 
         if not event.data:
             logging.warning("Drop event has no data")
@@ -411,6 +610,3 @@ class AttachmentArea(ttk.Frame):
                     msg_parts[-1] += f"\n  ... and {len(rejected_unsupported) - 3} more"
 
             messagebox.showwarning("Some Files Rejected", "\n\n".join(msg_parts), parent=self)
-
-        # Reset button style after drop
-        self._update_add_button_style()

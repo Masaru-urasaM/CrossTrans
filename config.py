@@ -1,5 +1,5 @@
 """
-Configuration management for AI Translator v1.6.0
+Configuration management for CrossTrans.
 Handles API key, hotkeys, auto-start settings, and other preferences.
 """
 import os

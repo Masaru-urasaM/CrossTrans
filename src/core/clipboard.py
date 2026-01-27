@@ -1,5 +1,5 @@
 """
-Clipboard management for AI Translator.
+Clipboard management for CrossTrans.
 Handles saving, restoring, and manipulating clipboard content.
 """
 import logging

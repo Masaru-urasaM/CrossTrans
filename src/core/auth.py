@@ -1,5 +1,5 @@
 """
-Windows Authentication Module for AI Translator.
+Windows Authentication Module for CrossTrans.
 Supports Windows Hello (PIN/Fingerprint/Face) with password fallback.
 """
 import asyncio
@@ -381,7 +381,7 @@ def require_auth(parent) -> bool:
         # Start Windows Hello in background
         WindowsHelloAuth.verify_async(
             on_hello_result,
-            "AI Translator - Verify your identity to view API keys"
+            "CrossTrans - Verify your identity to view API keys"
         )
 
         # Function to find and bring Windows Hello dialog to front

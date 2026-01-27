@@ -1,5 +1,5 @@
 """
-AI API Manager for AI Translator.
+AI API Manager for CrossTrans.
 Handles communication with various AI providers (Google, OpenAI, Anthropic, Groq, etc.)
 """
 import json
@@ -14,6 +14,24 @@ import google.generativeai as genai
 from src.constants import MODEL_PROVIDER_MAP, API_KEY_PATTERNS
 from src.core.multimodal import MultimodalProcessor
 from src.core.ssl_pinning import get_ssl_context_for_url
+
+# Default models to try for each provider when model is "Auto"
+# Ordered by preference (best models first)
+DEFAULT_MODELS_BY_PROVIDER = {
+    'google': ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'],
+    'openai': ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo'],
+    'anthropic': ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022', 'claude-3-haiku-20240307'],
+    'groq': ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768'],
+    'deepseek': ['deepseek-chat', 'deepseek-coder'],
+    'xai': ['grok-2', 'grok-beta'],
+    'mistral': ['mistral-large-latest', 'mistral-small-latest'],
+    'perplexity': ['sonar', 'sonar-pro'],
+    'cerebras': ['llama-3.3-70b', 'llama3.1-70b'],
+    'sambanova': ['Meta-Llama-3.3-70B-Instruct', 'Meta-Llama-3.1-70B-Instruct'],
+    'together': ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo'],
+    'siliconflow': ['deepseek-ai/DeepSeek-V3', 'Qwen/Qwen2.5-72B-Instruct'],
+    'openrouter': ['google/gemini-2.0-flash-exp:free', 'meta-llama/llama-3.3-70b-instruct:free'],
+}
 
 if TYPE_CHECKING:
     from src.core.provider_health import ProviderHealthManager
@@ -31,9 +49,13 @@ class AIAPIManager:
     - Smart fallback with health tracking
     - Adaptive timeouts based on provider performance
     - Circuit breaker for failing providers
+    - Auto-model detection when model is not specified
     """
 
     MODEL_NAME: str = ''
+
+    # Class-level cache for working models (key: api_key_prefix -> model_name)
+    _working_models_cache: Dict[str, str] = {}
 
     def __init__(self) -> None:
         self.api_configs: List[Dict[str, Any]] = []
@@ -133,6 +155,76 @@ class AIAPIManager:
 
         return 'google'  # Ultimate fallback
 
+    def _make_request_with_retry(self, url: str, data: dict, headers: dict,
+                                  response_parser: Callable[[dict], str],
+                                  timeout: int = 10, max_retries: int = 3) -> str:
+        """Make HTTP request with retry logic for rate limits and transient errors.
+
+        Args:
+            url: API endpoint URL
+            data: Request body as dict (will be JSON encoded)
+            headers: HTTP headers
+            response_parser: Function to extract response text from JSON result
+            timeout: Request timeout in seconds
+            max_retries: Maximum number of retry attempts
+
+        Returns:
+            Extracted response text
+
+        Raises:
+            Exception: On authentication failure, rate limit exceeded, or network errors
+        """
+        ssl_context = get_ssl_context_for_url(url)
+
+        for attempt in range(max_retries):
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(data).encode('utf-8'),
+                headers=headers,
+                method="POST"
+            )
+
+            try:
+                with urllib.request.urlopen(req, timeout=timeout, context=ssl_context) as response:
+                    result = json.loads(response.read().decode('utf-8'))
+                    return response_parser(result)
+
+            except urllib.error.HTTPError as e:
+                if e.code == 429:  # Rate limit
+                    if attempt < max_retries - 1:
+                        wait_time = 2 ** attempt  # 1s, 2s, 4s
+                        logging.warning(f"Rate limit hit, waiting {wait_time}s before retry...")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        raise Exception(f"Rate limit exceeded after {max_retries} retries")
+
+                elif e.code in (401, 403):
+                    raise Exception("API_KEY_INVALID: Authentication failed")
+
+                elif e.code >= 500:
+                    if attempt < max_retries - 1:
+                        wait_time = 2 ** attempt
+                        logging.warning(f"Server error {e.code}, waiting {wait_time}s before retry...")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        raise Exception(f"Server error {e.code} after {max_retries} retries")
+                else:
+                    raise  # Re-raise other HTTP errors
+
+            except urllib.error.URLError as e:
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    logging.warning(f"Network error, waiting {wait_time}s before retry: {e}")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    raise Exception(f"Network error after {max_retries} retries: {e}")
+
+        # Should not reach here, but just in case
+        raise Exception("Request failed after all retries")
+
     def _call_generic_openai_style(self, api_key: str, model_name: str, prompt: str,
                                      base_url: str, image_path: Optional[str] = None) -> str:
         """Helper for OpenAI-compatible APIs with rate limit handling."""
@@ -164,51 +256,17 @@ class AIAPIManager:
             "temperature": 0.3
         }
 
-        # Retry logic with exponential backoff for rate limits
-        max_retries = 3
-        ssl_context = get_ssl_context_for_url(base_url)
+        # OpenAI response parser
+        def parse_openai_response(result: dict) -> str:
+            return result['choices'][0]['message']['content'].strip()
 
-        for attempt in range(max_retries):
-            req = urllib.request.Request(
-                base_url,
-                data=json.dumps(data).encode('utf-8'),
-                headers=headers,
-                method="POST"
-            )
-
-            try:
-                with urllib.request.urlopen(req, timeout=10, context=ssl_context) as response:
-                    result = json.loads(response.read().decode('utf-8'))
-                    return result['choices'][0]['message']['content'].strip()
-            except urllib.error.HTTPError as e:
-                if e.code == 429:  # Rate limit
-                    if attempt < max_retries - 1:
-                        wait_time = 2 ** attempt  # 1s, 2s, 4s
-                        logging.warning(f"Rate limit hit, waiting {wait_time}s before retry...")
-                        time.sleep(wait_time)
-                        continue
-                    else:
-                        raise Exception(f"Rate limit exceeded after {max_retries} retries")
-                elif e.code == 401 or e.code == 403:
-                    raise Exception("API_KEY_INVALID: Authentication failed")
-                elif e.code >= 500:
-                    if attempt < max_retries - 1:
-                        wait_time = 2 ** attempt
-                        logging.warning(f"Server error {e.code}, waiting {wait_time}s before retry...")
-                        time.sleep(wait_time)
-                        continue
-                    else:
-                        raise Exception(f"Server error {e.code} after {max_retries} retries")
-                else:
-                    raise  # Re-raise other HTTP errors
-            except urllib.error.URLError as e:
-                if attempt < max_retries - 1:
-                    wait_time = 2 ** attempt
-                    logging.warning(f"Network error, waiting {wait_time}s before retry: {e}")
-                    time.sleep(wait_time)
-                    continue
-                else:
-                    raise Exception(f"Network error after {max_retries} retries: {e}")
+        return self._make_request_with_retry(
+            url=base_url,
+            data=data,
+            headers=headers,
+            response_parser=parse_openai_response,
+            timeout=10
+        )
 
     def _call_anthropic(self, api_key: str, model_name: str, prompt: str,
                          image_path: Optional[str] = None) -> str:
@@ -243,51 +301,17 @@ class AIAPIManager:
             "messages": [{"role": "user", "content": content}]
         }
 
-        # Retry logic with exponential backoff for rate limits
-        max_retries = 3
-        ssl_context = get_ssl_context_for_url(url)
+        # Anthropic response parser
+        def parse_anthropic_response(result: dict) -> str:
+            return result['content'][0]['text'].strip()
 
-        for attempt in range(max_retries):
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(data).encode('utf-8'),
-                headers=headers,
-                method="POST"
-            )
-
-            try:
-                with urllib.request.urlopen(req, timeout=10, context=ssl_context) as response:
-                    result = json.loads(response.read().decode('utf-8'))
-                    return result['content'][0]['text'].strip()
-            except urllib.error.HTTPError as e:
-                if e.code == 429:  # Rate limit
-                    if attempt < max_retries - 1:
-                        wait_time = 2 ** attempt
-                        logging.warning(f"Rate limit hit, waiting {wait_time}s before retry...")
-                        time.sleep(wait_time)
-                        continue
-                    else:
-                        raise Exception(f"Rate limit exceeded after {max_retries} retries")
-                elif e.code == 401 or e.code == 403:
-                    raise Exception("API_KEY_INVALID: Authentication failed")
-                elif e.code >= 500:
-                    if attempt < max_retries - 1:
-                        wait_time = 2 ** attempt
-                        logging.warning(f"Server error {e.code}, waiting {wait_time}s before retry...")
-                        time.sleep(wait_time)
-                        continue
-                    else:
-                        raise Exception(f"Server error {e.code} after {max_retries} retries")
-                else:
-                    raise  # Re-raise other HTTP errors
-            except urllib.error.URLError as e:
-                if attempt < max_retries - 1:
-                    wait_time = 2 ** attempt
-                    logging.warning(f"Network error, waiting {wait_time}s before retry: {e}")
-                    time.sleep(wait_time)
-                    continue
-                else:
-                    raise Exception(f"Network error after {max_retries} retries: {e}")
+        return self._make_request_with_retry(
+            url=url,
+            data=data,
+            headers=headers,
+            response_parser=parse_anthropic_response,
+            timeout=10
+        )
 
     def _generate_content(self, provider: str, api_key: str, model_name: str,
                            prompt: str, image_path: Optional[str] = None) -> str:
@@ -357,6 +381,62 @@ class AIAPIManager:
         except Exception as e:
             raise e
 
+    def _get_api_key_prefix(self, api_key: str) -> str:
+        """Get a prefix of API key for caching (to avoid storing full key)."""
+        return api_key[:12] if len(api_key) > 12 else api_key
+
+    def _detect_provider_from_key(self, api_key: str) -> str:
+        """Detect provider from API key pattern."""
+        for pattern, provider in API_KEY_PATTERNS.items():
+            if api_key.startswith(pattern):
+                return provider
+        # Default to google if can't detect
+        return 'google'
+
+    def _try_auto_detect_model(self, api_key: str, provider: str, prompt: str) -> Optional[str]:
+        """Try to auto-detect a working model for the given provider.
+
+        Tries models from DEFAULT_MODELS_BY_PROVIDER until one works.
+        Caches the working model for future use.
+
+        Returns:
+            Translation result if successful, None if all models failed.
+        """
+        key_prefix = self._get_api_key_prefix(api_key)
+
+        # Check if we have a cached working model
+        cached_model = self._working_models_cache.get(key_prefix)
+        if cached_model:
+            logging.info(f"[Auto-Model] Trying cached model: {cached_model}")
+            try:
+                result = self._generate_content(provider, api_key, cached_model, prompt)
+                logging.info(f"[Auto-Model] Cached model {cached_model} worked!")
+                return result
+            except Exception as e:
+                logging.warning(f"[Auto-Model] Cached model {cached_model} failed: {e}")
+                # Clear cache and try all models
+                del self._working_models_cache[key_prefix]
+
+        # Try models for this provider
+        models_to_try = DEFAULT_MODELS_BY_PROVIDER.get(provider, [])
+        if not models_to_try:
+            logging.warning(f"[Auto-Model] No default models for provider: {provider}")
+            return None
+
+        for model in models_to_try:
+            logging.info(f"[Auto-Model] Trying model: {model}")
+            try:
+                result = self._generate_content(provider, api_key, model, prompt)
+                # Success! Cache this model
+                self._working_models_cache[key_prefix] = model
+                logging.info(f"[Auto-Model] Model {model} works! Cached for future use.")
+                return result
+            except Exception as e:
+                logging.warning(f"[Auto-Model] Model {model} failed: {e}")
+                continue
+
+        return None
+
     def translate(self, prompt: str) -> str:
         """Translate text using configured keys with smart fallback."""
         if not self.api_configs:
@@ -375,11 +455,22 @@ class AIAPIManager:
             if not api_key:
                 continue
 
+            # Handle empty model name (Auto mode)
             if not model_name:
-                error_msg = f"Key #{i+1}: Model name not specified."
-                errors.append(error_msg)
-                logging.warning(f"[API] {error_msg}")
-                continue
+                # Detect provider from key or use setting
+                if provider_setting == 'Auto':
+                    target_provider = self._detect_provider_from_key(api_key)
+                else:
+                    target_provider = provider_setting.lower()
+
+                # Try auto-detect model
+                logging.info(f"[API] Key #{i+1}: Model is Auto, detecting for provider {target_provider}...")
+                result = self._try_auto_detect_model(api_key, target_provider, prompt)
+                if result:
+                    return result
+                else:
+                    errors.append(f"Key #{i+1}: Auto-detection failed for all models")
+                    continue
 
             target_provider = self._identify_provider(model_name, api_key) if provider_setting == 'Auto' else provider_setting.lower()
             configs_with_providers.append({
@@ -686,49 +777,17 @@ class AIAPIManager:
             "temperature": 0.3
         }
 
-        # Retry logic
-        max_retries = 3
-        ssl_context = get_ssl_context_for_url(base_url)
+        # OpenAI response parser
+        def parse_openai_response(result: dict) -> str:
+            return result['choices'][0]['message']['content'].strip()
 
-        for attempt in range(max_retries):
-            req = urllib.request.Request(
-                base_url,
-                data=json.dumps(data).encode('utf-8'),
-                headers=headers,
-                method="POST"
-            )
-
-            try:
-                with urllib.request.urlopen(req, timeout=60, context=ssl_context) as response:
-                    result = json.loads(response.read().decode('utf-8'))
-                    return result['choices'][0]['message']['content'].strip()
-            except urllib.error.HTTPError as e:
-                if e.code == 429:
-                    if attempt < max_retries - 1:
-                        wait_time = 2 ** attempt
-                        logging.warning(f"Rate limit hit, waiting {wait_time}s before retry...")
-                        time.sleep(wait_time)
-                        continue
-                    else:
-                        raise Exception(f"Rate limit exceeded after {max_retries} retries")
-                elif e.code == 401 or e.code == 403:
-                    raise Exception("API_KEY_INVALID: Authentication failed")
-                elif e.code >= 500:
-                    if attempt < max_retries - 1:
-                        wait_time = 2 ** attempt
-                        time.sleep(wait_time)
-                        continue
-                    else:
-                        raise Exception(f"Server error {e.code} after {max_retries} retries")
-                else:
-                    raise
-            except urllib.error.URLError as e:
-                if attempt < max_retries - 1:
-                    wait_time = 2 ** attempt
-                    time.sleep(wait_time)
-                    continue
-                else:
-                    raise Exception(f"Network error after {max_retries} retries: {e}")
+        return self._make_request_with_retry(
+            url=base_url,
+            data=data,
+            headers=headers,
+            response_parser=parse_openai_response,
+            timeout=60  # Longer timeout for multi-image processing
+        )
 
     def _call_anthropic_multimodal(self, api_key: str, model_name: str, prompt: str,
                                      image_paths: List[str]) -> str:
@@ -769,45 +828,14 @@ class AIAPIManager:
             "messages": [{"role": "user", "content": content}]
         }
 
-        # Retry logic
-        max_retries = 3
-        ssl_context = get_ssl_context_for_url(url)
+        # Anthropic response parser
+        def parse_anthropic_response(result: dict) -> str:
+            return result['content'][0]['text'].strip()
 
-        for attempt in range(max_retries):
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(data).encode('utf-8'),
-                headers=headers,
-                method="POST"
-            )
-
-            try:
-                with urllib.request.urlopen(req, timeout=60, context=ssl_context) as response:
-                    result = json.loads(response.read().decode('utf-8'))
-                    return result['content'][0]['text'].strip()
-            except urllib.error.HTTPError as e:
-                if e.code == 429:
-                    if attempt < max_retries - 1:
-                        wait_time = 2 ** attempt
-                        time.sleep(wait_time)
-                        continue
-                    else:
-                        raise Exception(f"Rate limit exceeded after {max_retries} retries")
-                elif e.code == 401 or e.code == 403:
-                    raise Exception("API_KEY_INVALID: Authentication failed")
-                elif e.code >= 500:
-                    if attempt < max_retries - 1:
-                        wait_time = 2 ** attempt
-                        time.sleep(wait_time)
-                        continue
-                    else:
-                        raise Exception(f"Server error {e.code} after {max_retries} retries")
-                else:
-                    raise
-            except urllib.error.URLError as e:
-                if attempt < max_retries - 1:
-                    wait_time = 2 ** attempt
-                    time.sleep(wait_time)
-                    continue
-                else:
-                    raise Exception(f"Network error after {max_retries} retries: {e}")
+        return self._make_request_with_retry(
+            url=url,
+            data=data,
+            headers=headers,
+            response_parser=parse_anthropic_response,
+            timeout=60  # Longer timeout for multi-image processing
+        )

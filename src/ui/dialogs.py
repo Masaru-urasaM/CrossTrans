@@ -1,5 +1,5 @@
 """
-Dialog windows for AI Translator.
+Dialog windows for CrossTrans.
 """
 import webbrowser
 
@@ -22,7 +22,7 @@ class APIErrorDialog:
         self.on_open_settings = on_open_settings
 
         self.window = tk.Toplevel(parent)
-        self.window.title("API Key Error - AI Translator")
+        self.window.title("API Key Error - CrossTrans")
         self.window.geometry("500x400")
         self.window.resizable(False, False)
         self.window.grab_set()
@@ -73,6 +73,174 @@ class APIErrorDialog:
         # Buttons
         btn_frame = ttk.Frame(main)
         btn_frame.pack(fill=X, pady=20)
+
+        if self.on_open_settings:
+            if HAS_TTKBOOTSTRAP:
+                ttk.Button(btn_frame, text="Open Settings",
+                           command=self._open_settings,
+                           bootstyle="success", width=15).pack(side=LEFT)
+            else:
+                ttk.Button(btn_frame, text="Open Settings",
+                           command=self._open_settings,
+                           width=15).pack(side=LEFT)
+
+        if HAS_TTKBOOTSTRAP:
+            ttk.Button(btn_frame, text="Close", command=self.window.destroy,
+                       bootstyle="secondary", width=15).pack(side=RIGHT)
+        else:
+            ttk.Button(btn_frame, text="Close", command=self.window.destroy,
+                       width=15).pack(side=RIGHT)
+
+    def _open_settings(self):
+        """Open settings and close this dialog."""
+        self.window.destroy()
+        if self.on_open_settings:
+            self.on_open_settings()
+
+
+class TrialExhaustedDialog:
+    """Dialog shown when trial quota is exhausted."""
+
+    def __init__(self, parent, on_open_settings=None):
+        self.on_open_settings = on_open_settings
+
+        self.window = tk.Toplevel(parent)
+        self.window.title("Trial Quota Exhausted - CrossTrans")
+        self.window.geometry("500x350")
+        self.window.resizable(False, False)
+        self.window.grab_set()
+
+        # Center
+        self.window.update_idletasks()
+        x = (self.window.winfo_screenwidth() - 500) // 2
+        y = (self.window.winfo_screenheight() - 350) // 2
+        self.window.geometry(f"+{x}+{y}")
+
+        self._create_widgets()
+
+    def _create_widgets(self):
+        """Create dialog UI."""
+        main = ttk.Frame(self.window, padding=25) if HAS_TTKBOOTSTRAP else ttk.Frame(self.window)
+        main.pack(fill=BOTH, expand=True)
+
+        # Title
+        if HAS_TTKBOOTSTRAP:
+            ttk.Label(main, text="Trial Quota Exhausted", font=('Segoe UI', 16, 'bold'),
+                      bootstyle="warning").pack(anchor=W)
+        else:
+            ttk.Label(main, text="Trial Quota Exhausted", font=('Segoe UI', 16, 'bold')).pack(anchor=W)
+
+        ttk.Label(main, text="You've used all 100 free translations for today.",
+                  font=('Segoe UI', 10), wraplength=450).pack(anchor=W, pady=(10, 5))
+
+        ttk.Label(main, text="Quota resets at midnight, or you can get unlimited access now.",
+                  font=('Segoe UI', 10), wraplength=450).pack(anchor=W, pady=(0, 20))
+
+        # Instructions
+        ttk.Label(main, text="Get unlimited translations:", font=('Segoe UI', 11, 'bold')).pack(anchor=W)
+
+        instructions = ttk.Frame(main)
+        instructions.pack(fill=X, pady=10)
+
+        ttk.Label(instructions, text="1. Get a FREE API key (takes 1 minute):",
+                  font=('Segoe UI', 10)).pack(anchor=W)
+        if HAS_TTKBOOTSTRAP:
+            ttk.Button(instructions, text="https://aistudio.google.com/app/apikey",
+                       command=lambda: webbrowser.open("https://aistudio.google.com/app/apikey"),
+                       bootstyle="link").pack(anchor=W, padx=(15, 0))
+        else:
+            ttk.Button(instructions, text="https://aistudio.google.com/app/apikey",
+                       command=lambda: webbrowser.open("https://aistudio.google.com/app/apikey")).pack(anchor=W, padx=(15, 0))
+
+        ttk.Label(instructions, text="\n2. Paste your API key in Settings > API Key tab.",
+                  font=('Segoe UI', 10)).pack(anchor=W)
+
+        # Buttons
+        btn_frame = ttk.Frame(main)
+        btn_frame.pack(fill=X, pady=20)
+
+        if self.on_open_settings:
+            if HAS_TTKBOOTSTRAP:
+                ttk.Button(btn_frame, text="Open Settings",
+                           command=self._open_settings,
+                           bootstyle="success", width=15).pack(side=LEFT)
+            else:
+                ttk.Button(btn_frame, text="Open Settings",
+                           command=self._open_settings,
+                           width=15).pack(side=LEFT)
+
+        if HAS_TTKBOOTSTRAP:
+            ttk.Button(btn_frame, text="Close", command=self.window.destroy,
+                       bootstyle="secondary", width=15).pack(side=RIGHT)
+        else:
+            ttk.Button(btn_frame, text="Close", command=self.window.destroy,
+                       width=15).pack(side=RIGHT)
+
+    def _open_settings(self):
+        """Open settings and close this dialog."""
+        self.window.destroy()
+        if self.on_open_settings:
+            self.on_open_settings()
+
+
+class TrialFeatureDialog:
+    """Dialog shown when user tries to use a feature disabled in trial mode."""
+
+    def __init__(self, parent, feature_name: str = "This feature", on_open_settings=None):
+        self.on_open_settings = on_open_settings
+
+        self.window = tk.Toplevel(parent)
+        self.window.title("Feature Not Available - CrossTrans")
+        self.window.geometry("480x360")
+        self.window.resizable(False, False)
+        self.window.grab_set()
+
+        # Center
+        self.window.update_idletasks()
+        x = (self.window.winfo_screenwidth() - 480) // 2
+        y = (self.window.winfo_screenheight() - 360) // 2
+        self.window.geometry(f"+{x}+{y}")
+
+        self._create_widgets(feature_name)
+
+    def _create_widgets(self, feature_name: str):
+        """Create dialog UI."""
+        main = ttk.Frame(self.window, padding=25) if HAS_TTKBOOTSTRAP else ttk.Frame(self.window)
+        main.pack(fill=BOTH, expand=True)
+
+        # Title
+        if HAS_TTKBOOTSTRAP:
+            ttk.Label(main, text="Free Trial Mode", font=('Segoe UI', 16, 'bold'),
+                      bootstyle="info").pack(anchor=W)
+        else:
+            ttk.Label(main, text="Free Trial Mode", font=('Segoe UI', 16, 'bold')).pack(anchor=W)
+
+        ttk.Label(main, text=f"{feature_name} is not available in free trial mode.",
+                  font=('Segoe UI', 10), wraplength=430).pack(anchor=W, pady=(10, 5))
+
+        ttk.Label(main, text="Get a FREE API key to unlock all features:",
+                  font=('Segoe UI', 10), wraplength=430).pack(anchor=W, pady=(0, 15))
+
+        # Features list
+        features_frame = ttk.Frame(main)
+        features_frame.pack(fill=X, pady=5)
+
+        ttk.Label(features_frame, text="  - Unlimited text translations", font=('Segoe UI', 10)).pack(anchor=W)
+        ttk.Label(features_frame, text="  - Screenshot OCR translation", font=('Segoe UI', 10)).pack(anchor=W)
+        ttk.Label(features_frame, text="  - File translation (PDF, DOCX, TXT)", font=('Segoe UI', 10)).pack(anchor=W)
+
+        # Get API key link
+        if HAS_TTKBOOTSTRAP:
+            ttk.Button(main, text="Get FREE API Key (1 minute)",
+                       command=lambda: webbrowser.open("https://aistudio.google.com/app/apikey"),
+                       bootstyle="link").pack(anchor=W, pady=(10, 0))
+        else:
+            ttk.Button(main, text="Get FREE API Key (1 minute)",
+                       command=lambda: webbrowser.open("https://aistudio.google.com/app/apikey")).pack(anchor=W, pady=(10, 0))
+
+        # Buttons
+        btn_frame = ttk.Frame(main)
+        btn_frame.pack(fill=X, pady=(15, 0))
 
         if self.on_open_settings:
             if HAS_TTKBOOTSTRAP:

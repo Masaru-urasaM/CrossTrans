@@ -1,15 +1,18 @@
-# AI Translator
+# CrossTrans
 
-![Version](https://img.shields.io/badge/version-1.7.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.9.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-yellow.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-informational.svg)
 
 A powerful Windows desktop application for instant text translation using AI. Select any text, press a hotkey, and get translations instantly - no window switching needed!
 
+![CrossTrans](CrossTrans.png)
+
 ## Highlights
 
 - **Instant Translation** - Select text, press hotkey, get translation in tooltip
+- **Free Trial Mode** - 100 translations/day without API key
 - **14 AI Providers** - Google Gemini (free!), OpenAI, Claude, DeepSeek, Groq, and more
 - **Vision & OCR** - Screenshot any region and translate text from images
 - **File Processing** - Translate documents (.docx, .txt, .srt, .pdf)
@@ -30,6 +33,11 @@ A powerful Windows desktop application for instant text translation using AI. Se
 | `Win+Alt+S` | Screenshot OCR (if vision enabled) |
 
 **+ 4 customizable hotkeys** for any language of your choice.
+
+### Free Trial Mode
+- **100 free translations per day** without any API key
+- Perfect for trying out the app before getting your own API key
+- Quota resets at midnight
 
 ### Vision & File Processing
 - **Screenshot OCR** - Capture any screen region and extract/translate text
@@ -79,20 +87,20 @@ A powerful Windows desktop application for instant text translation using AI. Se
 ### Prerequisites
 - Windows 10/11
 - Python 3.10+ (if running from source)
-- An API key (Google Gemini is free!)
+- An API key (optional - free trial mode available!)
 
 ### Option 1: Download EXE (Recommended)
-1. Go to [Releases](https://github.com/sytacxinh/ai-translator/releases)
-2. Download `AITranslator_v1.7.0.exe`
+1. Go to [Releases](https://github.com/Masaru-urasaM/CrossTrans/releases)
+2. Download `CrossTrans_v1.9.0.exe`
 3. Run the application
-4. Enter your API key in Settings
+4. Start translating immediately with trial mode, or enter your API key in Settings
 
 ### Option 2: Run from Source
 
 ```bash
 # Clone repository
-git clone https://github.com/sytacxinh/ai-translator.git
-cd ai-translator
+git clone https://github.com/Masaru-urasaM/CrossTrans.git
+cd CrossTrans
 
 # Install dependencies
 pip install -r requirements.txt
@@ -104,7 +112,7 @@ python main.py
 # Double-click run_silent.vbs
 ```
 
-### Get Your Free API Key
+### Get Your Free API Key (Optional)
 
 1. Go to [Google AI Studio](https://aistudio.google.com/app/apikey)
 2. Click "Create API Key"
@@ -115,7 +123,7 @@ python main.py
 ## Usage
 
 ### Basic Translation
-1. **Start the app** - Look for "AI" icon in system tray
+1. **Start the app** - Look for "CT" icon in system tray
 2. **Select any text** in any application
 3. **Press hotkey** (e.g., `Win+Alt+V` for Vietnamese)
 4. **Translation appears** in a tooltip near your cursor
@@ -127,7 +135,7 @@ python main.py
 - **X** or `Escape` - Close tooltip
 
 ### Full Translator Window
-Right-click tray icon → "Open Translator" or click from tooltip
+Right-click tray icon -> "Open Translator" or click from tooltip
 
 Features:
 - Edit original text
@@ -137,7 +145,7 @@ Features:
 - View translation history
 
 ### Screenshot OCR
-1. Enable vision in Settings (requires vision-capable model)
+1. Enable vision in Settings (requires vision-capable model or API key)
 2. Press `Win+Alt+S`
 3. Draw rectangle around text to translate
 4. Translation appears in tooltip
@@ -171,6 +179,10 @@ Features:
 - Test connection
 - View vision/file capabilities
 
+**Guide**
+- Step-by-step instructions for getting started
+- Troubleshooting tips
+
 ### Custom Prompts
 In translator window, use "Custom prompt" field:
 - "Make it formal" - Business communication
@@ -184,12 +196,12 @@ In translator window, use "Custom prompt" field:
 ## Project Structure
 
 ```
-ai-translator/
+CrossTrans/
 ├── main.py                 # Entry point
 ├── config.py               # Configuration management
 ├── requirements.txt        # Dependencies
 ├── src/
-│   ├── app.py              # Main application (1,684 lines)
+│   ├── app.py              # Main application
 │   ├── constants.py        # Languages, providers, models
 │   ├── core/
 │   │   ├── api_manager.py  # AI provider management
@@ -199,28 +211,30 @@ ai-translator/
 │   │   ├── screenshot.py   # Screen capture for OCR
 │   │   ├── multimodal.py   # Vision processing
 │   │   ├── file_processor.py # Document text extraction
-│   │   ├── pdf_ocr.py      # Scanned PDF OCR (NEW)
+│   │   ├── pdf_ocr.py      # Scanned PDF OCR
 │   │   ├── history.py      # Translation history
 │   │   ├── crypto.py       # Secure API key storage (DPAPI)
 │   │   ├── ssl_pinning.py  # SSL certificate pinning
-│   │   ├── auth.py         # Windows Hello authentication (NEW)
-│   │   └── provider_health.py # Smart provider fallback (NEW)
+│   │   ├── auth.py         # Windows Hello authentication
+│   │   ├── drop_handler.py # Drag-drop handler
+│   │   ├── quota_manager.py # Trial mode quota tracking
+│   │   ├── trial_api.py    # Trial mode API handler
+│   │   └── provider_health.py # Smart provider fallback
 │   ├── ui/
 │   │   ├── settings.py     # Settings window
 │   │   ├── attachments.py  # File attachment widget
 │   │   ├── history_dialog.py # History viewer with search
 │   │   ├── progress_dialog.py # Progress indicator
-│   │   ├── toast.py        # Toast notifications (NEW)
+│   │   ├── toast.py        # Toast notifications
+│   │   ├── tray.py         # System tray manager
+│   │   ├── tooltip.py      # Tooltip widget
 │   │   └── dialogs.py      # Error dialogs
+│   ├── assets/             # Icon assets
 │   └── utils/
 │       ├── logging_setup.py    # Logging
 │       ├── single_instance.py  # Prevent duplicates
 │       └── updates.py          # Auto-update
 ├── tests/                  # Unit tests
-│   ├── conftest.py
-│   ├── test_config.py
-│   ├── test_api_manager.py
-│   └── test_file_processor.py
 └── logs/                   # Application logs
 ```
 
@@ -229,7 +243,7 @@ ai-translator/
 ## Troubleshooting
 
 ### API Error / Connection Failed
-1. Open Settings → API Key tab
+1. Open Settings -> API Key tab
 2. Verify your API key is correct
 3. Select correct Provider (or use "Auto")
 4. Click "Test" to verify connection
@@ -241,80 +255,43 @@ ai-translator/
 - Check logs folder for error details
 
 ### Hotkeys Not Working
-- Check Settings → Hotkeys for configured shortcuts
+- Check Settings -> Hotkeys for configured shortcuts
 - Try running as administrator
 - Some apps capture certain key combinations
 - Ensure no hotkey conflicts with other software
 
 ### Vision/File Features Disabled
 - You need a vision-capable model (e.g., Gemini 2.0 Flash, GPT-4o)
-- Go to Settings → API Key → Click "Test"
+- Go to Settings -> API Key -> Click "Test"
 - If test shows "Image OK", vision is enabled
 
----
-
-## Technical Details
-
-### Architecture
-- **Threading Model**: Main thread (UI), Translation thread (async), Hotkey thread (Windows messages), Tray thread (pystray)
-- **Queue System**: Thread-safe queue for translation results
-- **Hotkey System**: Windows RegisterHotKey API (zero CPU when idle)
-- **Provider Detection**: Model name → API key pattern → Heuristics → Default
-
-### Dependencies
-| Package | Purpose |
-|---------|---------|
-| google-generativeai | Google Gemini API |
-| pyperclip | Clipboard access |
-| pystray | System tray icon |
-| Pillow | Image processing |
-| ttkbootstrap | Modern UI |
-| pywin32 | Windows clipboard/registry |
-| python-docx | DOCX file reading |
-| pysrt | Subtitle parsing |
-| chardet | Encoding detection |
-| windnd | Drag & drop support |
-| PyPDF2 | PDF text extraction |
-| PyMuPDF | Scanned PDF OCR |
-| winsdk | Windows Hello authentication |
-
-### Configuration Storage
-- **Location**: `%APPDATA%/AITranslator/config.json`
-- **Contents**: API keys, hotkeys, history, preferences
-- **Auto-start**: Windows Registry entry
+### Trial Mode Issues
+- Trial mode requires internet connection
+- If quota exhausted, wait until midnight or add your own API key
 
 ---
 
-## What's New in v1.7.0
+## What's New in v1.9.0
 
-### Security Enhancements
-- **Windows Hello Authentication** - Protect API keys with PIN, Fingerprint, or Face recognition
-- **Show All API Keys** - One-click to reveal/hide all keys (with authentication)
-- **Password Fallback** - Falls back to Windows password if Windows Hello unavailable
-- **Soft Rate Limiting** - 5 attempts per authentication dialog
+### Trial Mode
+- **100 free translations per day** without API key
+- Perfect for new users to try the app
+- Smart quota management with daily reset
 
-### New Features
-- **Smart Provider Fallback** - Auto-switch to backup API when primary fails
-- **Scanned PDF OCR** - Extract text from image-based PDFs using AI vision
-- **Toast Notifications** - Non-intrusive notifications with auto-dismiss
-- **Search History** - Filter translation history by keyword
+### Rebranding
+- App renamed from "AI Translator" to "CrossTrans"
+- New logo and visual identity
 
-### UI Improvements
-- **Synced Show/Hide Buttons** - Individual and "Show All" buttons stay in sync
-- **Better Settings UI** - Improved API key management experience
+### Previous in v1.8.0
+- Attachments UI improvements with smart button colors
+- System tray menu reorganization
 
-### Previous in v1.6.0
-- Encrypted API Keys (Windows DPAPI)
-- SSL Certificate Pinning (TLS 1.2+)
-- PDF Support
-- Progress Indicator
-- Type hints & Unit tests
-
-### Previous in v1.5.0
-- Modular architecture refactoring
-- 14 AI providers with auto-detection
-- Vision & OCR, file processing
-- Drag & drop, translation history
+### Previous in v1.7.0
+- Windows Hello Authentication for API key protection
+- Smart Provider Fallback - auto-switch to backup API
+- Scanned PDF OCR support
+- Toast notifications
+- Search History functionality
 
 ---
 
@@ -324,8 +301,8 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ### Development Setup
 ```bash
-git clone https://github.com/sytacxinh/ai-translator.git
-cd ai-translator
+git clone https://github.com/Masaru-urasaM/CrossTrans.git
+cd CrossTrans
 pip install -r requirements.txt
 python main.py
 ```
@@ -333,8 +310,8 @@ python main.py
 ### Building EXE
 ```bash
 pip install pyinstaller
-pyinstaller AITranslator.spec
-# Output: dist/AITranslator_v1.7.0.exe
+pyinstaller CrossTrans.spec
+# Output: dist/CrossTrans_v1.9.0.exe
 ```
 
 ### Running Tests

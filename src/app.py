@@ -1,5 +1,5 @@
 """
-Main Application for AI Translator.
+Main Application for CrossTrans.
 """
 import os
 import sys
@@ -11,12 +11,8 @@ import webbrowser
 from typing import Dict, Tuple
 
 import pyperclip
-from pystray import Icon, MenuItem, Menu
-from PIL import Image, ImageDraw
-
 import tkinter as tk
 from tkinter import BOTH, X, LEFT, RIGHT, END, BOTTOM, TOP
-from tkinter import font
 
 try:
     import ttkbootstrap as ttk
@@ -41,19 +37,71 @@ except ImportError:
     HAS_WINDND = False
 
 from config import Config
-from src.constants import VERSION, LANGUAGES
+from src.constants import VERSION, LANGUAGES, FEEDBACK_URL
 from src.core.translation import TranslationService
 from src.core.api_manager import AIAPIManager
 from src.core.hotkey import HotkeyManager
+from src.core.drop_handler import DropHandler
 from src.ui.settings import SettingsWindow
-from src.ui.dialogs import APIErrorDialog
+from src.ui.dialogs import APIErrorDialog, TrialExhaustedDialog, TrialFeatureDialog
 from src.ui.history_dialog import HistoryDialog
 from src.ui.toast import ToastManager, ToastType
+from src.ui.tooltip import TooltipManager
+from src.ui.tray import TrayManager
 from src.utils.updates import check_for_updates
 from src.core.screenshot import ScreenshotCapture
 from src.core.file_processor import FileProcessor
 from src.ui.attachments import AttachmentArea
 from src.core.multimodal import MultimodalProcessor
+
+
+def set_dark_title_bar(window):
+    """Set dark title bar for Windows 10/11 windows.
+
+    Uses Windows DWM API to enable dark mode for the title bar.
+    This makes the title bar match the dark theme of the app.
+
+    Args:
+        window: Tkinter window (Tk or Toplevel)
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        # Get window handle
+        hwnd = ctypes.windll.user32.GetParent(window.winfo_id())
+        if not hwnd:
+            hwnd = window.winfo_id()
+
+        # DWMWA_USE_IMMERSIVE_DARK_MODE = 20 (Windows 10 build 18985+, Windows 11)
+        DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+        # DWMWA_CAPTION_COLOR = 35 (Windows 11 only - custom caption color)
+        DWMWA_CAPTION_COLOR = 35
+
+        dwmapi = ctypes.windll.dwmapi
+
+        # Enable dark mode for title bar
+        value = ctypes.c_int(1)
+        dwmapi.DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            ctypes.byref(value),
+            ctypes.sizeof(value)
+        )
+
+        # Try to set custom caption color (Windows 11)
+        # Color format: 0x00BBGGRR (BGR, not RGB)
+        # Using dark blue-gray: #1a1a2e -> 0x002e1a1a
+        caption_color = ctypes.c_int(0x002b2b2b)  # Match app background
+        dwmapi.DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_CAPTION_COLOR,
+            ctypes.byref(caption_color),
+            ctypes.sizeof(caption_color)
+        )
+
+    except Exception as e:
+        logging.debug(f"Could not set dark title bar: {e}")
 
 
 class TranslatorApp:
@@ -91,8 +139,6 @@ class TranslatorApp:
 
         # UI state
         self.popup = None
-        self.tooltip = None
-        self.tray_icon = None
         self.running = True
         self.selected_language = "Vietnamese"
         self.filtered_languages = LANGUAGES.copy()
@@ -103,348 +149,80 @@ class TranslatorApp:
         self.current_target_lang = ""
         self.settings_window = None
 
-        # Dragging state
-        self._drag_x = 0
-        self._drag_y = 0
-        self._last_mouse_x = 0
-        self._last_mouse_y = 0
-
-        # Thread-safe queue for windnd file drops (avoids GIL issues)
-        self._drop_queue = queue.Queue()
-
         # Toast notification manager
         self.toast = ToastManager(self.root)
+
+        # Tooltip manager
+        self.tooltip_manager = TooltipManager(self.root)
+        self.tooltip_manager.configure_callbacks(
+            on_copy=self._on_tooltip_copy,
+            on_open_translator=self._on_tooltip_open_translator,
+            on_open_settings=self.show_settings
+        )
+
+        # Tray manager
+        self.tray_manager = TrayManager(self.config)
+        self.tray_manager.configure_callbacks(
+            on_show_main_window=self.show_main_window,
+            on_show_settings=self.show_settings,
+            on_quit=self.quit_app
+        )
+
+        # Drop handler
+        self.drop_handler = DropHandler(self.root)
+
+        # Translation animation state
+        self._translate_animation_running = False
+        self._translate_animation_step = 0
+        self._translate_pulse_direction = 1  # 1 = brightening, -1 = dimming
+        self._translate_pulse_level = 0
 
     def _on_hotkey_translate(self, language: str):
         """Handle hotkey translation request."""
         # Capture mouse position immediately when hotkey is pressed
-        self._last_mouse_x = self.root.winfo_pointerx()
-        self._last_mouse_y = self.root.winfo_pointery()
-        
+        self.tooltip_manager.capture_mouse_position()
+
         if language == "Screenshot":
             self.root.after(0, self._start_screenshot_ocr)
             return
 
-        self.root.after(0, lambda: self.show_loading_tooltip(language))
+        self.root.after(0, lambda: self.tooltip_manager.show_loading(language))
         self.translation_service.do_translation(language)
 
-    def show_loading_tooltip(self, target_lang: str):
-        """Show loading indicator."""
-        if self.tooltip:
-            try:
-                self.tooltip.destroy()
-            except tk.TclError:
-                pass  # Tooltip already destroyed
+    def show_tooltip(self, original: str, translated: str, target_lang: str, trial_info: dict = None):
+        """Show compact tooltip near mouse cursor with translation result.
 
-        self.tooltip = tk.Toplevel(self.root)
-        self.tooltip.overrideredirect(True)
-        self.tooltip.configure(bg='#2b2b2b')
-        self.tooltip.attributes('-topmost', True)
-
-        frame = ttk.Frame(self.tooltip, padding=10)
-        frame.pack(fill=BOTH, expand=True)
-
-        ttk.Label(frame, text=f"⏳ Translating to {target_lang}...",
-                 font=('Segoe UI', 10), foreground='#ffffff', background='#2b2b2b').pack()
-
-        mouse_x = self._last_mouse_x
-        mouse_y = self._last_mouse_y
-        self.tooltip.geometry(f"+{mouse_x + 15}+{mouse_y + 20}")
-
-    def calculate_tooltip_size(self, text: str) -> Tuple[int, int]:
-        """Calculate optimal tooltip dimensions based on text content using font measurement."""
-        MAX_WIDTH = 800
-        MAX_HEIGHT = self.root.winfo_screenheight() - 80
-        MIN_WIDTH = 320
-        MIN_HEIGHT = 120
-        
-        # Padding configuration
-        FRAME_PADDING = 30  # Total horizontal padding (15px * 2)
-        TEXT_MARGIN = 10    # Extra margin for scrollbar/safety
-        VERTICAL_PADDING = 100 # Increased: Header (20) + Footer (50) + Padding (30)
-        
-        # Create font object to measure text accurately
-        try:
-            ui_font = font.Font(family='Segoe UI', size=11)
-        except tk.TclError:
-            # Fallback if font creation fails
-            ui_font = font.Font(family='Arial', size=11)
-            
-        line_height = ui_font.metrics("linespace") + 2 # +2px for line spacing
-
-        # 1. Calculate Optimal Width
-        # Measure the longest line to determine ideal width
-        longest_line_width = 0
-        for line in text.split('\n'):
-            w = ui_font.measure(line)
-            if w > longest_line_width:
-                longest_line_width = w
-        
-        # Determine width: clamp between MIN and MAX
-        # Add padding to text width to get window width
-        ideal_width = longest_line_width + FRAME_PADDING + TEXT_MARGIN
-        width = max(MIN_WIDTH, min(ideal_width, MAX_WIDTH))
-
-        # 2. Calculate Height (Simulate Word Wrapping)
-        available_text_width = width - FRAME_PADDING - TEXT_MARGIN
-        
-        total_lines = 0
-        for paragraph in text.split('\n'):
-            # Empty lines count as 1
-            if not paragraph:
-                total_lines += 1
-                continue
-                
-            # Fast path: if paragraph fits in one line
-            if ui_font.measure(paragraph) <= available_text_width:
-                total_lines += 1
-                continue
-            
-            # Slow path: simulate word wrapping
-            current_line_width = 0
-            lines_in_para = 1
-            words = paragraph.split(' ')
-            space_width = ui_font.measure(' ')
-            
-            for word in words:
-                word_width = ui_font.measure(word)
-                
-                # Check if word fits on current line
-                if current_line_width + word_width <= available_text_width:
-                    current_line_width += word_width + space_width
-                else:
-                    # Word doesn't fit, wrap to next line
-                    lines_in_para += 1
-                    
-                    # Handle case where a single word is wider than the box
-                    if word_width > available_text_width:
-                        # It will wrap multiple times
-                        # Approximate extra lines for this huge word
-                        extra_lines = int(word_width / available_text_width)
-                        lines_in_para += extra_lines
-                        current_line_width = word_width % available_text_width
-                    else:
-                        current_line_width = word_width + space_width
-            
-            total_lines += lines_in_para
-        
-        # Calculate final height
-        height = (total_lines * line_height) + VERTICAL_PADDING
-
-        return int(width), int(max(height, MIN_HEIGHT))
-
-    def show_tooltip(self, original: str, translated: str, target_lang: str):
-        """Show compact tooltip near mouse cursor with translation result."""
+        Args:
+            original: Original text
+            translated: Translated text
+            target_lang: Target language
+            trial_info: Optional trial mode info dict
+        """
         self.current_original = original
         self.current_translated = translated
         self.current_target_lang = target_lang
 
-        # Close existing tooltip
-        if self.tooltip:
-            try:
-                self.tooltip.destroy()
-            except tk.TclError:
-                pass  # Tooltip already destroyed
-
-        # Check if this is an error message
-        is_error = translated.startswith("Error:") or translated.startswith("No text")
-
-        # Calculate size
-        width, height = self.calculate_tooltip_size(translated)
-        if is_error:
-            height = max(height, 120)  # Ensure error messages have enough space
-
-        # Create tooltip window
-        self.tooltip = tk.Toplevel(self.root)
-        self.tooltip.overrideredirect(True)
-
-        # Handle close properly
-        def on_tooltip_close():
-            self.close_tooltip()
-
-        self.tooltip.protocol("WM_DELETE_WINDOW", on_tooltip_close)
-
-        # Color based on error status
-        if is_error:
-            self.tooltip.configure(bg='#3d1f1f')  # Dark red background for errors
-        else:
-            self.tooltip.configure(bg='#2b2b2b')
-
-        # Set topmost initially, then remove so it can go behind other windows
-        self.tooltip.attributes('-topmost', True)
-        self.tooltip.after(100, lambda: self.tooltip.attributes('-topmost', False) if self.tooltip else None)
-
-        # Main frame
-        main_frame = ttk.Frame(self.tooltip, padding=15)
-        main_frame.pack(fill=BOTH, expand=True)
-
-        # Bind dragging events to the main frame
-        main_frame.bind("<Button-1>", self._start_move)
-        main_frame.bind("<B1-Motion>", self._on_drag)
-
-        # Button frame (Create FIRST to ensure it stays at BOTTOM)
-        btn_frame = ttk.Frame(main_frame)
-        btn_frame.pack(side=BOTTOM, fill=X, pady=(12, 0))
-
-        # Bind dragging events to the button frame
-        btn_frame.bind("<Button-1>", self._start_move)
-        btn_frame.bind("<B1-Motion>", self._on_drag)
-
-        if not is_error:
-            # Copy button (only show for success)
-            copy_btn_kwargs = {"text": "Copy", "command": self.copy_from_tooltip, "width": 8}
-            if HAS_TTKBOOTSTRAP:
-                copy_btn_kwargs["bootstyle"] = "primary"
-            self.tooltip_copy_btn = ttk.Button(btn_frame, **copy_btn_kwargs)
-            self.tooltip_copy_btn.pack(side=LEFT)
-
-            # Open Translator button (only show for success)
-            open_btn_kwargs = {"text": "Open Translator", "command": self.open_full_translator, "width": 14}
-            if HAS_TTKBOOTSTRAP:
-                open_btn_kwargs["bootstyle"] = "success"
-            ttk.Button(btn_frame, **open_btn_kwargs).pack(side=LEFT, padx=8)
-        else:
-            # For errors, show "Open Settings" button
-            settings_btn_kwargs = {"text": "Open Settings", "command": self._open_settings_from_error, "width": 14}
-            if HAS_TTKBOOTSTRAP:
-                settings_btn_kwargs["bootstyle"] = "warning"
-            ttk.Button(btn_frame, **settings_btn_kwargs).pack(side=LEFT, padx=8)
-
-        # Close button
-        close_btn_kwargs = {"text": "✕", "command": self.close_tooltip, "width": 3}
-        if HAS_TTKBOOTSTRAP:
-            close_btn_kwargs["bootstyle"] = "secondary"
-        ttk.Button(btn_frame, **close_btn_kwargs).pack(side=RIGHT)
-
-        # Translation text with color for errors
-        text_height = max(1, (height - 80) // 26)
-        text_fg = '#ff6b6b' if is_error else '#ffffff'  # Light red for errors
-
-        self.tooltip_text = tk.Text(main_frame, wrap=tk.WORD,
-                                    bg='#3d1f1f' if is_error else '#2b2b2b',
-                                    fg=text_fg,
-                                    font=('Segoe UI', 11), relief='flat',
-                                    width=width // 9, height=text_height,
-                                    borderwidth=0, highlightthickness=0)
-        self.tooltip_text.insert('1.0', translated)
-        self.tooltip_text.config(state='disabled') # Read-only but selectable
-        self.tooltip_text.pack(side=TOP, fill=BOTH, expand=True)
-
-        # Mouse wheel scroll
-        self.tooltip_text.bind('<MouseWheel>',
-            lambda e: self.tooltip_text.yview_scroll(int(-1*(e.delta/120)), "units"))
-
-        # Position near mouse
-        # Use captured position from when hotkey was pressed
-        mouse_x = self._last_mouse_x
-        mouse_y = self._last_mouse_y
-        
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        taskbar_margin = 50  # Space for taskbar
-
-        # 1. Calculate X (Horizontal)
-        x = mouse_x + 15
-        if x + width > screen_width - 10:
-            x = mouse_x - width - 15
-        x = max(10, min(x, screen_width - width - 10))
-
-        # 2. Calculate Y (Vertical) and Adjust Height
-        # Default preference: Below the mouse
-        y = mouse_y + 20
-        
-        # Calculate safe area
-        safe_top = 10
-        safe_bottom = screen_height - taskbar_margin
-        max_safe_height = safe_bottom - safe_top
-        
-        # Case 1: Content is taller than the entire safe screen area
-        if height >= max_safe_height:
-            height = max_safe_height
-            y = safe_top
-        
-        # Case 2: Content fits on screen, but need to decide position relative to mouse
-        else:
-            space_below = safe_bottom - y
-            
-            if height <= space_below:
-                # Fits below perfectly
-                pass 
-            else:
-                # Try above
-                y_above = mouse_y - height - 20
-                if y_above >= safe_top:
-                    y = y_above
-                else:
-                    # Doesn't fit cleanly above or below -> Pin to bottom safe edge
-                    y = safe_bottom - height
-                    # Double check top edge
-                    if y < safe_top:
-                        y = safe_top
-                        height = max_safe_height
-
-        self.tooltip.geometry(f"{width}x{height}+{int(x)}+{int(y)}")
-
-        # Bindings
-        self.tooltip.bind('<Escape>', lambda e: on_tooltip_close())
-
-    def _start_move(self, event):
-        """Record start position for dragging using screen coordinates."""
-        self._drag_x = event.x_root
-        self._drag_y = event.y_root
-
-    def _on_drag(self, event):
-        """Handle dragging of the tooltip using screen coordinates."""
-        if not self.tooltip:
+        # Check if trial quota is exhausted - show dialog instead of tooltip
+        if trial_info and trial_info.get('is_exhausted'):
+            self._show_trial_exhausted()
             return
 
-        # Calculate delta using screen coordinates (x_root, y_root)
-        deltax = event.x_root - self._drag_x
-        deltay = event.y_root - self._drag_y
-
-        # Update reference point
-        self._drag_x = event.x_root
-        self._drag_y = event.y_root
-
-        # Move window
-        x = self.tooltip.winfo_x() + deltax
-        y = self.tooltip.winfo_y() + deltay
-        self.tooltip.geometry(f"+{x}+{y}")
-
-    def _on_tooltip_focus_out(self, event):
-        """Handle tooltip losing focus."""
-        if self.tooltip:
-            # Immediately close instead of using after()
-            self.close_tooltip()
+        self.tooltip_manager.show(translated, target_lang, trial_info)
 
     def close_tooltip(self):
         """Close the tooltip."""
-        if self.tooltip:
-            try:
-                if self.tooltip.winfo_exists():
-                    self.tooltip.destroy()
-            except tk.TclError:
-                pass  # Window already destroyed
-            self.tooltip = None
+        self.tooltip_manager.close()
 
-    def copy_from_tooltip(self):
-        """Copy translation from tooltip to clipboard."""
+    def _on_tooltip_copy(self):
+        """Handle copy from tooltip."""
         pyperclip.copy(self.current_translated)
-        self.tooltip_copy_btn.configure(text="Copied!")
+        self.tooltip_manager.set_copy_button_text("Copied!")
         self.toast.show_success("Copied to clipboard!")
-        if self.tooltip:
-            self.tooltip.after(1000, lambda: self._reset_copy_btn())
+        # Reset button text after 1 second
+        self.root.after(1000, lambda: self.tooltip_manager.set_copy_button_text("Copy"))
 
-    def _reset_copy_btn(self):
-        """Reset copy button text."""
-        if self.tooltip and self.tooltip_copy_btn:
-            try:
-                self.tooltip_copy_btn.configure(text="Copy")
-            except tk.TclError:
-                pass  # Widget destroyed
-
-    def open_full_translator(self):
-        """Close tooltip and open full translator window."""
+    def _on_tooltip_open_translator(self):
+        """Handle open translator from tooltip."""
         self.close_tooltip()
         self.show_popup(self.current_original, self.current_translated, self.current_target_lang)
 
@@ -531,7 +309,7 @@ class TranslatorApp:
 
         # Use tk.Toplevel for better compatibility
         self.popup = tk.Toplevel(self.root)
-        self.popup.title("AI Translator")
+        self.popup.title("CrossTrans")
         self.popup.configure(bg='#2b2b2b')
 
         # Focus handlers for topmost behavior
@@ -561,6 +339,10 @@ class TranslatorApp:
         x = (screen_width - window_width) // 2
         y = (screen_height - window_height) // 2
         self.popup.geometry(f"{window_width}x{window_height}+{x}+{y}")
+
+        # Apply dark title bar (Windows 10/11)
+        self.popup.update_idletasks()  # Ensure window is created
+        set_dark_title_bar(self.popup)
 
         if HAS_TTKBOOTSTRAP:
             main_frame = ttk.Frame(self.popup, padding=20)
@@ -613,15 +395,6 @@ class TranslatorApp:
                                          command=self._open_in_gemini, width=15)
         self.gemini_btn.pack(side=LEFT)
 
-        # Screenshot button (if vision enabled)
-        if self.config.get('vision_enabled', False):
-            if HAS_TTKBOOTSTRAP:
-                ttk.Button(btn_frame, text="📷 Screenshot", command=self._start_screenshot_ocr,
-                           bootstyle="warning-outline", width=12).pack(side=LEFT, padx=10)
-            else:
-                ttk.Button(btn_frame, text="📷 Screenshot", command=self._start_screenshot_ocr,
-                           width=12).pack(side=LEFT, padx=10)
-
         # History button
         if HAS_TTKBOOTSTRAP:
             ttk.Button(btn_frame, text="History", command=self._open_history,
@@ -653,6 +426,16 @@ class TranslatorApp:
                 self.popup.update_idletasks()
                 self.attachment_area = AttachmentArea(content_frame, self.config, on_change=None)
                 self.attachment_area.pack(fill=X, pady=(0, 10))
+
+                # Add Screenshot button to attachment area header (before Clear All)
+                if vision_enabled:
+                    screenshot_kwargs = {"text": "📷 Screenshot", "command": self._start_screenshot_ocr, "width": 12}
+                    if HAS_TTKBOOTSTRAP:
+                        screenshot_kwargs["bootstyle"] = "warning-outline"
+                    self.screenshot_btn = ttk.Button(self.attachment_area.top_frame, **screenshot_kwargs)
+                    self.screenshot_btn.pack(side=RIGHT, padx=(0, 5))
+                    # Store reference for clear_btn positioning
+                    self.attachment_area._screenshot_btn = self.screenshot_btn
             except Exception as e:
                 logging.error(f"Error initializing AttachmentArea: {e}")
                 self.attachment_area = None
@@ -746,7 +529,17 @@ class TranslatorApp:
         self.custom_prompt_text.bind('<FocusOut>', on_custom_focus_out)
 
         # ===== TRANSLATION OUTPUT =====
-        ttk.Label(content_frame, text="Translation:", font=('Segoe UI', 10)).pack(anchor='w')
+        trans_header = ttk.Frame(content_frame)
+        trans_header.pack(fill=tk.X, anchor='w')
+
+        ttk.Label(trans_header, text="Translation:", font=('Segoe UI', 10)).pack(side=tk.LEFT)
+
+        # Expand button
+        expand_kwargs = {"text": "⛶ Expand", "command": self._open_expanded_translation, "width": 10}
+        if HAS_TTKBOOTSTRAP:
+            expand_kwargs["bootstyle"] = "info-outline"
+        self.expand_btn = ttk.Button(trans_header, **expand_kwargs)
+        self.expand_btn.pack(side=tk.RIGHT)
 
         self.trans_text = tk.Text(content_frame, height=10, wrap=tk.WORD,
                                   bg='#2b2b2b', fg='#ffffff',
@@ -758,38 +551,8 @@ class TranslatorApp:
         self.trans_text.bind('<MouseWheel>',
             lambda e: self.trans_text.yview_scroll(int(-1*(e.delta/120)), "units"))
 
-        # Enable DnD for popup window
-        self.popup.update_idletasks()  # Ensure window is fully realized
-
-        # Debug: Log DnD availability
-        logging.info(f"HAS_DND={HAS_DND}, HAS_WINDND={HAS_WINDND}")
-
-        # Use windnd - it's the most reliable for Windows Toplevel windows
-        if HAS_WINDND:
-            def setup_windnd():
-                if not self.popup or not self.popup.winfo_exists():
-                    return
-                try:
-                    # Force window to be fully realized
-                    self.popup.update()
-                    hwnd = self.popup.winfo_id()
-                    logging.info(f"Setting up windnd for popup HWND: {hwnd}")
-
-                    # Hook using windnd - callback will put files in queue
-                    windnd.hook_dropfiles(self.popup, self._on_windnd_drop_direct)
-                    logging.info("windnd drag-and-drop enabled for popup")
-
-                    # Start queue checker on main thread to process dropped files
-                    self.root.after(50, self._check_drop_queue)
-                    logging.info("Drop queue checker started")
-
-                except Exception as e:
-                    logging.error(f"Failed to setup windnd: {e}")
-                    import traceback
-                    traceback.print_exc()
-
-            # Delay to ensure window is fully realized
-            self.popup.after(300, setup_windnd)
+        # Enable DnD for popup window - delay to ensure window is fully realized
+        self.popup.after(300, lambda: self._setup_drop_handling(self.popup))
 
         self.popup.focus_force()
 
@@ -863,10 +626,15 @@ class TranslatorApp:
     def _do_retranslate(self):
         """Perform translation from popup."""
         original = self.original_text.get('1.0', tk.END).strip()
-        
+
         # Check for attachments
         attachments = self.attachment_area.get_attachments() if (hasattr(self, 'attachment_area') and self.attachment_area) else []
         has_attachments = len(attachments) > 0
+
+        # Check if in trial mode and trying to use file/image translation
+        if has_attachments and self.is_trial_mode():
+            self._show_trial_feature_blocked("File/Image translation")
+            return
 
         if not original and not has_attachments:
             return
@@ -877,8 +645,8 @@ class TranslatorApp:
         if custom_prompt == placeholder:
             custom_prompt = ""
 
-        self.translate_btn.configure(text="⏳ Translating...", state='disabled')
-        self.popup.update()
+        self.translate_btn.configure(state='disabled')
+        self._start_translate_animation()
 
         def translate_thread():
             translated = ""
@@ -971,12 +739,12 @@ Return your response in this EXACT format:
 
 ===TRANSLATION===
 **[filename1]:**
-[translated text]
+[translated text in {self.selected_language}]
 
 **[filename2]:**
-[translated text]
+[translated text in {self.selected_language}]
 
-Process ALL files. Extract actual text from images (OCR), do not describe them."""
+IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Extract actual text from images (OCR), do not describe them."""
 
                     # Single API call with all images + file contents
                     result = self.translation_service.api_manager.translate_multimodal(
@@ -1000,6 +768,12 @@ Process ALL files. Extract actual text from images (OCR), do not describe them."
                         # AI didn't follow format, use full result as translation
                         translated = result
 
+                    # Save to history for multimodal translations
+                    source_text = original if original else f"[{len(attachments)} attachment(s)]"
+                    self.translation_service.history_manager.add_entry(
+                        source_text, translated, self.selected_language, source_type="multimodal"
+                    )
+
                 except Exception as e:
                     translated = f"Error processing attachments: {str(e)}"
             else:
@@ -1018,6 +792,9 @@ Process ALL files. Extract actual text from images (OCR), do not describe them."
 
     def _update_translation_with_original(self, translated: str, extracted_original: str = ""):
         """Update translation result and optionally the original text in popup."""
+        # Stop animation
+        self._stop_translate_animation()
+
         # Update original text box if extracted_original is provided
         if extracted_original:
             self.original_text.delete('1.0', tk.END)
@@ -1030,6 +807,205 @@ Process ALL files. Extract actual text from images (OCR), do not describe them."
         self.trans_text.config(state='disabled')  # Make read-only again
         self.translate_btn.configure(text=f"Translate → {self.selected_language}",
                                      state='normal')
+
+    def _start_translate_animation(self):
+        """Start the translation button animation (dots + pulse)."""
+        self._translate_animation_running = True
+        self._translate_animation_step = 0
+        self._translate_pulse_level = 0
+        self._translate_pulse_direction = 1
+        self._animate_translate_button()
+
+    def _stop_translate_animation(self):
+        """Stop the translation button animation."""
+        self._translate_animation_running = False
+        # Reset button style
+        if hasattr(self, 'translate_btn') and self.translate_btn:
+            try:
+                if HAS_TTKBOOTSTRAP:
+                    self.translate_btn.configure(bootstyle="success")
+            except tk.TclError:
+                pass
+
+    def _animate_translate_button(self):
+        """Animate the translate button with dots and pulse effect."""
+        if not self._translate_animation_running:
+            return
+
+        if not hasattr(self, 'translate_btn') or not self.translate_btn:
+            return
+
+        try:
+            # Dots animation: use fixed-width patterns to prevent text shifting
+            # Each pattern has same visual width (dots + spaces)
+            dots_patterns = [
+                "⏳ Translating   ",  # 0 dots + 3 spaces
+                "⏳ Translating.  ",  # 1 dot + 2 spaces
+                "⏳ Translating.. ",  # 2 dots + 1 space
+                "⏳ Translating...",  # 3 dots + 0 spaces
+            ]
+            text = dots_patterns[self._translate_animation_step % 4]
+            self.translate_btn.configure(text=text)
+
+            # Pulse effect using bootstyle colors (runs faster than dots)
+            if HAS_TTKBOOTSTRAP:
+                # Cycle through different green shades
+                pulse_styles = ["success", "success", "info", "success"]
+                style_idx = (self._translate_pulse_level // 2) % len(pulse_styles)
+                self.translate_btn.configure(bootstyle=pulse_styles[style_idx])
+
+                # Update pulse level
+                self._translate_pulse_level += self._translate_pulse_direction
+                if self._translate_pulse_level >= 6:
+                    self._translate_pulse_direction = -1
+                elif self._translate_pulse_level <= 0:
+                    self._translate_pulse_direction = 1
+
+            # Increment step
+            self._translate_animation_step += 1
+
+            # Schedule next frame (500ms for dots - slower animation)
+            if self.popup and self.popup.winfo_exists():
+                self.popup.after(500, self._animate_translate_button)
+
+        except tk.TclError:
+            # Widget destroyed
+            self._translate_animation_running = False
+
+    def _open_expanded_translation(self):
+        """Open translation in expanded fullscreen window."""
+        translated = self.trans_text.get('1.0', tk.END).strip()
+        if not translated:
+            self.toast.show_warning("No translation to expand")
+            return
+
+        # Create expanded window
+        expanded = tk.Toplevel(self.root)
+        expanded.title(f"Translation - {self.selected_language}")
+        expanded.configure(bg='#1e1e1e')
+
+        # Get screen dimensions for fullscreen
+        screen_width = expanded.winfo_screenwidth()
+        screen_height = expanded.winfo_screenheight()
+
+        # Start with 80% of screen size, centered
+        window_width = int(screen_width * 0.8)
+        window_height = int(screen_height * 0.8)
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+        expanded.geometry(f"{window_width}x{window_height}+{x}+{y}")
+
+        # Apply dark title bar (Windows 10/11)
+        expanded.update_idletasks()
+        set_dark_title_bar(expanded)
+
+        # Allow resizing
+        expanded.minsize(600, 400)
+
+        # Main frame with padding
+        main_frame = ttk.Frame(expanded, padding=15)
+        main_frame.pack(fill=BOTH, expand=True)
+
+        # Header with title and controls
+        header_frame = ttk.Frame(main_frame)
+        header_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # Title
+        title_text = f"Translation to {self.selected_language}"
+        ttk.Label(header_frame, text=title_text, font=('Segoe UI', 14, 'bold')).pack(side=tk.LEFT)
+
+        # Window control buttons
+        btn_frame = ttk.Frame(header_frame)
+        btn_frame.pack(side=tk.RIGHT)
+
+        # Fullscreen toggle button
+        is_fullscreen = [False]  # Use list to allow modification in nested function
+
+        def toggle_fullscreen():
+            is_fullscreen[0] = not is_fullscreen[0]
+            expanded.attributes('-fullscreen', is_fullscreen[0])
+            if is_fullscreen[0]:
+                fullscreen_btn.configure(text="⧉ Window")
+            else:
+                fullscreen_btn.configure(text="⛶ Fullscreen")
+
+        fullscreen_kwargs = {"text": "⛶ Fullscreen", "command": toggle_fullscreen, "width": 12}
+        if HAS_TTKBOOTSTRAP:
+            fullscreen_kwargs["bootstyle"] = "info-outline"
+        fullscreen_btn = ttk.Button(btn_frame, **fullscreen_kwargs)
+        fullscreen_btn.pack(side=tk.LEFT, padx=5)
+
+        # Copy button
+        def copy_expanded():
+            text = expanded_text.get('1.0', tk.END).strip()
+            if text:
+                pyperclip.copy(text)
+                copy_exp_btn.configure(text="✓ Copied!")
+                self.toast.show_success("Copied to clipboard!")
+                expanded.after(1500, lambda: copy_exp_btn.configure(text="📋 Copy"))
+
+        copy_kwargs = {"text": "📋 Copy", "command": copy_expanded, "width": 10}
+        if HAS_TTKBOOTSTRAP:
+            copy_kwargs["bootstyle"] = "primary-outline"
+        copy_exp_btn = ttk.Button(btn_frame, **copy_kwargs)
+        copy_exp_btn.pack(side=tk.LEFT, padx=5)
+
+        # Close button
+        close_kwargs = {"text": "✕ Close", "command": expanded.destroy, "width": 10}
+        if HAS_TTKBOOTSTRAP:
+            close_kwargs["bootstyle"] = "secondary-outline"
+        ttk.Button(btn_frame, **close_kwargs).pack(side=tk.LEFT, padx=5)
+
+        # Text area (no scrollbar, use mouse wheel)
+        text_frame = ttk.Frame(main_frame)
+        text_frame.pack(fill=BOTH, expand=True)
+
+        # Text widget - editable for selection/copy
+        expanded_text = tk.Text(text_frame, wrap=tk.WORD,
+                                bg='#2b2b2b', fg='#ffffff',
+                                font=('Segoe UI', 14), relief='flat',
+                                padx=20, pady=20,
+                                insertbackground='white',
+                                selectbackground='#0d6efd',
+                                selectforeground='white')
+        expanded_text.insert('1.0', translated)
+        expanded_text.pack(fill=BOTH, expand=True)
+
+        # Mouse wheel scroll only
+        expanded_text.bind('<MouseWheel>',
+            lambda e: expanded_text.yview_scroll(int(-1*(e.delta/120)), "units"))
+
+        # Keyboard shortcuts
+        expanded.bind('<Escape>', lambda e: expanded.destroy())
+        expanded.bind('<F11>', lambda e: toggle_fullscreen())
+        expanded.bind('<Control-c>', lambda e: copy_expanded())
+
+        # Status bar
+        status_frame = ttk.Frame(main_frame)
+        status_frame.pack(fill=tk.X, pady=(10, 0))
+
+        # Character/word count
+        def update_status(*args):
+            text = expanded_text.get('1.0', 'end-1c')
+            chars = len(text)
+            words = len(text.split())
+            lines = text.count('\n') + 1
+            status_label.configure(text=f"Characters: {chars:,} | Words: {words:,} | Lines: {lines:,}")
+
+        status_label = ttk.Label(status_frame, text="", font=('Segoe UI', 9))
+        status_label.pack(side=tk.LEFT)
+        update_status()
+
+        # Shortcut hints
+        ttk.Label(status_frame, text="F11: Fullscreen | Esc: Close | Ctrl+C: Copy",
+                  font=('Segoe UI', 9), foreground='#888888').pack(side=tk.RIGHT)
+
+        # Update status on text change
+        expanded_text.bind('<KeyRelease>', update_status)
+
+        # Focus the window
+        expanded.focus_force()
+        expanded_text.focus_set()
 
     def _copy_translation(self):
         """Copy translation to clipboard."""
@@ -1075,13 +1051,18 @@ Process ALL files. Extract actual text from images (OCR), do not describe them."
 
     def _start_screenshot_ocr(self):
         """Start screenshot capture process."""
+        # Check if in trial mode - screenshot OCR not available
+        if self.is_trial_mode():
+            self._show_trial_feature_blocked("Screenshot OCR")
+            return
+
         if not self.config.get('vision_enabled', False):
             self.show_tooltip("", "Error: Vision Mode is disabled.\nPlease enable it in Settings to use Screenshot Translate.", "Error")
             return
             
         # Hide windows to capture clean screenshot
         if self.popup: self.popup.withdraw()
-        if self.tooltip: self.tooltip.withdraw()
+        self.tooltip_manager.close()  # Close tooltip before screenshot
         if self.settings_window and self.settings_window.window.winfo_exists():
             self.settings_window.window.withdraw()
             
@@ -1170,318 +1151,28 @@ Response format:
         except Exception as e:
             self.root.after(0, lambda: self.show_popup("Error processing image", str(e), self.selected_language))
 
-    def _setup_wm_dropfiles_handler(self, hwnd):
-        """Setup Windows message handler for WM_DROPFILES using ctypes subclassing."""
-        import ctypes
-        from ctypes import wintypes
+    def _setup_drop_handling(self, popup_window):
+        """Setup drag-and-drop handling for the popup window."""
+        # Configure drop handler with current popup and attachment area
+        self.drop_handler.set_popup(popup_window)
+        self.drop_handler.set_attachment_area(
+            self.attachment_area if hasattr(self, 'attachment_area') else None
+        )
 
-        # Windows constants
-        WM_DROPFILES = 0x0233
-        GWL_WNDPROC = -4
-
-        # Function signatures
-        WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_long, wintypes.HWND, wintypes.UINT,
-                                      wintypes.WPARAM, wintypes.LPARAM)
-
-        user32 = ctypes.windll.user32
-        shell32 = ctypes.windll.shell32
-
-        # Get original window procedure
-        SetWindowLongPtrW = user32.SetWindowLongPtrW
-        SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, WNDPROC]
-        SetWindowLongPtrW.restype = WNDPROC
-
-        CallWindowProcW = user32.CallWindowProcW
-        CallWindowProcW.argtypes = [WNDPROC, wintypes.HWND, wintypes.UINT,
-                                    wintypes.WPARAM, wintypes.LPARAM]
-        CallWindowProcW.restype = ctypes.c_long
-
-        # DragQueryFileW
-        DragQueryFileW = shell32.DragQueryFileW
-        DragQueryFileW.argtypes = [wintypes.HANDLE, wintypes.UINT, wintypes.LPWSTR, wintypes.UINT]
-        DragQueryFileW.restype = wintypes.UINT
-
-        DragFinish = shell32.DragFinish
-        DragFinish.argtypes = [wintypes.HANDLE]
-
-        # Store original wndproc
-        self._original_wndproc = None
-
-        def wndproc(hwnd, msg, wparam, lparam):
-            if msg == WM_DROPFILES:
-                logging.info("WM_DROPFILES received!")
-                hdrop = wparam
-                try:
-                    # Get number of files
-                    file_count = DragQueryFileW(hdrop, 0xFFFFFFFF, None, 0)
-                    logging.info(f"Dropped {file_count} files")
-
-                    paths = []
-                    for i in range(file_count):
-                        # Get required buffer size
-                        length = DragQueryFileW(hdrop, i, None, 0)
-                        buffer = ctypes.create_unicode_buffer(length + 1)
-                        DragQueryFileW(hdrop, i, buffer, length + 1)
-                        paths.append(buffer.value)
-                        logging.info(f"  File {i}: {buffer.value}")
-
-                    DragFinish(hdrop)
-
-                    # Process files on main thread
-                    if paths:
-                        self.root.after(0, lambda p=paths: self._process_dropped_files_direct(p))
-
-                except Exception as e:
-                    logging.error(f"Error processing WM_DROPFILES: {e}")
-                    import traceback
-                    traceback.print_exc()
-
-                return 0
-
-            # Call original window procedure
-            return CallWindowProcW(self._original_wndproc, hwnd, msg, wparam, lparam)
-
-        # Keep reference to prevent garbage collection
-        self._wndproc_callback = WNDPROC(wndproc)
-
-        # Subclass the window
-        self._original_wndproc = SetWindowLongPtrW(hwnd, GWL_WNDPROC, self._wndproc_callback)
-        logging.info(f"Window subclassed, original wndproc: {self._original_wndproc}")
-
-    def _process_dropped_files_direct(self, paths):
-        """Process files dropped via WM_DROPFILES."""
-        logging.info(f"Processing {len(paths)} dropped files (direct)")
-
-        if not self.popup or not self.popup.winfo_exists():
-            logging.warning("Popup window no longer exists")
-            return
-
-        if not hasattr(self, 'attachment_area') or not self.attachment_area:
-            logging.warning("No attachment area available")
-            if HAS_TTKBOOTSTRAP:
-                from ttkbootstrap.dialogs import Messagebox
-                Messagebox.show_warning(
-                    "Cannot add files.\n\n"
-                    "Upload features are not enabled.\n"
-                    "Please go to Settings > API Key tab and test your API to enable upload features.",
-                    title="Upload Disabled",
-                    parent=self.popup
-                )
-            else:
-                from tkinter import messagebox
-                messagebox.showwarning(
-                    "Upload Disabled",
-                    "Cannot add files.\n\n"
-                    "Upload features are not enabled.\n"
-                    "Please go to Settings > API Key tab and test your API to enable upload features.",
-                    parent=self.popup
-                )
-            return
-
-        for path in paths:
-            try:
-                result = self.attachment_area.add_file(path, show_warning=True)
-                logging.info(f"add_file result for {path}: {result}")
-            except Exception as e:
-                logging.warning(f"Error adding dropped file {path}: {e}")
-
-    def _on_tkdnd_drop(self, event):
-        """Handle file drops via tkinterdnd2.
-
-        This runs on the main Tkinter thread, so we can directly call Tkinter methods.
-        """
-        logging.info(f"tkinterdnd2 drop received: {event.data}")
-
-        if not event.data:
-            logging.warning("Drop event has no data")
-            return
-
-        # Parse file paths from tkinterdnd2 format
-        # Handles paths with spaces wrapped in braces {}
-        raw_data = event.data
-        paths = []
-
-        if '{' in raw_data:
-            # Parse braced paths
-            current = ""
-            in_brace = False
-            for char in raw_data:
-                if char == '{':
-                    in_brace = True
-                elif char == '}':
-                    in_brace = False
-                    if current:
-                        paths.append(current)
-                        current = ""
-                elif char == ' ' and not in_brace:
-                    if current:
-                        paths.append(current)
-                        current = ""
-                else:
-                    current += char
-            if current:
-                paths.append(current)
+        # Use tkinterdnd2 if available (built into root window), otherwise use windnd
+        # NOTE: Only use ONE drop method to avoid conflicts that can break keyboard input
+        if HAS_DND:
+            # tkinterdnd2 is already set up on AttachmentArea, just need queue checker
+            logging.info("Using tkinterdnd2 for drag-and-drop (via AttachmentArea)")
+        elif HAS_WINDND:
+            # Use windnd as fallback for Toplevel windows
+            self.drop_handler.setup_windnd(popup_window)
+            logging.info("Using windnd for drag-and-drop")
         else:
-            paths = raw_data.split()
+            logging.warning("No drag-and-drop library available")
 
-        logging.info(f"Parsed paths: {paths}")
-
-        # Process directly since we're on main thread
-        self._process_tkdnd_files(paths)
-
-    def _process_tkdnd_files(self, paths):
-        """Process files dropped via tkinterdnd2."""
-        if not self.popup or not self.popup.winfo_exists():
-            logging.warning("Popup window no longer exists")
-            return
-
-        if not hasattr(self, 'attachment_area') or not self.attachment_area:
-            logging.warning("No attachment area available")
-            if HAS_TTKBOOTSTRAP:
-                from ttkbootstrap.dialogs import Messagebox
-                Messagebox.show_warning(
-                    "Cannot add files.\n\n"
-                    "Upload features are not enabled.\n"
-                    "Please go to Settings > API Key tab and test your API to enable upload features.",
-                    title="Upload Disabled",
-                    parent=self.popup
-                )
-            else:
-                from tkinter import messagebox
-                messagebox.showwarning(
-                    "Upload Disabled",
-                    "Cannot add files.\n\n"
-                    "Upload features are not enabled.\n"
-                    "Please go to Settings > API Key tab and test your API to enable upload features.",
-                    parent=self.popup
-                )
-            return
-
-        for path in paths:
-            try:
-                result = self.attachment_area.add_file(path, show_warning=True)
-                logging.info(f"add_file result for {path}: {result}")
-            except Exception as e:
-                logging.warning(f"Error adding dropped file {path}: {e}")
-
-    def _on_windnd_drop_direct(self, file_paths):
-        """Handle file drops via windnd.
-
-        CRITICAL: This callback runs on a WINDOWS THREAD, not the Python main thread.
-        We MUST NOT call ANY Tkinter methods here (including root.after()).
-        Only use thread-safe operations: logging and queue.put().
-        """
-        try:
-            # logging is thread-safe
-            logging.info(f"windnd drop received: {len(file_paths)} files")
-
-            # Decode paths (windnd returns bytes)
-            paths = []
-            for fp in file_paths:
-                if isinstance(fp, bytes):
-                    path = fp.decode('utf-8', errors='replace')
-                else:
-                    path = str(fp)
-                paths.append(path)
-                logging.info(f"  Dropped file: {path}")
-
-            # Put in thread-safe queue - DO NOT call any Tkinter methods!
-            self._drop_queue.put(paths)
-            logging.info("Files added to drop queue")
-
-        except Exception as e:
-            logging.error(f"Error in windnd drop handler: {e}")
-
-    def _on_windnd_drop(self, file_paths):
-        """Handle file drops via windnd - use queue to avoid GIL issues.
-
-        IMPORTANT: This callback runs from a Windows thread, NOT the main Python thread.
-        We MUST NOT call any Tkinter methods here (including root.after()).
-        Instead, we put the files in a thread-safe queue that the main thread checks.
-        """
-        # Just put files in queue - no Tkinter calls allowed here!
-        try:
-            # Note: logging is thread-safe in Python
-            logging.info(f"windnd drop received: {len(file_paths)} files")
-            self._drop_queue.put(file_paths)
-        except Exception as e:
-            logging.error(f"Error in windnd drop handler: {e}")
-
-    def _check_drop_queue(self):
-        """Check drop queue for files (runs on main Tkinter thread)."""
-        try:
-            while True:
-                paths = self._drop_queue.get_nowait()
-                logging.info(f"Processing drop queue: {len(paths)} files")
-                # Paths are already decoded strings from _on_windnd_drop_direct
-                self._process_dropped_files_direct(paths)
-        except queue.Empty:
-            pass
-        except Exception as e:
-            logging.error(f"Error checking drop queue: {e}")
-            import traceback
-            traceback.print_exc()
-
-        # Schedule next check if running and popup exists
-        if self.running and self.popup:
-            try:
-                if self.popup.winfo_exists():
-                    self.root.after(50, self._check_drop_queue)
-            except tk.TclError:
-                pass  # Popup was closed
-            except Exception as e:
-                logging.debug(f"Error scheduling next queue check: {e}")
-
-    def _process_dropped_files(self, file_paths):
-        """Process dropped files on main thread."""
-        logging.info(f"Processing {len(file_paths)} dropped files")
-        try:
-            # Verify popup and attachment_area still exist
-            if not self.popup or not self.popup.winfo_exists():
-                logging.warning("Popup window no longer exists")
-                return
-            if not hasattr(self, 'attachment_area') or not self.attachment_area:
-                logging.warning("No attachment area available - vision/file features may be disabled")
-                # Show user-friendly message
-                if HAS_TTKBOOTSTRAP:
-                    from ttkbootstrap.dialogs import Messagebox
-                    Messagebox.show_warning(
-                        "Cannot add files.\n\n"
-                        "Upload features are not enabled.\n"
-                        "Please go to Settings > API Key tab and test your API to enable upload features.",
-                        title="Upload Disabled",
-                        parent=self.popup
-                    )
-                else:
-                    from tkinter import messagebox
-                    messagebox.showwarning(
-                        "Upload Disabled",
-                        "Cannot add files.\n\n"
-                        "Upload features are not enabled.\n"
-                        "Please go to Settings > API Key tab and test your API to enable upload features.",
-                        parent=self.popup
-                    )
-                return
-
-            # windnd returns list of bytes, decode to strings
-            paths = []
-            for fp in file_paths:
-                if isinstance(fp, bytes):
-                    paths.append(fp.decode('utf-8', errors='replace'))
-                else:
-                    paths.append(str(fp))
-
-            logging.info(f"Decoded paths: {paths}")
-
-            # Add files to attachment area
-            for path in paths:
-                try:
-                    result = self.attachment_area.add_file(path, show_warning=True)
-                    logging.info(f"add_file result for {path}: {result}")
-                except Exception as e:
-                    logging.warning(f"Error adding dropped file {path}: {e}")
-        except Exception as e:
-            logging.error(f"Error processing dropped files: {e}")
+        # Start queue checker for windnd (processes drops from Windows thread)
+        self.drop_handler.start_queue_checker()
 
     def show_settings(self, icon=None, item=None):
         """Show settings window."""
@@ -1514,7 +1205,11 @@ Response format:
                 from tkinter import messagebox
                 messagebox.showinfo("Saved", "Settings saved successfully!", parent=self.settings_window.window)
 
-        self.settings_window = SettingsWindow(self.root, self.config, on_settings_save)
+        def on_api_change():
+            """Called when API keys change - reconfigure to update trial mode status."""
+            self.translation_service.reconfigure()
+
+        self.settings_window = SettingsWindow(self.root, self.config, on_settings_save, on_api_change)
 
     def _open_settings_from_error(self):
         """Open settings from error tooltip."""
@@ -1523,62 +1218,11 @@ Response format:
 
     def _refresh_tray_menu(self):
         """Refresh tray menu to reflect updated hotkeys."""
-        if self.tray_icon:
-            # Build new menu items - Settings is right below Open Translator
-            menu_items = [
-                MenuItem('Open Translator', self.show_main_window, default=True),
-                MenuItem('Settings', self.show_settings),
-                MenuItem('─────────────', lambda: None, enabled=False),
-            ]
-
-            # Add all hotkeys (default + custom) from config
-            all_hotkeys = self.config.get_all_hotkeys()
-            for language, hotkey in all_hotkeys.items():
-                display_hotkey = '+'.join(part.capitalize() for part in hotkey.split('+'))
-                menu_items.append(
-                    MenuItem(f'{display_hotkey} → {language}', lambda: None, enabled=False)
-                )
-
-            # Quit is at the bottom, separated from hotkeys
-            menu_items.extend([
-                MenuItem('─────────────', lambda: None, enabled=False),
-                MenuItem('Quit', self.quit_app)
-            ])
-
-            self.tray_icon.menu = Menu(*menu_items)
+        self.tray_manager.refresh_menu()
 
     def _create_tray_icon(self):
         """Create system tray icon."""
-        # Create icon image
-        image = Image.new('RGB', (64, 64), color='#0d6efd')
-        draw = ImageDraw.Draw(image)
-        draw.text((18, 18), "T", fill='white')
-
-        # Build menu items dynamically from config
-        menu_items = [
-            MenuItem('Open Translator', self.show_main_window, default=True),
-            MenuItem('Settings', self.show_settings),
-            MenuItem('─────────────', lambda: None, enabled=False),
-        ]
-
-        # Add all hotkeys (default + custom) from config
-        all_hotkeys = self.config.get_all_hotkeys()
-        for language, hotkey in all_hotkeys.items():
-            # Format hotkey for display (e.g., "win+alt+v" → "Win+Alt+V")
-            display_hotkey = '+'.join(part.capitalize() for part in hotkey.split('+'))
-            menu_items.append(
-                MenuItem(f'{display_hotkey} → {language}', lambda: None, enabled=False)
-            )
-
-        menu_items.extend([
-            MenuItem('─────────────', lambda: None, enabled=False),
-            MenuItem('Quit', self.quit_app)
-        ])
-
-        menu = Menu(*menu_items)
-
-        self.tray_icon = Icon("AI Translator", image,
-                             f"AI Translator v{VERSION}", menu)
+        self.tray_icon = self.tray_manager.create()
         return self.tray_icon
 
     def quit_app(self, icon=None, item=None):
@@ -1592,6 +1236,12 @@ Response format:
         except Exception as e:
             logging.error(f"Error cleaning up hotkeys: {e}")
 
+        # Stop drop handler
+        try:
+            self.drop_handler.stop()
+        except Exception as e:
+            logging.warning(f"Error stopping drop handler: {e}")
+
         # Close tooltip
         self.close_tooltip()
 
@@ -1604,11 +1254,10 @@ Response format:
                 logging.warning(f"Error destroying popup: {e}")
 
         # Stop tray icon
-        if self.tray_icon:
-            try:
-                self.tray_icon.stop()
-            except Exception as e:
-                logging.warning(f"Error stopping tray: {e}")
+        try:
+            self.tray_manager.stop()
+        except Exception as e:
+            logging.warning(f"Error stopping tray: {e}")
 
         # Quit root window
         try:
@@ -1624,9 +1273,16 @@ Response format:
         """Check translation queue for results with error handling."""
         try:
             while True:
-                original, translated, target_lang = self.translation_service.translation_queue.get_nowait()
+                # Queue item format: (original, translated, target_lang, trial_info)
+                result = self.translation_service.translation_queue.get_nowait()
+                if len(result) == 4:
+                    original, translated, target_lang, trial_info = result
+                else:
+                    # Backward compatibility
+                    original, translated, target_lang = result
+                    trial_info = None
                 if self.running:
-                    self.show_tooltip(original, translated, target_lang)
+                    self.show_tooltip(original, translated, target_lang, trial_info)
         except queue.Empty:
             pass
         except Exception as e:
@@ -1696,6 +1352,18 @@ Response format:
         """Show API error dialog."""
         APIErrorDialog(self.root, on_open_settings=self.show_settings)
 
+    def _show_trial_exhausted(self):
+        """Show trial quota exhausted dialog."""
+        TrialExhaustedDialog(self.root, on_open_settings=self.show_settings)
+
+    def _show_trial_feature_blocked(self, feature_name: str):
+        """Show dialog when user tries to use a feature disabled in trial mode."""
+        TrialFeatureDialog(self.root, feature_name=feature_name, on_open_settings=self.show_settings)
+
+    def is_trial_mode(self) -> bool:
+        """Check if currently in trial mode."""
+        return self.translation_service.is_trial_mode()
+
     def _startup_api_check(self):
         """Perform a one-time API check on startup and cache results."""
         try:
@@ -1738,8 +1406,8 @@ Response format:
     def run(self):
         """Run the application."""
         print("=" * 50)
-        logging.info(f"AI Translator v{VERSION}")
-        print(f"AI Translator v{VERSION}")
+        logging.info(f"CrossTrans v{VERSION}")
+        print(f"CrossTrans v{VERSION}")
         print("=" * 50)
         print()
         print("Hotkeys:")
@@ -1755,9 +1423,8 @@ Response format:
         # Track app start time for watchdog
         self._app_start_time = time.time()
 
-        # Check API key
-        if not self.config.get_api_key():
-            self.root.after(500, self._show_api_error)
+        # Don't show API error on startup if trial mode is available
+        # Trial mode provides 50 free translations/day without API key
 
         # Start hotkey manager thread (registers hotkeys internally)
         self.hotkey_manager.start()

@@ -1,5 +1,5 @@
 """
-File Processor Module for AI Translator.
+File Processor Module for CrossTrans.
 Handles text extraction and translation for supported file formats.
 """
 import os

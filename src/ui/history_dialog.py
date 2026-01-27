@@ -1,6 +1,7 @@
 """
-History Dialog for AI Translator.
+History Dialog for CrossTrans.
 """
+import ctypes
 import tkinter as tk
 from tkinter import BOTH, X, Y, LEFT, RIGHT, TOP, BOTTOM, W, E, NW
 from datetime import datetime
@@ -12,6 +13,25 @@ try:
 except ImportError:
     from tkinter import ttk
     HAS_TTKBOOTSTRAP = False
+
+
+def set_dark_title_bar(window):
+    """Set dark title bar for Windows 10/11 windows."""
+    try:
+        hwnd = ctypes.windll.user32.GetParent(window.winfo_id())
+        if not hwnd:
+            hwnd = window.winfo_id()
+        DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+        DWMWA_CAPTION_COLOR = 35
+        dwmapi = ctypes.windll.dwmapi
+        value = ctypes.c_int(1)
+        dwmapi.DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
+                                     ctypes.byref(value), ctypes.sizeof(value))
+        caption_color = ctypes.c_int(0x002b2b2b)
+        dwmapi.DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR,
+                                     ctypes.byref(caption_color), ctypes.sizeof(caption_color))
+    except Exception:
+        pass
 
 
 class HistoryDialog:
@@ -34,6 +54,9 @@ class HistoryDialog:
         x = (self.window.winfo_screenwidth() - 600) // 2
         y = (self.window.winfo_screenheight() - 700) // 2
         self.window.geometry(f"+{x}+{y}")
+
+        # Apply dark title bar (Windows 10/11)
+        set_dark_title_bar(self.window)
 
         self.window.transient(parent)
         self.window.grab_set()
@@ -83,12 +106,11 @@ class HistoryDialog:
         self.clear_search_btn.pack(side=LEFT, padx=(5, 0))
         self.clear_search_btn.pack_forget()  # Initially hidden
 
-        # List Container (Canvas + Scrollbar)
+        # List Container (Canvas only, no scrollbar)
         list_container = ttk.Frame(self.window)
         list_container.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
 
         self.canvas = tk.Canvas(list_container, bg='#2b2b2b', highlightthickness=0)
-        scrollbar = ttk.Scrollbar(list_container, orient="vertical", command=self.canvas.yview)
         self.scrollable_frame = ttk.Frame(self.canvas)
 
         self.scrollable_frame.bind(
@@ -96,13 +118,10 @@ class HistoryDialog:
             lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         )
 
-        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw", width=560) # Fixed width approx
-        self.canvas.configure(yscrollcommand=scrollbar.set)
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw", width=580)
+        self.canvas.pack(fill=BOTH, expand=True)
 
-        self.canvas.pack(side=LEFT, fill=BOTH, expand=True)
-        scrollbar.pack(side=RIGHT, fill=Y)
-
-        # Mousewheel scrolling
+        # Mousewheel scrolling only
         def _on_mousewheel(event):
             self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
 
@@ -169,7 +188,8 @@ class HistoryDialog:
                 item for item in self.all_history
                 if (search_text in item.get('original', '').lower() or
                     search_text in item.get('translated', '').lower() or
-                    search_text in item.get('target_lang', '').lower())
+                    search_text in item.get('target_lang', '').lower() or
+                    search_text in item.get('source_lang', '').lower())
             ]
         else:
             filtered = self.all_history
@@ -198,14 +218,21 @@ class HistoryDialog:
         top_row = ttk.Frame(frame)
         top_row.pack(fill=X, pady=(0, 5))
 
-        lang = item.get('target_lang', 'Unknown')
+        source_lang = item.get('source_lang', '')
+        target_lang = item.get('target_lang', 'Unknown')
         ts = item.get('timestamp', 0)
         time_str = datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M')
 
-        if HAS_TTKBOOTSTRAP:
-            ttk.Label(top_row, text=lang, bootstyle="info", font=('Segoe UI', 9, 'bold')).pack(side=LEFT)
+        # Language display: Source → Target
+        if source_lang and source_lang != 'Unknown':
+            lang_text = f"{source_lang} → {target_lang}"
         else:
-            ttk.Label(top_row, text=lang, foreground='#17a2b8', font=('Segoe UI', 9, 'bold')).pack(side=LEFT)
+            lang_text = f"→ {target_lang}"
+
+        if HAS_TTKBOOTSTRAP:
+            ttk.Label(top_row, text=lang_text, bootstyle="info", font=('Segoe UI', 9, 'bold')).pack(side=LEFT)
+        else:
+            ttk.Label(top_row, text=lang_text, foreground='#17a2b8', font=('Segoe UI', 9, 'bold')).pack(side=LEFT)
 
         ttk.Label(top_row, text=time_str, foreground='#888888', font=('Segoe UI', 8)).pack(side=RIGHT)
 

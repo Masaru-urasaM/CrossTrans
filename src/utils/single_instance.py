@@ -1,5 +1,5 @@
 """
-Single instance lock for AI Translator.
+Single instance lock for CrossTrans.
 Prevents multiple instances from running simultaneously.
 """
 import socket

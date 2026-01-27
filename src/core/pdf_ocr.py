@@ -1,5 +1,5 @@
 """
-PDF OCR Module for AI Translator.
+PDF OCR Module for CrossTrans.
 Handles text extraction from scanned PDFs using Gemini Vision OCR.
 """
 import os

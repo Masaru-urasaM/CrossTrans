@@ -1,5 +1,5 @@
 """
-Provider Health Tracking Module for AI Translator.
+Provider Health Tracking Module for CrossTrans.
 Tracks success/failure rates and response times for intelligent provider selection.
 """
 import time

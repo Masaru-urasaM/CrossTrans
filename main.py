@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-AI Translator - Main Entry Point
+CrossTrans - Main Entry Point
 
-This is the modular entry point for AI Translator.
+This is the modular entry point for CrossTrans.
 It initializes the application using the refactored module structure.
 
 For backward compatibility, you can still run translator.py directly.
@@ -26,7 +26,7 @@ from src.utils.single_instance import is_already_running
 
 
 def main():
-    """Main entry point for AI Translator."""
+    """Main entry point for CrossTrans."""
     # Setup logging first
     setup_logging()
 
@@ -37,15 +37,15 @@ def main():
         root.withdraw()
         if HAS_TTKBOOTSTRAP:
             Messagebox.show_warning(
-                "AI Translator is already running!\n\n"
+                "CrossTrans is already running!\n\n"
                 "Check the system tray (bottom-right corner).",
-                title="AI Translator"
+                title="CrossTrans"
             )
         else:
             from tkinter import messagebox
             messagebox.showwarning(
-                "AI Translator",
-                "AI Translator is already running!\n\n"
+                "CrossTrans",
+                "CrossTrans is already running!\n\n"
                 "Check the system tray (bottom-right corner)."
             )
         root.destroy()

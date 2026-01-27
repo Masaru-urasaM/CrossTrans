@@ -1,5 +1,5 @@
 """
-Hotkey Manager for AI Translator.
+Hotkey Manager for CrossTrans.
 Uses Windows RegisterHotKey API for global hotkey handling.
 """
 import time

@@ -1,5 +1,5 @@
 """
-Update checker and installer for AI Translator.
+Update checker and installer for CrossTrans.
 """
 import os
 import sys
@@ -22,7 +22,7 @@ def check_for_updates() -> Dict[str, Any]:
         url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
         req = urllib.request.Request(url, headers={
             'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'AITranslator'
+            'User-Agent': 'CrossTrans'
         })
         ssl_context = get_ssl_context_for_url(url)
         with urllib.request.urlopen(req, timeout=10, context=ssl_context) as resp:
@@ -62,9 +62,9 @@ def download_and_install_update(exe_url: str, new_version: str,
             return {'success': False, 'error': 'Auto-update only works with exe version. Please download manually.'}
 
         temp_dir = tempfile.mkdtemp(prefix='ai_translator_update_')
-        new_exe_path = os.path.join(temp_dir, f'AITranslator_v{new_version}.exe')
+        new_exe_path = os.path.join(temp_dir, f'CrossTrans_v{new_version}.exe')
 
-        req = urllib.request.Request(exe_url, headers={'User-Agent': 'AITranslator'})
+        req = urllib.request.Request(exe_url, headers={'User-Agent': 'CrossTrans'})
         ssl_context = get_ssl_context_for_url(exe_url)
 
         with urllib.request.urlopen(req, timeout=60, context=ssl_context) as response:
@@ -86,7 +86,7 @@ def download_and_install_update(exe_url: str, new_version: str,
 
         batch_path = os.path.join(temp_dir, 'update.bat')
         batch_content = f'''@echo off
-echo Updating AI Translator to v{new_version}...
+echo Updating CrossTrans to v{new_version}...
 echo.
 
 REM Wait for the application to close

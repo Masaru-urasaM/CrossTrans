@@ -1,5 +1,5 @@
 """
-Multimodal Processing Module for AI Translator.
+Multimodal Processing Module for CrossTrans.
 Handles image encoding and vision model capabilities.
 """
 import base64
