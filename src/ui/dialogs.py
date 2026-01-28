@@ -18,8 +18,18 @@ except ImportError:
 class APIErrorDialog:
     """Professional error dialog for API key issues."""
 
-    def __init__(self, parent, error_message: str = "", on_open_settings=None):
+    def __init__(self, parent, error_message: str = "", on_open_settings=None,
+                 on_open_settings_tab=None):
+        """Initialize API error dialog.
+
+        Args:
+            parent: Parent window
+            error_message: Error message to display
+            on_open_settings: Legacy callback for opening settings (no tab)
+            on_open_settings_tab: Callback for opening settings at specific tab (tab_name: str)
+        """
         self.on_open_settings = on_open_settings
+        self.on_open_settings_tab = on_open_settings_tab
 
         self.window = tk.Toplevel(parent)
         self.window.title("API Key Error - CrossTrans")
@@ -92,17 +102,27 @@ class APIErrorDialog:
                        width=15).pack(side=RIGHT)
 
     def _open_settings(self):
-        """Open settings and close this dialog."""
+        """Open settings at API Key tab and close this dialog."""
         self.window.destroy()
-        if self.on_open_settings:
+        if self.on_open_settings_tab:
+            self.on_open_settings_tab("API Key")
+        elif self.on_open_settings:
             self.on_open_settings()
 
 
 class TrialExhaustedDialog:
     """Dialog shown when trial quota is exhausted."""
 
-    def __init__(self, parent, on_open_settings=None):
+    def __init__(self, parent, on_open_settings=None, on_open_settings_tab=None):
+        """Initialize trial exhausted dialog.
+
+        Args:
+            parent: Parent window
+            on_open_settings: Legacy callback for opening settings
+            on_open_settings_tab: Callback for opening settings at specific tab
+        """
         self.on_open_settings = on_open_settings
+        self.on_open_settings_tab = on_open_settings_tab
 
         self.window = tk.Toplevel(parent)
         self.window.title("Trial Quota Exhausted - CrossTrans")
@@ -177,17 +197,29 @@ class TrialExhaustedDialog:
                        width=15).pack(side=RIGHT)
 
     def _open_settings(self):
-        """Open settings and close this dialog."""
+        """Open settings at API Key tab and close this dialog."""
         self.window.destroy()
-        if self.on_open_settings:
+        if self.on_open_settings_tab:
+            self.on_open_settings_tab("API Key")
+        elif self.on_open_settings:
             self.on_open_settings()
 
 
 class TrialFeatureDialog:
     """Dialog shown when user tries to use a feature disabled in trial mode."""
 
-    def __init__(self, parent, feature_name: str = "This feature", on_open_settings=None):
+    def __init__(self, parent, feature_name: str = "This feature", on_open_settings=None,
+                 on_open_settings_tab=None):
+        """Initialize trial feature dialog.
+
+        Args:
+            parent: Parent window
+            feature_name: Name of the feature being accessed
+            on_open_settings: Legacy callback for opening settings
+            on_open_settings_tab: Callback for opening settings at specific tab
+        """
         self.on_open_settings = on_open_settings
+        self.on_open_settings_tab = on_open_settings_tab
 
         self.window = tk.Toplevel(parent)
         self.window.title("Feature Not Available - CrossTrans")
@@ -226,8 +258,7 @@ class TrialFeatureDialog:
         features_frame.pack(fill=X, pady=5)
 
         ttk.Label(features_frame, text="  - Unlimited text translations", font=('Segoe UI', 10)).pack(anchor=W)
-        ttk.Label(features_frame, text="  - Screenshot OCR translation", font=('Segoe UI', 10)).pack(anchor=W)
-        ttk.Label(features_frame, text="  - File translation (PDF, DOCX, TXT)", font=('Segoe UI', 10)).pack(anchor=W)
+        ttk.Label(features_frame, text="  - File translation (PDF, DOCX, TXT, images)", font=('Segoe UI', 10)).pack(anchor=W)
 
         # Get API key link
         if HAS_TTKBOOTSTRAP:
@@ -260,7 +291,9 @@ class TrialFeatureDialog:
                        width=15).pack(side=RIGHT)
 
     def _open_settings(self):
-        """Open settings and close this dialog."""
+        """Open settings at API Key tab and close this dialog."""
         self.window.destroy()
-        if self.on_open_settings:
+        if self.on_open_settings_tab:
+            self.on_open_settings_tab("API Key")
+        elif self.on_open_settings:
             self.on_open_settings()

@@ -1,4 +1,4 @@
-CrossTrans v1.9.0 - Project Structure
+CrossTrans v1.9.3 - Project Structure
 ========================================
 
 gemini_translator_v4/
@@ -8,35 +8,37 @@ gemini_translator_v4/
 ├── requirements.txt         # Dependencies
 │
 └── src/
-    ├── constants.py         # VERSION, LANGUAGES, PROVIDERS_LIST, etc.
+    ├── constants.py         # VERSION, LANGUAGES, PROVIDERS_LIST, MODEL_PROVIDER_MAP
     ├── app.py               # TranslatorApp class (main application)
     │
     ├── core/
     │   ├── clipboard.py     # ClipboardManager
-    │   ├── api_manager.py   # AIAPIManager (14 providers)
-    │   ├── translation.py   # TranslationService
+    │   ├── api_manager.py   # AIAPIManager (13 providers)
+    │   ├── translation.py   # TranslationService, dictionary_lookup()
     │   ├── hotkey.py        # HotkeyManager (global hotkeys)
     │   ├── history.py       # Translation history (100 entries)
     │   ├── multimodal.py    # Vision processing (OCR)
-    │   ├── screenshot.py    # Screen capture for OCR
     │   ├── file_processor.py # Document text extraction
     │   ├── pdf_ocr.py       # Scanned PDF OCR support
     │   ├── crypto.py        # Secure API key storage (DPAPI)
     │   ├── ssl_pinning.py   # SSL certificate pinning
     │   ├── auth.py          # Windows Hello authentication
     │   ├── provider_health.py # Smart provider fallback
+    │   ├── drop_handler.py  # Drag-drop file handler
     │   ├── quota_manager.py # Trial mode quota tracking
-    │   └── trial_api.py     # Trial mode API handler
+    │   ├── trial_api.py     # Trial mode API handler
+    │   └── runtime_utils.py # Runtime context for trial API security
     │
     ├── ui/
     │   ├── settings.py      # SettingsWindow (with Show All API Keys)
     │   ├── dialogs.py       # APIErrorDialog, TrialExhaustedDialog, TrialFeatureDialog
     │   ├── attachments.py   # File attachment widget
+    │   ├── dictionary_mode.py # Dictionary word selection UI
     │   ├── history_dialog.py # History viewer (with search)
     │   ├── progress_dialog.py # Progress indicator
     │   ├── toast.py         # Toast notifications
     │   ├── tray.py          # System tray manager
-    │   └── tooltip.py       # Tooltip widget
+    │   └── tooltip.py       # Tooltip widget, Dictionary popup
     │
     └── utils/
         ├── logging_setup.py # setup_logging()
@@ -66,7 +68,6 @@ Translation prompts            src/core/translation.py
 Hotkey registration            src/core/hotkey.py
 History management             src/core/history.py
 Vision/OCR processing          src/core/multimodal.py
-Screenshot capture             src/core/screenshot.py
 File text extraction           src/core/file_processor.py
 Scanned PDF OCR                src/core/pdf_ocr.py
 API key encryption             src/core/crypto.py
@@ -75,9 +76,11 @@ Windows Hello auth             src/core/auth.py
 Provider fallback logic        src/core/provider_health.py
 Trial mode quota               src/core/quota_manager.py
 Trial mode API                 src/core/trial_api.py
+Runtime context (security)     src/core/runtime_utils.py
 Settings UI                    src/ui/settings.py
 Error dialogs                  src/ui/dialogs.py
 File attachments widget        src/ui/attachments.py
+Dictionary word selection      src/ui/dictionary_mode.py
 History dialog (with search)   src/ui/history_dialog.py
 Progress indicator             src/ui/progress_dialog.py
 Toast notifications            src/ui/toast.py
@@ -87,27 +90,50 @@ Main app (tray, tooltip, popup) src/app.py
 Update checker                 src/utils/updates.py
 
 ========================================
-New Features in v1.9.0
+New Features in v1.9.3
 ========================================
 
-1. Trial Mode
-   - 100 free translations per day without API key
-   - Smart quota management with device-based tracking
-   - Cloudflare Worker proxy for secure API key protection
+1. Security Enhancement
+   - App context validation for Trial mode proxy API
+   - X-App-Context header with obfuscated token
+   - Prevents unauthorized API abuse
 
-2. Rebranding
-   - App renamed from "AI Translator" to "CrossTrans"
-   - New logo and visual identity
-   - Updated GitHub repository
+2. Model Updates
+   - Updated Google Gemini models (only active, free-tier)
+   - Gemini 3.0 Flash, 2.5 series, 2.0 series
+
+3. Bug Fixes
+   - Fixed Dictionary button color (was blue due to ttkbootstrap autostyle)
+   - Added autostyle=False to prevent theme override
+
+========================================
+Previous Features (v1.9.2)
+========================================
+
+1. Dictionary Mode
+   - Interactive word selection (click, drag, shift+click)
+   - Word-by-word lookup with definitions, pronunciation, examples
+   - Words flow like paragraph with line wrapping
+   - Expand button for larger view
+   - Animation feedback while looking up
+   - Separate result window (doesn't replace tooltip)
+
+2. Model Updates
+   - 180+ models from 13 providers
+   - Latest: Gemini 2.5, GPT-4.1, o3, Claude 4.5, DeepSeek-R1, Grok 3
 
 3. UI Improvements
-   - Trial mode indicator in tooltip
-   - TrialExhaustedDialog when quota is used up
-   - TrialFeatureDialog for disabled features in trial mode
+   - Dictionary button in tooltip and main window
+   - Dictionary Lookup button with loading animation
 
 ========================================
 Previous Features
 ========================================
+
+v1.9.0:
+- Trial Mode (100 free translations/day)
+- Rebranding from "AI Translator" to "CrossTrans"
+- Trial mode indicator in tooltip
 
 v1.8.0:
 - Attachments UI improvements with smart button colors

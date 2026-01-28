@@ -453,15 +453,9 @@ class AttachmentArea(ttk.Frame):
         return self.attachments
 
     def _update_visibility(self):
-        """Update UI state: show/hide Clear All button and update add button style.
-
-        Screenshot button stays fixed at rightmost position (packed by app.py).
-        Clear All appears to its LEFT when there are attachments.
-        """
+        """Update UI state: show/hide Clear All button and update add button style."""
         if self.attachments:
-            # Show Clear All button (to the left of Screenshot)
-            # Screenshot was packed first with side=RIGHT, so it's rightmost
-            # Clear All packed with side=RIGHT will appear to its LEFT
+            # Show Clear All button
             try:
                 self.clear_btn.pack_forget()
             except tk.TclError:

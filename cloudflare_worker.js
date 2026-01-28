@@ -1,16 +1,22 @@
 /**
  * Cloudflare Worker - CrossTrans Trial Proxy
  *
- * Multi-provider fallback support:
- * Cerebras (primary) -> Groq (backup 1) -> SambaNova (backup 2)
+ * Multi-provider fallback support (in order):
+ * 1. Cerebras (llama-3.3-70b)
+ * 2. SambaNova (llama-3.3-70b)
+ * 3. Groq (llama-3.3-70b)
+ * 4. Gemini Free (gemini-2.5-flash-lite)
+ * 5. Gemini Paid (gemini-2.5-flash-lite)
  *
  * Setup:
  * 1. Create a Cloudflare Worker
  * 2. Paste this code
  * 3. Add environment variables:
- *    - CEREBRAS_API_KEY (required)
- *    - GROQ_API_KEY (optional, for fallback)
- *    - SAMBANOVA_API_KEY (optional, for fallback)
+ *    - CEREBRAS_API_KEY (primary)
+ *    - SAMBANOVA_API_KEY (fallback 1)
+ *    - GROQ_API_KEY (fallback 2)
+ *    - GEMINI_API_KEY_FREE (fallback 3)
+ *    - GEMINI_API_KEY_PAID (fallback 4)
  * 4. Deploy
  */
 
@@ -25,23 +31,40 @@ const PROVIDERS = {
     url: 'https://api.cerebras.ai/v1/chat/completions',
     model: 'llama-3.3-70b',
     envKey: 'CEREBRAS_API_KEY',
-  },
-  groq: {
-    name: 'Groq',
-    url: 'https://api.groq.com/openai/v1/chat/completions',
-    model: 'llama-3.3-70b-versatile',
-    envKey: 'GROQ_API_KEY',
+    type: 'openai',  // OpenAI-compatible API
   },
   sambanova: {
     name: 'SambaNova',
     url: 'https://api.sambanova.ai/v1/chat/completions',
     model: 'Meta-Llama-3.3-70B-Instruct',
     envKey: 'SAMBANOVA_API_KEY',
+    type: 'openai',
+  },
+  groq: {
+    name: 'Groq',
+    url: 'https://api.groq.com/openai/v1/chat/completions',
+    model: 'llama-3.3-70b-versatile',
+    envKey: 'GROQ_API_KEY',
+    type: 'openai',
+  },
+  gemini_free: {
+    name: 'Gemini (Free)',
+    url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent',
+    model: 'gemini-2.5-flash-lite',
+    envKey: 'GEMINI_API_KEY_FREE',
+    type: 'gemini',  // Google Gemini API
+  },
+  gemini_paid: {
+    name: 'Gemini (Paid)',
+    url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent',
+    model: 'gemini-2.5-flash-lite',
+    envKey: 'GEMINI_API_KEY_PAID',
+    type: 'gemini',
   },
 };
 
 // Provider fallback order
-const FALLBACK_ORDER = ['cerebras', 'groq', 'sambanova'];
+const FALLBACK_ORDER = ['cerebras', 'sambanova', 'groq', 'gemini_free', 'gemini_paid'];
 
 export default {
   async fetch(request, env) {
@@ -49,7 +72,7 @@ export default {
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, X-Device-ID',
+      'Access-Control-Allow-Headers': 'Content-Type, X-Device-ID, X-App-Context',
     };
 
     // Handle preflight
@@ -68,6 +91,18 @@ export default {
     try {
       // Get device ID for rate limiting
       const deviceId = request.headers.get('X-Device-ID') || 'unknown';
+
+      // Validate app context
+      const appContext = request.headers.get('X-App-Context');
+      if (!appContext || appContext !== env.APP_CONTEXT) {
+        return new Response(JSON.stringify({
+          error: 'Unauthorized',
+          message: 'Invalid request context'
+        }), {
+          status: 401,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
 
       // Check rate limit
       const rateLimitResult = checkRateLimit(deviceId);
@@ -108,22 +143,24 @@ export default {
         try {
           console.log(`Trying provider: ${provider.name}`);
 
-          const response = await fetch(provider.url, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-              model: body.model || provider.model,
-              messages: body.messages,
-              temperature: body.temperature || 0.3,
-              max_tokens: body.max_tokens || 4096,
-            }),
-          });
+          let response;
+          let result;
+
+          if (provider.type === 'gemini') {
+            // Gemini API format
+            response = await callGeminiAPI(provider, apiKey, body);
+          } else {
+            // OpenAI-compatible API format
+            response = await callOpenAIAPI(provider, apiKey, body);
+          }
 
           if (response.ok) {
-            const result = await response.json();
+            result = await response.json();
+
+            // Convert Gemini response to OpenAI format if needed
+            if (provider.type === 'gemini') {
+              result = convertGeminiToOpenAI(result, provider.model);
+            }
 
             // Success! Increment rate limit counter
             incrementRateLimit(deviceId);
@@ -170,6 +207,102 @@ export default {
     }
   }
 };
+
+// Call OpenAI-compatible API (Cerebras, SambaNova, Groq)
+async function callOpenAIAPI(provider, apiKey, body) {
+  return await fetch(provider.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: body.model || provider.model,
+      messages: body.messages,
+      temperature: body.temperature || 0.3,
+      max_tokens: body.max_tokens || 4096,
+    }),
+  });
+}
+
+// Call Google Gemini API
+async function callGeminiAPI(provider, apiKey, body) {
+  // Convert OpenAI messages format to Gemini format
+  const contents = convertMessagesToGemini(body.messages);
+
+  const url = `${provider.url}?key=${apiKey}`;
+
+  return await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      contents: contents,
+      generationConfig: {
+        temperature: body.temperature || 0.3,
+        maxOutputTokens: body.max_tokens || 4096,
+      },
+    }),
+  });
+}
+
+// Convert OpenAI messages to Gemini format
+function convertMessagesToGemini(messages) {
+  const contents = [];
+
+  for (const msg of messages) {
+    // Gemini uses 'user' and 'model' roles
+    let role = msg.role;
+    if (role === 'assistant') {
+      role = 'model';
+    } else if (role === 'system') {
+      // Gemini doesn't have system role, prepend to first user message
+      // For simplicity, treat as user message
+      role = 'user';
+    }
+
+    contents.push({
+      role: role,
+      parts: [{ text: msg.content }]
+    });
+  }
+
+  return contents;
+}
+
+// Convert Gemini response to OpenAI format
+function convertGeminiToOpenAI(geminiResponse, model) {
+  // Extract text from Gemini response
+  let text = '';
+  if (geminiResponse.candidates && geminiResponse.candidates[0]) {
+    const candidate = geminiResponse.candidates[0];
+    if (candidate.content && candidate.content.parts) {
+      text = candidate.content.parts.map(p => p.text || '').join('');
+    }
+  }
+
+  // Return OpenAI-compatible format
+  return {
+    id: `gemini-${Date.now()}`,
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model: model,
+    choices: [{
+      index: 0,
+      message: {
+        role: 'assistant',
+        content: text,
+      },
+      finish_reason: 'stop',
+    }],
+    usage: {
+      prompt_tokens: geminiResponse.usageMetadata?.promptTokenCount || 0,
+      completion_tokens: geminiResponse.usageMetadata?.candidatesTokenCount || 0,
+      total_tokens: geminiResponse.usageMetadata?.totalTokenCount || 0,
+    }
+  };
+}
 
 // Simple in-memory rate limiting (resets when worker restarts)
 // For production, use Cloudflare KV or D1 database

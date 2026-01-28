@@ -17,6 +17,7 @@ from src.constants import (
     TRIAL_PROVIDER,
     TRIAL_MODE_ENABLED
 )
+from src.core.runtime_utils import get_runtime_context
 
 
 class TrialAPIError(Exception):
@@ -130,6 +131,7 @@ class TrialAPIClient:
         headers = {
             "Content-Type": "application/json",
             "X-Device-ID": self.device_id,
+            "X-App-Context": get_runtime_context(),
             "User-Agent": "CrossTrans-Trial/1.0"
         }
 

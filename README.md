@@ -1,6 +1,6 @@
 # CrossTrans
 
-![Version](https://img.shields.io/badge/version-1.9.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.9.3-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-yellow.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-informational.svg)
@@ -13,9 +13,8 @@ A powerful Windows desktop application for instant text translation using AI. Se
 
 - **Instant Translation** - Select text, press hotkey, get translation in tooltip
 - **Free Trial Mode** - 100 translations/day without API key
-- **14 AI Providers** - Google Gemini (free!), OpenAI, Claude, DeepSeek, Groq, and more
-- **Vision & OCR** - Screenshot any region and translate text from images
-- **File Processing** - Translate documents (.docx, .txt, .srt, .pdf)
+- **13 AI Providers** - Google Gemini (free!), OpenAI, Claude, DeepSeek, Groq, and more
+- **File Processing** - Translate documents (.docx, .txt, .srt, .pdf) and images
 - **120+ Languages** - Comprehensive language support
 - **Custom Hotkeys** - Configure any key combination for any language
 
@@ -30,7 +29,6 @@ A powerful Windows desktop application for instant text translation using AI. Se
 | `Win+Alt+E` | English |
 | `Win+Alt+J` | Japanese |
 | `Win+Alt+C` | Chinese Simplified |
-| `Win+Alt+S` | Screenshot OCR (if vision enabled) |
 
 **+ 4 customizable hotkeys** for any language of your choice.
 
@@ -39,8 +37,7 @@ A powerful Windows desktop application for instant text translation using AI. Se
 - Perfect for trying out the app before getting your own API key
 - Quota resets at midnight
 
-### Vision & File Processing
-- **Screenshot OCR** - Capture any screen region and extract/translate text
+### File Processing
 - **Image Translation** - Drag & drop images for OCR and translation
 - **Document Support** - Process `.docx`, `.txt`, `.srt`, `.pdf` files
 - **Multi-file Batch** - Translate multiple files in a single API request
@@ -50,19 +47,19 @@ A powerful Windows desktop application for instant text translation using AI. Se
 
 | Provider | Models | Free Tier |
 |----------|--------|-----------|
-| **Google Gemini** | gemini-2.0-flash, gemini-pro | 1,500 req/day |
-| **OpenAI** | gpt-4o, gpt-4-turbo, gpt-3.5 | No |
-| **Anthropic** | claude-3.5-sonnet, claude-3-haiku | No |
-| **DeepSeek** | deepseek-chat, deepseek-coder | Yes |
-| **Groq** | llama-3.3-70b, mixtral-8x7b | Yes |
-| **xAI** | grok-2, grok-vision | No |
-| **Mistral** | mistral-large, pixtral | No |
-| **Perplexity** | sonar-pro, sonar | No |
-| **Cerebras** | llama-3.3-70b | Yes |
-| **SambaNova** | Meta-Llama-3.1-405B | Yes |
-| **Together** | Llama-3.2-Vision | No |
-| **SiliconFlow** | Qwen2.5, DeepSeek | Yes |
-| **OpenRouter** | 100+ models | Varies |
+| **Google Gemini** | Gemini 2.5, 2.0, 1.5 | 1,500 req/day |
+| **OpenAI** | o3, GPT-4.1, GPT-4o | No |
+| **Anthropic** | Claude 4.5, Claude 3.5 | No |
+| **DeepSeek** | DeepSeek-R1, V3 | Yes |
+| **Groq** | Llama 3.3, Mixtral | Yes |
+| **xAI** | Grok 3, Grok 2 | No |
+| **Mistral** | Mistral Large, Pixtral | No |
+| **Perplexity** | Sonar Pro, Reasoning | No |
+| **Cerebras** | Llama 4, Llama 3.3 | Yes |
+| **SambaNova** | DeepSeek-R1, Llama 405B | Yes |
+| **Together** | Llama 3.3, Qwen 2.5 | No |
+| **SiliconFlow** | Qwen 2.5, DeepSeek-V3 | Yes |
+| **OpenRouter** | 400+ models | Varies |
 
 **Smart Routing** - Automatically detects provider from API key or model name.
 
@@ -74,7 +71,7 @@ A powerful Windows desktop application for instant text translation using AI. Se
 - **Translation History** - Review and reuse past translations (up to 100 entries)
 
 ### Smart Features
-- **Dictionary Mode** - Single words get definitions, pronunciation, examples
+- **Dictionary Mode** - Click words to select, get definitions, pronunciation, examples
 - **Custom Prompts** - Add instructions like "Make it formal" or "Technical terms only"
 - **Clipboard Preservation** - Your files/images in clipboard are preserved
 - **Auto-start** - Optionally start with Windows
@@ -91,7 +88,7 @@ A powerful Windows desktop application for instant text translation using AI. Se
 
 ### Option 1: Download EXE (Recommended)
 1. Go to [Releases](https://github.com/Masaru-urasaM/CrossTrans/releases)
-2. Download `CrossTrans_v1.9.0.exe`
+2. Download `CrossTrans_v1.9.3.exe`
 3. Run the application
 4. Start translating immediately with trial mode, or enter your API key in Settings
 
@@ -130,8 +127,8 @@ python main.py
 
 ### Tooltip Actions
 - **Copy** - Copy translation to clipboard
+- **Dictionary** - Open word-by-word lookup mode
 - **Open Translator** - Open full window with more options
-- **Settings** - Quick access to configuration
 - **X** or `Escape` - Close tooltip
 
 ### Full Translator Window
@@ -143,12 +140,6 @@ Features:
 - Add custom prompt for translation style
 - Attach images or files
 - View translation history
-
-### Screenshot OCR
-1. Enable vision in Settings (requires vision-capable model or API key)
-2. Press `Win+Alt+S`
-3. Draw rectangle around text to translate
-4. Translation appears in tooltip
 
 ### File Translation
 1. Open Full Translator
@@ -208,7 +199,6 @@ CrossTrans/
 │   │   ├── translation.py  # Translation service
 │   │   ├── hotkey.py       # Global hotkey system
 │   │   ├── clipboard.py    # Clipboard operations
-│   │   ├── screenshot.py   # Screen capture for OCR
 │   │   ├── multimodal.py   # Vision processing
 │   │   ├── file_processor.py # Document text extraction
 │   │   ├── pdf_ocr.py      # Scanned PDF OCR
@@ -223,6 +213,7 @@ CrossTrans/
 │   ├── ui/
 │   │   ├── settings.py     # Settings window
 │   │   ├── attachments.py  # File attachment widget
+│   │   ├── dictionary_mode.py # Dictionary word selection
 │   │   ├── history_dialog.py # History viewer with search
 │   │   ├── progress_dialog.py # Progress indicator
 │   │   ├── toast.py        # Toast notifications
@@ -271,22 +262,22 @@ CrossTrans/
 
 ---
 
-## What's New in v1.9.0
+## What's New in v1.9.3
 
-### Trial Mode
-- **100 free translations per day** without API key
-- Perfect for new users to try the app
-- Smart quota management with daily reset
+### Security & Stability
+- **Enhanced Trial mode security** - App context validation for proxy API
+- **Updated Google Gemini models** - Only active, free-tier models included
+- **Fixed Dictionary button color** - Now displays correct brown/red theme color
 
-### Rebranding
-- App renamed from "AI Translator" to "CrossTrans"
-- New logo and visual identity
+### Previous in v1.9.2
+- **Dictionary Mode** - Interactive word selection with definitions, pronunciation, examples
+- **180+ models** from 13 providers
 
-### Previous in v1.8.0
-- Attachments UI improvements with smart button colors
-- System tray menu reorganization
+### Previous in v1.9.0
+- Trial Mode - 100 free translations/day without API key
+- Rebranding from "AI Translator" to "CrossTrans"
 
-### Previous in v1.7.0
+### Previous in v1.7.0-1.8.0
 - Windows Hello Authentication for API key protection
 - Smart Provider Fallback - auto-switch to backup API
 - Scanned PDF OCR support
@@ -311,7 +302,7 @@ python main.py
 ```bash
 pip install pyinstaller
 pyinstaller CrossTrans.spec
-# Output: dist/CrossTrans_v1.9.0.exe
+# Output: dist/CrossTrans_v1.9.3.exe
 ```
 
 ### Running Tests

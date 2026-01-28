@@ -2,6 +2,7 @@
 Main Application for CrossTrans.
 """
 import os
+import re
 import sys
 import time
 import queue
@@ -49,10 +50,10 @@ from src.ui.toast import ToastManager, ToastType
 from src.ui.tooltip import TooltipManager
 from src.ui.tray import TrayManager
 from src.utils.updates import check_for_updates
-from src.core.screenshot import ScreenshotCapture
 from src.core.file_processor import FileProcessor
 from src.ui.attachments import AttachmentArea
 from src.core.multimodal import MultimodalProcessor
+from src.core.nlp_manager import nlp_manager
 
 
 def set_dark_title_bar(window):
@@ -104,6 +105,34 @@ def set_dark_title_bar(window):
         logging.debug(f"Could not set dark title bar: {e}")
 
 
+def filter_dictionary_words(words: list) -> list:
+    """Filter out punctuation, symbols, and special characters from words list.
+
+    Args:
+        words: List of words to filter
+
+    Returns:
+        Filtered list containing only valid words (at least one letter/digit)
+    """
+    if not words:
+        return []
+
+    filtered = []
+    for word in words:
+        if not word or not isinstance(word, str):
+            continue
+        # Strip leading/trailing punctuation and whitespace
+        cleaned = word.strip()
+        # Remove leading/trailing punctuation (keep internal ones like don't, e-mail)
+        cleaned = re.sub(r'^[^\w]+|[^\w]+$', '', cleaned, flags=re.UNICODE)
+        # Check if the cleaned word has at least one letter or CJK character
+        # This allows words like "日本語" but filters out pure punctuation like "-", "...", "!!!"
+        if cleaned and re.search(r'[\w\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]', cleaned, re.UNICODE):
+            filtered.append(cleaned)
+
+    return filtered
+
+
 class TranslatorApp:
     """Main application class."""
 
@@ -134,7 +163,6 @@ class TranslatorApp:
         # Initialize services
         self.translation_service = TranslationService(self.config)
         self.hotkey_manager = HotkeyManager(self.config, self._on_hotkey_translate)
-        self.screenshot_capture = ScreenshotCapture(self.root)
         self.file_processor = FileProcessor(self.translation_service.api_manager)
 
         # UI state
@@ -157,7 +185,9 @@ class TranslatorApp:
         self.tooltip_manager.configure_callbacks(
             on_copy=self._on_tooltip_copy,
             on_open_translator=self._on_tooltip_open_translator,
-            on_open_settings=self.show_settings
+            on_open_settings=self.show_settings,
+            on_open_settings_dictionary_tab=self._show_settings_dictionary_tab,
+            on_dictionary_lookup=self._on_tooltip_dictionary_lookup
         )
 
         # Tray manager
@@ -182,10 +212,6 @@ class TranslatorApp:
         # Capture mouse position immediately when hotkey is pressed
         self.tooltip_manager.capture_mouse_position()
 
-        if language == "Screenshot":
-            self.root.after(0, self._start_screenshot_ocr)
-            return
-
         self.root.after(0, lambda: self.tooltip_manager.show_loading(language))
         self.translation_service.do_translation(language)
 
@@ -207,7 +233,7 @@ class TranslatorApp:
             self._show_trial_exhausted()
             return
 
-        self.tooltip_manager.show(translated, target_lang, trial_info)
+        self.tooltip_manager.show(translated, target_lang, trial_info, original)
 
     def close_tooltip(self):
         """Close the tooltip."""
@@ -225,6 +251,45 @@ class TranslatorApp:
         """Handle open translator from tooltip."""
         self.close_tooltip()
         self.show_popup(self.current_original, self.current_translated, self.current_target_lang)
+
+    def _on_tooltip_dictionary_lookup(self, words: list, target_lang: str):
+        """Handle dictionary lookup from tooltip.
+
+        Uses batch lookup (single API call) for efficiency.
+        """
+        if not words:
+            return
+
+        # Filter out punctuation, symbols, and special characters
+        filtered_words = filter_dictionary_words(words)
+        if not filtered_words:
+            self.toast.show_info("No valid words to look up (only punctuation/symbols)")
+            return
+
+        display_text = ", ".join(filtered_words[:3]) + ("..." if len(filtered_words) > 3 else "")
+        self.toast.show_info(f"Looking up {len(filtered_words)} word(s): {display_text}")
+
+        def do_lookup():
+            try:
+                # Single API call for all words (optimized batch lookup)
+                result = self.translation_service.dictionary_lookup_batch(filtered_words, target_lang)
+                # Get trial info after API call (quota may have changed)
+                trial_info = self.translation_service.get_trial_info()
+                # Show result in a new tooltip at mouse position
+                self.root.after(0, lambda: self._show_tooltip_dictionary_result(result, target_lang, trial_info))
+            except Exception as e:
+                # Stop animation on error
+                self.root.after(0, lambda: self.tooltip_manager.stop_dictionary_animation())
+                self.root.after(0, lambda: self.toast.show_error(f"Lookup failed: {str(e)}"))
+
+        import threading
+        threading.Thread(target=do_lookup, daemon=True).start()
+
+    def _show_tooltip_dictionary_result(self, result: str, target_lang: str, trial_info: dict = None):
+        """Show dictionary result in a SEPARATE window (not replacing quick translate)."""
+        # Create a new SEPARATE dictionary result window
+        self.tooltip_manager.capture_mouse_position()
+        self.tooltip_manager.show_dictionary_result(result, target_lang, trial_info)
 
     def show_main_window(self, icon=None, item=None):
         """Show main translator window from tray."""
@@ -398,7 +463,7 @@ class TranslatorApp:
         # History button
         if HAS_TTKBOOTSTRAP:
             ttk.Button(btn_frame, text="History", command=self._open_history,
-                       bootstyle="light-outline", width=10).pack(side=LEFT, padx=10)
+                       bootstyle="warning-outline", width=10).pack(side=LEFT, padx=10)
         else:
             ttk.Button(btn_frame, text="History", command=self._open_history,
                        width=10).pack(side=LEFT, padx=10)
@@ -416,26 +481,17 @@ class TranslatorApp:
         content_frame.pack(side=TOP, fill=BOTH, expand=True)
 
         # ===== ATTACHMENT AREA =====
-        # Only show if features are enabled
-        vision_enabled = self.config.get('vision_enabled', False)
-        file_enabled = self.config.get('file_processing_enabled', False)
+        # Show if ANY API has vision or file capabilities (check flags set during API test)
+        has_vision = self.config.has_any_vision_capable()
+        has_file = self.config.has_any_file_capable()
 
-        if vision_enabled or file_enabled:
+        if has_vision or has_file:
             try:
                 # Ensure popup window is fully realized before creating DnD widgets
                 self.popup.update_idletasks()
                 self.attachment_area = AttachmentArea(content_frame, self.config, on_change=None)
                 self.attachment_area.pack(fill=X, pady=(0, 10))
 
-                # Add Screenshot button to attachment area header (before Clear All)
-                if vision_enabled:
-                    screenshot_kwargs = {"text": "📷 Screenshot", "command": self._start_screenshot_ocr, "width": 12}
-                    if HAS_TTKBOOTSTRAP:
-                        screenshot_kwargs["bootstyle"] = "warning-outline"
-                    self.screenshot_btn = ttk.Button(self.attachment_area.top_frame, **screenshot_kwargs)
-                    self.screenshot_btn.pack(side=RIGHT, padx=(0, 5))
-                    # Store reference for clear_btn positioning
-                    self.attachment_area._screenshot_btn = self.screenshot_btn
             except Exception as e:
                 logging.error(f"Error initializing AttachmentArea: {e}")
                 self.attachment_area = None
@@ -443,7 +499,32 @@ class TranslatorApp:
             self.attachment_area = None
 
         # ===== ORIGINAL TEXT =====
-        ttk.Label(content_frame, text="Original:", font=('Segoe UI', 10)).pack(anchor='w')
+        original_header = ttk.Frame(content_frame)
+        original_header.pack(fill=X, anchor='w')
+
+        ttk.Label(original_header, text="Original:", font=('Segoe UI', 10)).pack(side=LEFT)
+
+        # Dictionary button - opens popup with word buttons for original text
+        # Use tk.Button for consistent reddish-brown color
+        self.dict_btn = tk.Button(
+            original_header,
+            text="Dictionary",
+            command=self._open_dictionary_popup,
+            autostyle=False,  # Prevent ttkbootstrap from overriding colors
+            bg="#822312",  # Dark red (main color)
+            fg='#ffffff',
+            activebackground='#9A3322',  # Lighter red (hover/active)
+            activeforeground='#ffffff',
+            font=('Segoe UI', 9),
+            relief='flat',
+            padx=8, pady=2,
+            cursor='hand2',
+            width=10
+        )
+        self.dict_btn.pack(side=RIGHT)
+
+        # Update Dictionary button state based on NLP availability
+        self._update_dict_button_state()
 
         self.original_text = tk.Text(content_frame, height=6, wrap=tk.WORD,
                                      bg='#2b2b2b', fg='#cccccc',
@@ -1018,6 +1099,344 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         self.toast.show_success("Copied to clipboard!")
         self.popup.after(1000, lambda: self.copy_btn.configure(text="Copy"))
 
+    def _update_dict_button_state(self):
+        """Update Dictionary button state based on NLP availability.
+
+        Button keeps same visual appearance (reddish-brown color) whether
+        enabled or disabled. Only interaction changes.
+        """
+        if not hasattr(self, 'dict_btn') or not self.dict_btn:
+            return
+
+        self._dict_btn_enabled = nlp_manager.is_any_installed()
+
+        try:
+            if self._dict_btn_enabled:
+                self.dict_btn.configure(cursor='hand2')
+            else:
+                self.dict_btn.configure(cursor='arrow')
+            # Unbind any previous tooltips
+            self.dict_btn.unbind('<Enter>')
+            self.dict_btn.unbind('<Leave>')
+        except tk.TclError:
+            pass  # Widget destroyed
+
+    def _open_dictionary_popup(self):
+        """Open dictionary popup window with word buttons for original text."""
+        # Check if button is enabled (NLP installed)
+        if hasattr(self, '_dict_btn_enabled') and not self._dict_btn_enabled:
+            self._show_nlp_not_installed_dialog()
+            return
+
+        original = self.original_text.get('1.0', tk.END).strip()
+        if not original:
+            self.toast.show_warning("No text to analyze")
+            return
+
+        # Double-check NLP is installed
+        if not nlp_manager.is_any_installed():
+            self._show_nlp_not_installed_dialog()
+            return
+
+        # Detect language
+        detected_lang, confidence = nlp_manager.detect_language(original)
+        CONFIDENCE_THRESHOLD = 0.7
+
+        # Check if detection is confident and NLP is installed for that language
+        if confidence >= CONFIDENCE_THRESHOLD and nlp_manager.is_installed(detected_lang):
+            # Auto-proceed with detected language
+            self._open_dictionary_with_language(original, detected_lang)
+        else:
+            # Show language selection dialog
+            self._show_language_selection_dialog(original, detected_lang if confidence > 0.3 else None)
+
+    def _show_nlp_not_installed_dialog(self):
+        """Show dialog when no NLP language pack is installed."""
+        dialog = tk.Toplevel(self.popup)
+        dialog.title("No Language Pack Installed")
+        dialog.configure(bg='#2b2b2b')
+        dialog.transient(self.popup)
+        dialog.grab_set()
+
+        # Center on screen
+        dialog.update_idletasks()
+        w, h = 400, 180
+        x = (dialog.winfo_screenwidth() - w) // 2
+        y = (dialog.winfo_screenheight() - h) // 2
+        dialog.geometry(f"{w}x{h}+{x}+{y}")
+
+        set_dark_title_bar(dialog)
+
+        # Content
+        frame = ttk.Frame(dialog, padding=20)
+        frame.pack(fill=BOTH, expand=True)
+
+        ttk.Label(frame, text="⚠️ No Language Pack Installed",
+                  font=('Segoe UI', 12, 'bold')).pack(pady=(0, 10))
+
+        ttk.Label(frame, text="Dictionary mode requires at least one NLP language pack.\n"
+                             "Install a language pack in Settings → Dictionary tab.",
+                  font=('Segoe UI', 10), justify='center').pack(pady=(0, 15))
+
+        # Buttons
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill=X)
+
+        def open_settings():
+            dialog.destroy()
+            self._show_settings_tab("Dictionary")
+
+        open_btn_kwargs = {"text": "Open Dictionary Settings", "command": open_settings, "width": 22}
+        if HAS_TTKBOOTSTRAP:
+            open_btn_kwargs["bootstyle"] = "primary"
+        ttk.Button(btn_frame, **open_btn_kwargs).pack(side=LEFT, padx=5)
+
+        cancel_kwargs = {"text": "Cancel", "command": dialog.destroy, "width": 10}
+        if HAS_TTKBOOTSTRAP:
+            cancel_kwargs["bootstyle"] = "secondary"
+        ttk.Button(btn_frame, **cancel_kwargs).pack(side=RIGHT, padx=5)
+
+        dialog.bind('<Escape>', lambda e: dialog.destroy())
+
+    def _show_settings_dictionary_tab(self):
+        """Open settings window and navigate directly to Dictionary tab.
+
+        Used by tooltip "Install now" link to open Dictionary tab directly.
+        """
+        self.show_settings()
+        # Use multiple attempts with increasing delays to ensure window is ready
+        def try_open_tab(attempts=3):
+            if attempts <= 0:
+                return
+            if self.settings_window and hasattr(self.settings_window, 'open_dictionary_tab'):
+                self.settings_window.open_dictionary_tab()
+                # Focus the settings window after opening tab
+                self._focus_settings_window()
+            else:
+                # Retry with longer delay
+                self.root.after(200, lambda: try_open_tab(attempts - 1))
+        self.root.after(100, try_open_tab)
+
+    def _focus_settings_window(self):
+        """Bring Settings window to front and focus it."""
+        if self.settings_window and hasattr(self.settings_window, 'window'):
+            try:
+                win = self.settings_window.window
+                if win and win.winfo_exists():
+                    win.deiconify()  # Restore if minimized
+                    win.attributes('-topmost', True)
+                    win.update()
+                    win.attributes('-topmost', False)
+                    win.lift()
+                    win.focus_force()
+            except tk.TclError:
+                pass  # Window destroyed
+
+    def _open_settings_dictionary_tab(self):
+        """Switch to Dictionary tab in already-open settings window."""
+        if self.settings_window and hasattr(self.settings_window, 'open_dictionary_tab'):
+            self.settings_window.open_dictionary_tab()
+
+    def _show_language_selection_dialog(self, original_text: str, suggested_lang: str = None):
+        """Show dialog to select source language for dictionary mode."""
+        installed_languages = nlp_manager.get_installed_languages()
+        if not installed_languages:
+            self._show_nlp_not_installed_dialog()
+            return
+
+        dialog = tk.Toplevel(self.popup)
+        dialog.title("Select Source Language")
+        dialog.configure(bg='#2b2b2b')
+        dialog.transient(self.popup)
+        dialog.grab_set()
+
+        # Center on screen
+        dialog.update_idletasks()
+        w, h = 380, 220
+        x = (dialog.winfo_screenwidth() - w) // 2
+        y = (dialog.winfo_screenheight() - h) // 2
+        dialog.geometry(f"{w}x{h}+{x}+{y}")
+
+        set_dark_title_bar(dialog)
+
+        # Content
+        frame = ttk.Frame(dialog, padding=20)
+        frame.pack(fill=BOTH, expand=True)
+
+        ttk.Label(frame, text="⚠️ Cannot detect language automatically",
+                  font=('Segoe UI', 11, 'bold')).pack(pady=(0, 10))
+
+        ttk.Label(frame, text="Select the source language:",
+                  font=('Segoe UI', 10)).pack(anchor='w', pady=(0, 5))
+
+        # Combobox for language selection
+        lang_var = tk.StringVar()
+        lang_combo = ttk.Combobox(frame, textvariable=lang_var, values=installed_languages,
+                                  font=('Segoe UI', 10), state='readonly')
+        lang_combo.pack(fill=X, pady=(0, 5))
+
+        # Set default selection
+        if suggested_lang and suggested_lang in installed_languages:
+            lang_var.set(suggested_lang)
+        elif installed_languages:
+            lang_var.set(installed_languages[0])
+
+        ttk.Label(frame, text="Only installed language packs are shown.",
+                  font=('Segoe UI', 9), foreground='#888888').pack(anchor='w', pady=(0, 10))
+
+        # Install more link
+        def open_settings_dict():
+            dialog.destroy()
+            self.show_settings()
+            self.root.after(500, lambda: self._open_settings_dictionary_tab())
+
+        install_link = tk.Label(frame, text="Install more languages →", fg='#4da6ff',
+                               bg='#2b2b2b', font=('Segoe UI', 9, 'underline'), cursor='hand2')
+        install_link.pack(anchor='w')
+        install_link.bind('<Button-1>', lambda e: open_settings_dict())
+
+        # Buttons
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill=X, pady=(15, 0))
+
+        def confirm():
+            selected = lang_var.get()
+            if selected:
+                dialog.destroy()
+                self._open_dictionary_with_language(original_text, selected)
+
+        confirm_kwargs = {"text": "Confirm", "command": confirm, "width": 12}
+        if HAS_TTKBOOTSTRAP:
+            confirm_kwargs["bootstyle"] = "primary"
+        ttk.Button(btn_frame, **confirm_kwargs).pack(side=LEFT, padx=5)
+
+        cancel_kwargs = {"text": "Cancel", "command": dialog.destroy, "width": 10}
+        if HAS_TTKBOOTSTRAP:
+            cancel_kwargs["bootstyle"] = "secondary"
+        ttk.Button(btn_frame, **cancel_kwargs).pack(side=RIGHT, padx=5)
+
+        dialog.bind('<Escape>', lambda e: dialog.destroy())
+        dialog.bind('<Return>', lambda e: confirm())
+
+    def _open_dictionary_with_language(self, original: str, language: str):
+        """Open dictionary popup with specified language for NLP tokenization."""
+        from src.ui.dictionary_mode import WordButtonFrame
+        from src.ui.tooltip import get_monitor_work_area
+
+        # Create popup window
+        dict_popup = tk.Toplevel(self.root)
+        dict_popup.title(f"Dictionary ({language})")
+        dict_popup.configure(bg='#2b2b2b')
+        dict_popup.attributes('-topmost', True)
+        dict_popup.after(100, lambda: dict_popup.attributes('-topmost', False))
+
+        # Get work area (excludes taskbar)
+        mouse_x = self.root.winfo_pointerx()
+        mouse_y = self.root.winfo_pointery()
+        work_area = get_monitor_work_area(mouse_x, mouse_y)
+
+        if work_area:
+            work_left, work_top, work_right, work_bottom = work_area
+        else:
+            work_left, work_top = 0, 0
+            work_right = self.root.winfo_screenwidth()
+            work_bottom = self.root.winfo_screenheight() - 50
+
+        # Window size and position (centered in work area)
+        window_width = 700
+        window_height = 350
+        margin = 10
+
+        # Ensure height fits in work area
+        max_height = work_bottom - work_top - 2 * margin
+        if window_height > max_height:
+            window_height = max_height
+
+        x = work_left + (work_right - work_left - window_width) // 2
+        y = work_top + (work_bottom - work_top - window_height) // 2
+
+        dict_popup.geometry(f"{window_width}x{window_height}+{x}+{y}")
+
+        # Apply dark title bar
+        dict_popup.update_idletasks()
+        set_dark_title_bar(dict_popup)
+
+        # Main frame
+        main_frame = ttk.Frame(dict_popup, padding=15)
+        main_frame.pack(fill=BOTH, expand=True)
+
+        # Header with language info
+        ttk.Label(main_frame, text=f"Select words to look up ({language} NLP):",
+                  font=('Segoe UI', 10)).pack(anchor='w', pady=(0, 10))
+
+        # Expand function
+        def expand_dictionary():
+            # Resize window to larger size
+            dict_popup.geometry(f"1000x700")
+            # Center on work area
+            dict_popup.update_idletasks()
+            w = dict_popup.winfo_width()
+            h = dict_popup.winfo_height()
+            # Use work area from enclosing scope
+            cx = work_left + (work_right - work_left - w) // 2
+            cy = work_top + (work_bottom - work_top - h) // 2
+            dict_popup.geometry(f"{w}x{h}+{cx}+{cy}")
+
+        # Word button frame with language for NLP tokenization
+        def on_lookup(selected_words):
+            self._do_dictionary_lookup(selected_words)
+
+        dict_frame = WordButtonFrame(
+            main_frame,
+            original,
+            on_selection_change=lambda t: None,
+            on_lookup=on_lookup,
+            on_expand=expand_dictionary,
+            language=language  # Pass language for NLP tokenization
+        )
+        dict_frame.set_exit_callback(dict_popup.destroy)
+        dict_frame.pack(fill=BOTH, expand=True)
+
+        # Close on Escape
+        dict_popup.bind('<Escape>', lambda e: dict_popup.destroy())
+        dict_popup.focus_force()
+
+    def _do_dictionary_lookup(self, words: list):
+        """Perform dictionary lookup for selected words.
+
+        Uses batch lookup (single API call) for efficiency.
+        """
+        if not words:
+            return
+
+        # Get target language
+        target_lang = self.selected_language
+
+        # Show loading toast
+        display_text = ", ".join(words[:3]) + ("..." if len(words) > 3 else "")
+        self.toast.show_info(f"Looking up {len(words)} word(s): {display_text}")
+
+        # Perform lookup in background
+        def do_lookup():
+            try:
+                # Single API call for all words (optimized batch lookup)
+                result = self.translation_service.dictionary_lookup_batch(words, target_lang)
+                # Get trial info after API call (quota may have changed)
+                trial_info = self.translation_service.get_trial_info()
+                # Show result in tooltip
+                self.popup.after(0, lambda: self._show_dictionary_result(result, target_lang, trial_info))
+            except Exception as e:
+                self.popup.after(0, lambda: self.toast.show_error(f"Lookup failed: {str(e)}"))
+
+        import threading
+        threading.Thread(target=do_lookup, daemon=True).start()
+
+    def _show_dictionary_result(self, result: str, target_lang: str, trial_info: dict = None):
+        """Show dictionary lookup result in SEPARATE window."""
+        # Use tooltip manager to show result in SEPARATE dictionary window
+        self.tooltip_manager.capture_mouse_position()
+        self.tooltip_manager.show_dictionary_result(result, target_lang, trial_info)
+
     def _open_in_gemini(self):
         """Open Gemini web with translation prompt."""
         original = self.original_text.get('1.0', tk.END).strip()
@@ -1048,108 +1467,6 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         self._select_language_in_list(item.get('target_lang', 'English'))
         
         self._update_translation(item.get('translated', ''))
-
-    def _start_screenshot_ocr(self):
-        """Start screenshot capture process."""
-        # Check if in trial mode - screenshot OCR not available
-        if self.is_trial_mode():
-            self._show_trial_feature_blocked("Screenshot OCR")
-            return
-
-        if not self.config.get('vision_enabled', False):
-            self.show_tooltip("", "Error: Vision Mode is disabled.\nPlease enable it in Settings to use Screenshot Translate.", "Error")
-            return
-            
-        # Hide windows to capture clean screenshot
-        if self.popup: self.popup.withdraw()
-        self.tooltip_manager.close()  # Close tooltip before screenshot
-        if self.settings_window and self.settings_window.window.winfo_exists():
-            self.settings_window.window.withdraw()
-            
-        # Delay slightly to allow withdraw
-        self.root.after(200, lambda: self.screenshot_capture.capture_region(self._on_screenshot_captured))
-
-    def _on_screenshot_captured(self, image_path):
-        """Handle captured screenshot - add to attachments for user to process."""
-        # Restore settings window if it was open
-        if self.settings_window and self.settings_window.window.winfo_exists():
-            self.settings_window.window.deiconify()
-
-        if not image_path:
-            # Restore popup if it existed
-            if self.popup:
-                self.popup.deiconify()
-            return
-
-        # Check if popup already exists with attachment_area
-        popup_exists = (self.popup and
-                        hasattr(self, 'attachment_area') and
-                        self.attachment_area)
-
-        if popup_exists:
-            # Popup exists - just restore it and add screenshot (don't recreate)
-            try:
-                self.popup.deiconify()
-                self.popup.attributes('-topmost', True)
-                self.popup.update()
-                self.popup.attributes('-topmost', False)
-                self.popup.lift()
-                self.popup.focus_force()
-            except tk.TclError:
-                popup_exists = False  # Window was destroyed, need to create new
-
-        if not popup_exists:
-            # Create new popup
-            self.show_popup("", "", self.selected_language, force_new=True)
-
-        # Add screenshot to attachments
-        if hasattr(self, 'attachment_area') and self.attachment_area:
-            try:
-                self.attachment_area.add_file(image_path, show_warning=False)
-                logging.info(f"Screenshot added to attachments: {image_path}")
-            except Exception as e:
-                logging.error(f"Failed to add screenshot to attachments: {e}")
-
-    def _process_screenshot(self, image_path):
-        """Process screenshot with AI."""
-        try:
-            target_lang = self.selected_language
-            prompt = f"""
-1. Extract all text from this image
-2. Translate to {target_lang}
-
-Response format:
-**Original:**
-[extracted text]
-
-**Translation:**
-[translated text]
-"""
-            result = self.translation_service.api_manager.translate_image(prompt, image_path)
-            
-            # Simple parsing (fallback to full result if format doesn't match)
-            original = "Image Text"
-            translated = result
-            
-            if "**Original:**" in result and "**Translation:**" in result:
-                try:
-                    parts = result.split("**Translation:**")
-                    original = parts[0].replace("**Original:**", "").strip()
-                    translated = parts[1].strip()
-                except (IndexError, ValueError):
-                    pass  # Keep default values on parse failure
-
-            # Update UI
-            self.root.after(0, lambda: self.show_popup(original, translated, target_lang))
-
-            # Clean up temp file
-            try:
-                os.remove(image_path)
-            except OSError:
-                pass  # File may already be deleted or locked
-                
-        except Exception as e:
-            self.root.after(0, lambda: self.show_popup("Error processing image", str(e), self.selected_language))
 
     def _setup_drop_handling(self, popup_window):
         """Setup drag-and-drop handling for the popup window."""
@@ -1348,17 +1665,36 @@ Response format:
             if result:
                 webbrowser.open(update_info['url'])
 
+    def _show_settings_tab(self, tab_name: str):
+        """Open settings window and navigate to a specific tab.
+
+        Args:
+            tab_name: Name of the tab to open (e.g., "API Key", "Dictionary", "General")
+        """
+        self.show_settings()
+
+        def try_open_tab(attempts=3):
+            if attempts <= 0:
+                return
+            if self.settings_window and hasattr(self.settings_window, 'open_tab'):
+                self.settings_window.open_tab(tab_name)
+                self._focus_settings_window()
+            else:
+                self.root.after(200, lambda: try_open_tab(attempts - 1))
+
+        self.root.after(100, try_open_tab)
+
     def _show_api_error(self):
         """Show API error dialog."""
-        APIErrorDialog(self.root, on_open_settings=self.show_settings)
+        APIErrorDialog(self.root, on_open_settings_tab=self._show_settings_tab)
 
     def _show_trial_exhausted(self):
         """Show trial quota exhausted dialog."""
-        TrialExhaustedDialog(self.root, on_open_settings=self.show_settings)
+        TrialExhaustedDialog(self.root, on_open_settings_tab=self._show_settings_tab)
 
     def _show_trial_feature_blocked(self, feature_name: str):
         """Show dialog when user tries to use a feature disabled in trial mode."""
-        TrialFeatureDialog(self.root, feature_name=feature_name, on_open_settings=self.show_settings)
+        TrialFeatureDialog(self.root, feature_name=feature_name, on_open_settings_tab=self._show_settings_tab)
 
     def is_trial_mode(self) -> bool:
         """Check if currently in trial mode."""

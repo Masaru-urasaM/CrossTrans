@@ -103,7 +103,7 @@ class ScreenshotCapture:
         if self.rect:
             self.canvas.delete(self.rect)
         self.rect = self.canvas.create_rectangle(
-            0, 0, 0, 0, outline='red', width=2, fill='white', stipple='gray25'
+            0, 0, 0, 0, outline="#991700", width=2, fill='white', stipple='gray25'
         )
 
     def _on_drag(self, event):

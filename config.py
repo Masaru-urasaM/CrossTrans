@@ -27,8 +27,7 @@ class Config:
         "Vietnamese": "win+alt+v",
         "English": "win+alt+e",
         "Japanese": "win+alt+j",
-        "Chinese Simplified": "win+alt+c",
-        "Screenshot": "win+alt+s"
+        "Chinese Simplified": "win+alt+c"
     }
 
     # Languages that can be added as custom hotkeys
@@ -49,7 +48,9 @@ class Config:
         "vision_enabled": False,
         "file_processing_enabled": False,
         # Provider health tracking for smart fallback
-        "provider_health": {}
+        "provider_health": {},
+        # NLP language packs for Dictionary mode
+        "nlp_installed": []  # List of installed language names (e.g., ["Vietnamese", "English"])
     }
 
     def __init__(self):
@@ -360,16 +361,25 @@ class Config:
 
     # API Capability Management
     def update_api_capabilities(self, api_key: str, model_name: str, vision_capable: bool, file_capable: bool):
-        """Update capability flags for a specific API configuration."""
+        """Update capability flags for a specific API configuration.
+
+        This is called when an API is tested successfully.
+        The flags persist until the API is re-tested and fails, or deleted.
+        """
         api_keys = self.get_api_keys()
+        updated = False
         for api_config in api_keys:
             if api_config.get('api_key') == api_key and api_config.get('model_name') == model_name:
                 api_config['vision_capable'] = vision_capable
                 api_config['file_capable'] = file_capable
+                updated = True
                 break
-        self._config['api_keys'] = api_keys
-        self._auto_update_toggles()
-        self.save()
+
+        if updated:
+            # Use set_api_keys to properly encrypt and save
+            self.set_api_keys(api_keys)
+            self._auto_update_toggles()
+            self.save()
 
     def _auto_update_toggles(self):
         """Auto-enable toggles based on API capabilities."""
@@ -395,6 +405,38 @@ class Config:
     def has_any_file_capable(self) -> bool:
         """Check if any API supports file processing."""
         return len(self.get_file_capable_apis()) > 0
+
+    # NLP Language Pack Management
+    def get_nlp_installed(self) -> List[str]:
+        """Get list of installed NLP language pack names."""
+        return self._config.get('nlp_installed', [])
+
+    def set_nlp_installed(self, languages: List[str]):
+        """Set list of installed NLP language packs."""
+        self._config['nlp_installed'] = languages
+        self.save()
+
+    def add_nlp_installed(self, language: str):
+        """Add a language to installed NLP packs."""
+        installed = self.get_nlp_installed()
+        if language not in installed:
+            installed.append(language)
+            self.set_nlp_installed(installed)
+
+    def remove_nlp_installed(self, language: str):
+        """Remove a language from installed NLP packs."""
+        installed = self.get_nlp_installed()
+        if language in installed:
+            installed.remove(language)
+            self.set_nlp_installed(installed)
+
+    def is_nlp_installed(self, language: str) -> bool:
+        """Check if a language NLP pack is installed."""
+        return language in self.get_nlp_installed()
+
+    def has_any_nlp_installed(self) -> bool:
+        """Check if any NLP language pack is installed."""
+        return len(self.get_nlp_installed()) > 0
 
     # Generic getter/setter
     def get(self, key: str, default: Any = None) -> Any:

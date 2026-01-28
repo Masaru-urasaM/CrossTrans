@@ -17,20 +17,21 @@ from src.core.ssl_pinning import get_ssl_context_for_url
 
 # Default models to try for each provider when model is "Auto"
 # Ordered by preference (best models first)
+# Keys match PROVIDERS_LIST exactly (Title Case)
 DEFAULT_MODELS_BY_PROVIDER = {
-    'google': ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'],
-    'openai': ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo'],
-    'anthropic': ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022', 'claude-3-haiku-20240307'],
-    'groq': ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768'],
-    'deepseek': ['deepseek-chat', 'deepseek-coder'],
-    'xai': ['grok-2', 'grok-beta'],
-    'mistral': ['mistral-large-latest', 'mistral-small-latest'],
-    'perplexity': ['sonar', 'sonar-pro'],
-    'cerebras': ['llama-3.3-70b', 'llama3.1-70b'],
-    'sambanova': ['Meta-Llama-3.3-70B-Instruct', 'Meta-Llama-3.1-70B-Instruct'],
-    'together': ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo'],
-    'siliconflow': ['deepseek-ai/DeepSeek-V3', 'Qwen/Qwen2.5-72B-Instruct'],
-    'openrouter': ['google/gemini-2.0-flash-exp:free', 'meta-llama/llama-3.3-70b-instruct:free'],
+    'Google': ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'],
+    'OpenAI': ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo'],
+    'Anthropic': ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022', 'claude-3-haiku-20240307'],
+    'DeepSeek': ['deepseek-chat', 'deepseek-coder'],
+    'Groq': ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768'],
+    'xAI': ['grok-2', 'grok-beta'],
+    'Mistral': ['mistral-large-latest', 'mistral-small-latest'],
+    'Perplexity': ['sonar', 'sonar-pro'],
+    'Cerebras': ['llama-3.3-70b', 'llama3.1-70b'],
+    'SambaNova': ['Meta-Llama-3.3-70B-Instruct', 'Meta-Llama-3.1-70B-Instruct'],
+    'Together': ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo'],
+    'SiliconFlow': ['deepseek-ai/DeepSeek-V3', 'Qwen/Qwen2.5-72B-Instruct'],
+    'OpenRouter': ['google/gemini-2.0-flash-exp:free', 'meta-llama/llama-3.3-70b-instruct:free'],
 }
 
 if TYPE_CHECKING:
@@ -92,68 +93,68 @@ class AIAPIManager:
                     return provider
 
         # 2. Check for explicit provider prefixes
-        if model_lower.startswith('openrouter/'): return 'openrouter'
-        if model_lower.startswith('together/') or model_lower.startswith('meta-llama/'): return 'together'
-        if model_lower.startswith('silicon/') or model_lower.startswith('sf/'): return 'siliconflow'
+        if model_lower.startswith('openrouter/'): return 'OpenRouter'
+        if model_lower.startswith('together/') or model_lower.startswith('meta-llama/'): return 'Together'
+        if model_lower.startswith('silicon/') or model_lower.startswith('sf/'): return 'SiliconFlow'
 
         # 3. Model name contains "/" - likely Together or SiliconFlow format
         if '/' in model:
             # SiliconFlow patterns
             if any(model.startswith(p) for p in ['Qwen/', 'deepseek-ai/', 'THUDM/', '01-ai/', 'internlm/', 'Pro/']):
-                return 'siliconflow'
+                return 'SiliconFlow'
             # Together patterns
             if any(model.startswith(p) for p in ['meta-llama/', 'mistralai/', 'google/']):
-                return 'together'
+                return 'Together'
 
-        # 4. API Key Patterns
+        # 4. API Key Patterns (already returns Title Case from constants.py)
         for pattern, provider in API_KEY_PATTERNS.items():
             if key.startswith(pattern):
                 return provider
 
         # 5. Proprietary Models
         if 'gemini' in model_lower:
-            return 'google'
+            return 'Google'
         if 'claude' in model_lower:
-            return 'anthropic'
+            return 'Anthropic'
         if 'gpt' in model_lower or model_lower.startswith('o1') or model_lower.startswith('o3') or 'dall-e' in model_lower:
-            return 'openai'
+            return 'OpenAI'
         if 'grok' in model_lower:
-            return 'xai'
+            return 'xAI'
 
         # 6. Official Provider Models
         if model_lower.startswith('deepseek-'):
-            return 'deepseek'
+            return 'DeepSeek'
 
         if any(model_lower.startswith(p) for p in ['mistral-', 'codestral-', 'pixtral-', 'ministral-', 'open-mistral', 'open-mixtral']):
-            return 'mistral'
+            return 'Mistral'
 
         if 'sonar' in model_lower:
-            return 'perplexity'
+            return 'Perplexity'
 
         # 7. Groq-specific model signatures
         groq_suffixes = ['-32768', '-8192', '-versatile', '-instant', '-preview', '-specdec']
         if any(model_lower.endswith(s) for s in groq_suffixes):
-            return 'groq'
+            return 'Groq'
 
         if '/' not in model and any(model_lower.startswith(p) for p in ['llama3-', 'llama-3', 'gemma-', 'gemma2-', 'mixtral-', 'whisper-', 'distil-']):
-            return 'groq'
+            return 'Groq'
 
         # 8. SambaNova: Meta-Llama-xxx format
         if model.startswith('Meta-Llama-'):
-            return 'sambanova'
+            return 'SambaNova'
 
         # 9. Cerebras: llama3.1-xxx format (with dot)
         if model_lower.startswith('llama3.'):
-            return 'cerebras'
+            return 'Cerebras'
 
         # 10. Generic fallback
         if 'qwen' in model_lower or model_lower.startswith('yi-'):
-            return 'siliconflow'
+            return 'SiliconFlow'
 
         if any(x in model_lower for x in ['llama', 'mixtral', 'gemma', 'whisper']):
-            return 'groq'
+            return 'Groq'
 
-        return 'google'  # Ultimate fallback
+        return 'Google'  # Ultimate fallback
 
     def _make_request_with_retry(self, url: str, data: dict, headers: dict,
                                   response_parser: Callable[[dict], str],
@@ -315,10 +316,13 @@ class AIAPIManager:
 
     def _generate_content(self, provider: str, api_key: str, model_name: str,
                            prompt: str, image_path: Optional[str] = None) -> str:
-        """Route the request to the correct provider."""
+        """Route the request to the correct provider.
+
+        Provider names use Title Case (e.g., 'Google', 'OpenAI', 'Groq').
+        """
 
         # --- Google (SDK) ---
-        if provider == 'google':
+        if provider == 'Google':
             genai.configure(api_key=api_key)
             model = genai.GenerativeModel(model_name)
             if image_path:
@@ -330,22 +334,22 @@ class AIAPIManager:
             return response.text.strip()
 
         # --- Anthropic ---
-        elif provider == 'anthropic':
+        elif provider == 'Anthropic':
             return self._call_anthropic(api_key, model_name, prompt, image_path)
 
         # --- OpenAI Compatible APIs ---
         base_urls = {
-            'openai': "https://api.openai.com/v1/chat/completions",
-            'groq': "https://api.groq.com/openai/v1/chat/completions",
-            'deepseek': "https://api.deepseek.com/chat/completions",
-            'mistral': "https://api.mistral.ai/v1/chat/completions",
-            'xai': "https://api.x.ai/v1/chat/completions",
-            'perplexity': "https://api.perplexity.ai/chat/completions",
-            'cerebras': "https://api.cerebras.ai/v1/chat/completions",
-            'sambanova': "https://api.sambanova.ai/v1/chat/completions",
-            'together': "https://api.together.xyz/v1/chat/completions",
-            'siliconflow': "https://api.siliconflow.cn/v1/chat/completions",
-            'openrouter': "https://openrouter.ai/api/v1/chat/completions",
+            'OpenAI': "https://api.openai.com/v1/chat/completions",
+            'Groq': "https://api.groq.com/openai/v1/chat/completions",
+            'DeepSeek': "https://api.deepseek.com/chat/completions",
+            'Mistral': "https://api.mistral.ai/v1/chat/completions",
+            'xAI': "https://api.x.ai/v1/chat/completions",
+            'Perplexity': "https://api.perplexity.ai/chat/completions",
+            'Cerebras': "https://api.cerebras.ai/v1/chat/completions",
+            'SambaNova': "https://api.sambanova.ai/v1/chat/completions",
+            'Together': "https://api.together.xyz/v1/chat/completions",
+            'SiliconFlow': "https://api.siliconflow.cn/v1/chat/completions",
+            'OpenRouter': "https://openrouter.ai/api/v1/chat/completions",
         }
 
         if provider in base_urls:
@@ -354,28 +358,42 @@ class AIAPIManager:
         raise Exception(f"Unknown provider: {provider}")
 
     def get_display_name(self, provider_code: str) -> str:
-        """Get nice display name for provider."""
+        """Get nice display name for provider.
+
+        Accepts both Title Case (Google) and lowercase (google) provider codes.
+        """
         display_map = {
-            'google': 'Google (Gemini)',
-            'openai': 'OpenAI',
-            'anthropic': 'Anthropic (Claude)',
-            'groq': 'Groq',
-            'xai': 'xAI (Grok)',
-            'deepseek': 'DeepSeek',
-            'mistral': 'Mistral AI',
-            'perplexity': 'Perplexity',
-            'cerebras': 'Cerebras',
-            'sambanova': 'SambaNova',
-            'together': 'Together AI',
-            'siliconflow': 'SiliconFlow',
-            'openrouter': 'OpenRouter'
+            'Google': 'Google (Gemini)',
+            'OpenAI': 'OpenAI',
+            'Anthropic': 'Anthropic (Claude)',
+            'Groq': 'Groq',
+            'xAI': 'xAI (Grok)',
+            'DeepSeek': 'DeepSeek',
+            'Mistral': 'Mistral AI',
+            'Perplexity': 'Perplexity',
+            'Cerebras': 'Cerebras',
+            'SambaNova': 'SambaNova',
+            'Together': 'Together AI',
+            'SiliconFlow': 'SiliconFlow',
+            'OpenRouter': 'OpenRouter'
         }
-        return display_map.get(provider_code.lower(), provider_code.title())
+        # Try exact match first, then case-insensitive lookup
+        if provider_code in display_map:
+            return display_map[provider_code]
+        # Fallback: try to find case-insensitive match
+        provider_lower = provider_code.lower()
+        for key, value in display_map.items():
+            if key.lower() == provider_lower:
+                return value
+        return provider_code.title()
 
     def test_connection(self, model_name: str, api_key: str, provider: str = 'Auto') -> bool:
-        """Test connection with a specific model and key."""
+        """Test connection with a specific model and key.
+
+        Provider should be Title Case (e.g., 'Google', 'OpenAI', 'Groq') or 'Auto'.
+        """
         try:
-            target_provider = self._identify_provider(model_name, api_key) if provider == 'Auto' else provider.lower()
+            target_provider = self._identify_provider(model_name, api_key) if provider == 'Auto' else provider
             self._generate_content(target_provider, api_key, model_name, "Say OK")
             return True
         except Exception as e:
@@ -386,12 +404,15 @@ class AIAPIManager:
         return api_key[:12] if len(api_key) > 12 else api_key
 
     def _detect_provider_from_key(self, api_key: str) -> str:
-        """Detect provider from API key pattern."""
+        """Detect provider from API key pattern.
+
+        Returns Title Case provider name (e.g., 'Google', 'Groq').
+        """
         for pattern, provider in API_KEY_PATTERNS.items():
             if api_key.startswith(pattern):
                 return provider
-        # Default to google if can't detect
-        return 'google'
+        # Default to Google if can't detect
+        return 'Google'
 
     def _try_auto_detect_model(self, api_key: str, provider: str, prompt: str) -> Optional[str]:
         """Try to auto-detect a working model for the given provider.
@@ -461,7 +482,7 @@ class AIAPIManager:
                 if provider_setting == 'Auto':
                     target_provider = self._detect_provider_from_key(api_key)
                 else:
-                    target_provider = provider_setting.lower()
+                    target_provider = provider_setting  # Already Title Case
 
                 # Try auto-detect model
                 logging.info(f"[API] Key #{i+1}: Model is Auto, detecting for provider {target_provider}...")
@@ -472,7 +493,7 @@ class AIAPIManager:
                     errors.append(f"Key #{i+1}: Auto-detection failed for all models")
                     continue
 
-            target_provider = self._identify_provider(model_name, api_key) if provider_setting == 'Auto' else provider_setting.lower()
+            target_provider = self._identify_provider(model_name, api_key) if provider_setting == 'Auto' else provider_setting
             configs_with_providers.append({
                 'config': config,
                 'provider': target_provider,
@@ -554,7 +575,7 @@ class AIAPIManager:
             if not api_key or not model_name:
                 continue
 
-            target_provider = self._identify_provider(model_name, api_key) if provider_setting == 'Auto' else provider_setting.lower()
+            target_provider = self._identify_provider(model_name, api_key) if provider_setting == 'Auto' else provider_setting
 
             # Check vision capability
             if not MultimodalProcessor.is_vision_capable(model_name, target_provider):
@@ -637,7 +658,7 @@ class AIAPIManager:
             if not api_key or not model_name:
                 continue
 
-            target_provider = self._identify_provider(model_name, api_key) if provider_setting == 'Auto' else provider_setting.lower()
+            target_provider = self._identify_provider(model_name, api_key) if provider_setting == 'Auto' else provider_setting
 
             # If we have images, check vision capability
             if needs_vision and not MultimodalProcessor.is_vision_capable(model_name, target_provider):
@@ -708,7 +729,7 @@ class AIAPIManager:
             full_prompt = prompt + file_section
 
         # --- Google (SDK) - supports multiple images natively ---
-        if provider == 'google':
+        if provider == 'Google':
             genai.configure(api_key=api_key)
             model = genai.GenerativeModel(model_name)
 
@@ -722,22 +743,22 @@ class AIAPIManager:
             return response.text.strip()
 
         # --- Anthropic - supports multiple images ---
-        elif provider == 'anthropic':
+        elif provider == 'Anthropic':
             return self._call_anthropic_multimodal(api_key, model_name, full_prompt, image_paths)
 
         # --- OpenAI Compatible APIs ---
         base_urls = {
-            'openai': "https://api.openai.com/v1/chat/completions",
-            'groq': "https://api.groq.com/openai/v1/chat/completions",
-            'deepseek': "https://api.deepseek.com/chat/completions",
-            'mistral': "https://api.mistral.ai/v1/chat/completions",
-            'xai': "https://api.x.ai/v1/chat/completions",
-            'perplexity': "https://api.perplexity.ai/chat/completions",
-            'cerebras': "https://api.cerebras.ai/v1/chat/completions",
-            'sambanova': "https://api.sambanova.ai/v1/chat/completions",
-            'together': "https://api.together.xyz/v1/chat/completions",
-            'siliconflow': "https://api.siliconflow.cn/v1/chat/completions",
-            'openrouter': "https://openrouter.ai/api/v1/chat/completions",
+            'OpenAI': "https://api.openai.com/v1/chat/completions",
+            'Groq': "https://api.groq.com/openai/v1/chat/completions",
+            'DeepSeek': "https://api.deepseek.com/chat/completions",
+            'Mistral': "https://api.mistral.ai/v1/chat/completions",
+            'xAI': "https://api.x.ai/v1/chat/completions",
+            'Perplexity': "https://api.perplexity.ai/chat/completions",
+            'Cerebras': "https://api.cerebras.ai/v1/chat/completions",
+            'SambaNova': "https://api.sambanova.ai/v1/chat/completions",
+            'Together': "https://api.together.xyz/v1/chat/completions",
+            'SiliconFlow': "https://api.siliconflow.cn/v1/chat/completions",
+            'OpenRouter': "https://openrouter.ai/api/v1/chat/completions",
         }
 
         if provider in base_urls:

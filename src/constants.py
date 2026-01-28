@@ -3,7 +3,7 @@ Constants and configuration values for CrossTrans.
 """
 
 # ============== VERSION ==============
-VERSION = "1.9.2"
+VERSION = "1.9.3"
 APP_NAME = "CrossTrans"
 GITHUB_REPO = "Masaru-urasaM/CrossTrans"
 FEEDBACK_URL = f"https://github.com/{GITHUB_REPO}/issues/new"
@@ -131,108 +131,185 @@ PROVIDERS_LIST = [
 ]
 
 # Maps specific model patterns to their native providers
+# Keys match PROVIDERS_LIST exactly (Title Case)
+# Updated January 2026 with all active models
 MODEL_PROVIDER_MAP = {
     # === GOOGLE (Gemini) ===
-    'google': [
-        'gemini-2.0-flash', 'gemini-2.0-flash-exp', 'gemini-2.0-flash-thinking-exp',
-        'gemini-1.5-pro', 'gemini-1.5-pro-latest', 'gemini-1.5-pro-002',
-        'gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash-002', 'gemini-1.5-flash-8b',
-        'gemini-pro', 'gemini-pro-vision',
+    'Google': [
+        # Gemini 3.0 Series
+        'gemini-3-flash',
+        # Gemini 2.5 Series
+        'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite',
+        'gemini-2.5-flash-preview-image',
+        # Gemini 2.0 Series
+        'gemini-2.0-flash', 'gemini-2.0-flash-exp', 'gemini-2.0-flash-lite',
     ],
     # === OPENAI ===
-    'openai': [
+    'OpenAI': [
+        # O-Series (Reasoning)
+        'o3', 'o3-mini', 'o3-pro',
+        'o1', 'o1-preview', 'o1-mini', 'o1-pro',
+        # GPT-4.1 Series
+        'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano',
+        # GPT-4o Series
         'gpt-4o', 'gpt-4o-mini', 'gpt-4o-2024-11-20', 'gpt-4o-2024-08-06',
+        'gpt-4o-audio-preview', 'gpt-4o-realtime-preview',
+        # GPT-4 Turbo
         'gpt-4-turbo', 'gpt-4-turbo-preview', 'gpt-4-turbo-2024-04-09',
+        # GPT-4 Base
         'gpt-4', 'gpt-4-0613', 'gpt-4-32k',
+        # GPT-3.5
         'gpt-3.5-turbo', 'gpt-3.5-turbo-0125', 'gpt-3.5-turbo-16k',
-        'o1', 'o1-preview', 'o1-mini', 'o3-mini',
     ],
     # === ANTHROPIC (Claude) ===
-    'anthropic': [
+    'Anthropic': [
+        # Claude 4.5 Series (Latest)
+        'claude-opus-4-5-20251101', 'claude-sonnet-4-5-20251101', 'claude-haiku-4-5-20251101',
+        # Claude 4 Series
+        'claude-4-opus', 'claude-4-sonnet', 'claude-4-haiku',
+        # Claude 3.5 Series
         'claude-3-5-sonnet-20241022', 'claude-3-5-sonnet-latest',
         'claude-3-5-haiku-20241022', 'claude-3-5-haiku-latest',
+        # Claude 3 Series
         'claude-3-opus-20240229', 'claude-3-sonnet-20240229', 'claude-3-haiku-20240307',
     ],
+    # === DEEPSEEK ===
+    'DeepSeek': [
+        'deepseek-chat', 'deepseek-coder', 'deepseek-reasoner',
+        'deepseek-r1', 'deepseek-r1-lite',
+        'deepseek-v3', 'deepseek-v2.5',
+    ],
     # === GROQ ===
-    'groq': [
-        'llama-3.1-70b-versatile', 'llama-3.1-8b-instant', 'llama-3.2-1b-preview',
-        'llama-3.2-3b-preview', 'llama-3.2-11b-vision-preview', 'llama-3.2-90b-vision-preview',
+    'Groq': [
+        # Llama 3.3
         'llama-3.3-70b-versatile', 'llama-3.3-70b-specdec',
+        # Llama 3.2
+        'llama-3.2-1b-preview', 'llama-3.2-3b-preview',
+        'llama-3.2-11b-vision-preview', 'llama-3.2-90b-vision-preview',
+        # Llama 3.1
+        'llama-3.1-70b-versatile', 'llama-3.1-8b-instant',
+        # Llama 3
         'llama3-70b-8192', 'llama3-8b-8192', 'llama-guard-3-8b',
+        # Mixtral & Gemma
         'mixtral-8x7b-32768', 'gemma-7b-it', 'gemma2-9b-it',
+        # Whisper (Audio)
         'whisper-large-v3', 'whisper-large-v3-turbo', 'distil-whisper-large-v3-en',
     ],
+    # === XAI (Grok) ===
+    'xAI': [
+        'grok-3', 'grok-3-fast',
+        'grok-2', 'grok-2-vision', 'grok-2-1212',
+        'grok-beta', 'grok-vision-beta',
+    ],
     # === MISTRAL AI ===
-    'mistral': [
+    'Mistral': [
+        # Large Models
         'mistral-large-latest', 'mistral-large-2411', 'mistral-large-2407',
+        # Medium & Small
         'mistral-medium-latest', 'mistral-small-latest', 'mistral-small-2409',
+        # Ministral
         'ministral-8b-latest', 'ministral-3b-latest',
+        # Open Models
         'open-mistral-nemo', 'open-mistral-7b', 'open-mixtral-8x7b', 'open-mixtral-8x22b',
+        # Codestral
         'codestral-latest', 'codestral-mamba-latest',
+        # Pixtral (Vision)
         'pixtral-large-latest', 'pixtral-12b-latest',
     ],
-    # === DEEPSEEK ===
-    'deepseek': [
-        'deepseek-chat', 'deepseek-coder', 'deepseek-reasoner',
-    ],
-    # === XAI (Grok) ===
-    'xai': [
-        'grok-beta', 'grok-vision-beta', 'grok-2', 'grok-2-vision', 'grok-2-1212',
-    ],
     # === PERPLEXITY ===
-    'perplexity': [
+    'Perplexity': [
+        # Sonar Series
         'sonar', 'sonar-pro', 'sonar-reasoning', 'sonar-reasoning-pro',
+        'sonar-deep-research',
+        # Legacy Sonar
         'llama-3.1-sonar-small-128k-online', 'llama-3.1-sonar-large-128k-online',
         'llama-3.1-sonar-huge-128k-online',
     ],
     # === CEREBRAS ===
-    'cerebras': [
-        'llama3.1-8b', 'llama3.1-70b', 'llama-3.3-70b',
+    'Cerebras': [
+        # Llama Series
+        'llama-4-scout-17b', 'llama-4-maverick-17b',
+        'llama-3.3-70b', 'llama3.1-8b', 'llama3.1-70b',
+        # Qwen Series
+        'qwen-3-32b',
     ],
     # === SAMBANOVA ===
-    'sambanova': [
-        'Meta-Llama-3.1-8B-Instruct', 'Meta-Llama-3.1-70B-Instruct',
-        'Meta-Llama-3.1-405B-Instruct', 'Meta-Llama-3.2-1B-Instruct',
-        'Meta-Llama-3.2-3B-Instruct', 'Meta-Llama-3.3-70B-Instruct',
+    'SambaNova': [
+        # DeepSeek
+        'DeepSeek-R1', 'DeepSeek-R1-Distill-Llama-70B', 'DeepSeek-R1-Distill-Qwen-32B',
+        # Llama 3.3
+        'Meta-Llama-3.3-70B-Instruct',
+        # Llama 3.2
+        'Meta-Llama-3.2-1B-Instruct', 'Meta-Llama-3.2-3B-Instruct',
+        # Llama 3.1
+        'Meta-Llama-3.1-8B-Instruct', 'Meta-Llama-3.1-70B-Instruct', 'Meta-Llama-3.1-405B-Instruct',
+        # Qwen
+        'Qwen2.5-72B-Instruct', 'Qwen2.5-Coder-32B-Instruct', 'QwQ-32B-Preview',
     ],
     # === TOGETHER ===
-    'together': [
-        'meta-llama/Llama-3.2-3B-Instruct-Turbo', 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo',
-        'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo', 'meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo',
+    'Together': [
+        # Llama 3.3
         'meta-llama/Llama-3.3-70B-Instruct-Turbo',
-        'mistralai/Mixtral-8x7B-Instruct-v0.1', 'mistralai/Mistral-7B-Instruct-v0.3',
+        # Llama 3.2
+        'meta-llama/Llama-3.2-3B-Instruct-Turbo', 'meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo',
+        # Llama 3.1
+        'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo', 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo',
+        'meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo',
+        # Qwen
         'Qwen/Qwen2.5-7B-Instruct-Turbo', 'Qwen/Qwen2.5-72B-Instruct-Turbo',
+        'Qwen/QwQ-32B-Preview',
+        # Mistral
+        'mistralai/Mixtral-8x7B-Instruct-v0.1', 'mistralai/Mistral-7B-Instruct-v0.3',
+        # DeepSeek
+        'deepseek-ai/DeepSeek-R1', 'deepseek-ai/DeepSeek-R1-Distill-Llama-70B',
+        # Google
         'google/gemma-2-9b-it', 'google/gemma-2-27b-it',
-        'deepseek-ai/deepseek-llm-67b-chat',
     ],
     # === SILICONFLOW ===
-    'siliconflow': [
+    'SiliconFlow': [
+        # Qwen Series
         'Qwen/Qwen2.5-7B-Instruct', 'Qwen/Qwen2.5-14B-Instruct', 'Qwen/Qwen2.5-32B-Instruct',
         'Qwen/Qwen2.5-72B-Instruct', 'Qwen/Qwen2.5-Coder-7B-Instruct',
         'Qwen/QwQ-32B-Preview', 'Qwen/Qwen2-VL-72B-Instruct',
-        'deepseek-ai/DeepSeek-V3', 'deepseek-ai/DeepSeek-V2.5', 'deepseek-ai/DeepSeek-Coder-V2-Instruct',
-        'THUDM/glm-4-9b-chat', 'internlm/internlm2_5-7b-chat',
+        # DeepSeek
+        'deepseek-ai/DeepSeek-V3', 'deepseek-ai/DeepSeek-V2.5', 'deepseek-ai/DeepSeek-R1',
+        'deepseek-ai/DeepSeek-Coder-V2-Instruct',
+        # GLM
+        'THUDM/glm-4-9b-chat',
+        # InternLM
+        'internlm/internlm2_5-7b-chat',
+        # Yi
         '01-ai/Yi-1.5-9B-Chat', '01-ai/Yi-1.5-34B-Chat',
+        # Pro versions
         'Pro/Qwen/Qwen2.5-7B-Instruct', 'Pro/deepseek-ai/DeepSeek-V3',
     ],
     # === OPENROUTER (aggregator - common models) ===
-    'openrouter': [
-        'openai/gpt-4o', 'openai/gpt-4-turbo', 'openai/gpt-3.5-turbo',
+    'OpenRouter': [
+        # OpenAI
+        'openai/gpt-4o', 'openai/gpt-4-turbo', 'openai/gpt-3.5-turbo', 'openai/o1', 'openai/o1-mini',
+        # Anthropic
         'anthropic/claude-3.5-sonnet', 'anthropic/claude-3-opus', 'anthropic/claude-3-haiku',
-        'google/gemini-pro', 'google/gemini-flash-1.5',
-        'meta-llama/llama-3.1-70b-instruct', 'meta-llama/llama-3.1-405b-instruct',
+        # Google
+        'google/gemini-2.0-flash-exp', 'google/gemini-pro', 'google/gemini-flash-1.5',
+        # Meta
+        'meta-llama/llama-3.3-70b-instruct', 'meta-llama/llama-3.1-70b-instruct', 'meta-llama/llama-3.1-405b-instruct',
+        # Mistral
         'mistralai/mistral-large', 'mistralai/mixtral-8x7b-instruct',
-        'deepseek/deepseek-chat', 'qwen/qwen-2.5-72b-instruct',
+        # DeepSeek
+        'deepseek/deepseek-chat', 'deepseek/deepseek-r1',
+        # Qwen
+        'qwen/qwen-2.5-72b-instruct', 'qwen/qwq-32b-preview',
     ],
 }
 
 # API Key Patterns for provider detection
+# Values match PROVIDERS_LIST exactly (Title Case)
 API_KEY_PATTERNS = {
-    'gsk_': 'groq',           # Groq keys start with gsk_
-    'sk-ant-': 'anthropic',   # Anthropic keys start with sk-ant-
-    'xai-': 'xai',            # xAI keys start with xai-
-    'sk-or-v1-': 'openrouter', # OpenRouter keys
-    'pplx-': 'perplexity',    # Perplexity keys
+    'gsk_': 'Groq',           # Groq keys start with gsk_
+    'sk-ant-': 'Anthropic',   # Anthropic keys start with sk-ant-
+    'xai-': 'xAI',            # xAI keys start with xai-
+    'sk-or-v1-': 'OpenRouter', # OpenRouter keys
+    'pplx-': 'Perplexity',    # Perplexity keys
     # Note: sk- is used by OpenAI, DeepSeek, Together, SiliconFlow - need model name
 }
 
