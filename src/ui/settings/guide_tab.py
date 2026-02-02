@@ -157,8 +157,14 @@ class GuideTabMixin:
             "",
             "Features:",
             "  • Words flow like a paragraph with line wrapping",
+            "  • Hyphenated words stay together (auto-update, state-of-the-art)",
             "  • 'Expand' button for larger view",
             "  • Results appear in a separate window",
+            "",
+            "Language Packs:",
+            "  • Install NLP packs for better tokenization",
+            "  • Supports Japanese, Chinese, Vietnamese, and 30+ languages",
+            "  • Settings > Dictionary tab to manage language packs",
         ])
 
         # === Section 6: Tips & Tricks ===

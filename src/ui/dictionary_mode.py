@@ -254,6 +254,13 @@ class WordButtonFrame:
         import logging
         logging.info(f"[DICT_TOKENIZE] language={self.language}, text_len={len(text)}")
 
+        # Check for hyphenated words - if present, use simple split to preserve them
+        # NLP tokenizers often split "auto-update" into ["auto", "-", "update"]
+        has_hyphenated = re.search(r'\w+-\w+', text)
+        if has_hyphenated:
+            logging.info(f"[DICT_TOKENIZE] Found hyphenated words, using simple split")
+            return re.findall(r'\S+', text)
+
         if self.language:
             try:
                 from src.core.nlp_manager import nlp_manager
@@ -267,9 +274,59 @@ class WordButtonFrame:
             except Exception as e:
                 logging.error(f"[DICT_TOKENIZE] Exception: {e}", exc_info=True)
 
-        # Simple fallback: split on whitespace
+        # Simple fallback: split on whitespace, keeping hyphenated words together
         logging.info(f"[DICT_TOKENIZE] Using whitespace fallback")
         return re.findall(r'\S+', text)
+
+    def _tokenize_simple(self, text: str) -> list:
+        """Simple tokenizer that keeps hyphenated words together."""
+        # Split by whitespace, preserving hyphenated compounds
+        return re.findall(r'\S+', text)
+
+    def _merge_hyphenated_tokens(self, tokens: list) -> list:
+        """Merge tokens that were split by hyphens.
+
+        UDPipe often splits "auto-update" into ["auto", "-", "update"].
+        This merges them back into ["auto-update"].
+
+        Also handles chained hyphens like "state-of-the-art" ->
+        ["state", "-", "of", "-", "the", "-", "art"] -> "state-of-the-art"
+
+        Args:
+            tokens: List of tokens from NLP tokenizer
+
+        Returns:
+            List with hyphenated words merged
+        """
+        if len(tokens) < 3:
+            return tokens
+
+        result = []
+        i = 0
+
+        while i < len(tokens):
+            # Check for pattern: word + hyphen + word (+ hyphen + word)*
+            if (i + 2 < len(tokens) and
+                tokens[i + 1] == '-' and
+                tokens[i].isalnum() and
+                tokens[i + 2].isalnum()):
+                # Start building merged token
+                merged = tokens[i]
+                i += 1
+
+                # Keep merging while we see hyphen + word pattern
+                while (i + 1 < len(tokens) and
+                       tokens[i] == '-' and
+                       tokens[i + 1].isalnum()):
+                    merged += '-' + tokens[i + 1]
+                    i += 2
+
+                result.append(merged)
+            else:
+                result.append(tokens[i])
+                i += 1
+
+        return result
 
     def _on_word_click(self, index: int, event):
         """Handle word label click."""

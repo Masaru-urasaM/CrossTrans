@@ -1841,6 +1841,8 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         """Switch to Dictionary tab in already-open settings window."""
         if self.settings_window and hasattr(self.settings_window, 'open_dictionary_tab'):
             self.settings_window.open_dictionary_tab()
+            # Re-focus window after switching tab
+            self._focus_settings_window()
 
     def _show_language_selection_dialog(self, original_text: str, suggested_lang: str = None,
                                          detected_but_not_installed: bool = False):
@@ -1878,9 +1880,11 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
 
         # Open Settings → Dictionary tab
         def open_settings_dict():
+            dialog.grab_release()  # Release grab before destroying
             dialog.destroy()
-            self.show_settings()
-            self.root.after(500, lambda: self._open_settings_dictionary_tab())
+            # Delay for focus settle, then open settings
+            self.root.after(50, self.show_settings)
+            self.root.after(550, lambda: self._open_settings_dictionary_tab())
 
         if detected_but_not_installed and suggested_lang:
             # Case: Language detected but not installed - show prominent install option
@@ -1949,20 +1953,26 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         def confirm():
             selected = lang_var.get()
             if selected:
+                dialog.grab_release()  # Release grab before destroying
                 dialog.destroy()
-                self._open_dictionary_with_language(original_text, selected)
+                # Delay for focus settle before opening dictionary popup
+                self.root.after(50, lambda: self._open_dictionary_with_language(original_text, selected))
+
+        def cancel():
+            dialog.grab_release()
+            dialog.destroy()
 
         confirm_kwargs = {"text": "Confirm", "command": confirm, "width": 12}
         if HAS_TTKBOOTSTRAP:
             confirm_kwargs["bootstyle"] = "primary"
         ttk.Button(btn_frame, **confirm_kwargs).pack(side=LEFT, padx=5)
 
-        cancel_kwargs = {"text": "Cancel", "command": dialog.destroy, "width": 10}
+        cancel_kwargs = {"text": "Cancel", "command": cancel, "width": 10}
         if HAS_TTKBOOTSTRAP:
             cancel_kwargs["bootstyle"] = "secondary"
         ttk.Button(btn_frame, **cancel_kwargs).pack(side=RIGHT, padx=5)
 
-        dialog.bind('<Escape>', lambda e: dialog.destroy())
+        dialog.bind('<Escape>', lambda e: cancel())
         dialog.bind('<Return>', lambda e: confirm())
 
     def _open_dictionary_with_language(self, original: str, language: str):
@@ -1990,7 +2000,6 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         dict_popup.title(title)
         dict_popup.configure(bg='#2b2b2b')
         dict_popup.attributes('-topmost', True)
-        dict_popup.after(100, lambda: dict_popup.attributes('-topmost', False))
 
         # Get work area (excludes taskbar)
         mouse_x = self.root.winfo_pointerx()
@@ -2022,6 +2031,11 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         # Apply dark title bar
         dict_popup.update_idletasks()
         set_dark_title_bar(dict_popup)
+
+        # Bring to front and focus (after window fully configured)
+        dict_popup.lift()
+        dict_popup.focus_force()
+        dict_popup.after(200, lambda: dict_popup.attributes('-topmost', False) if dict_popup.winfo_exists() else None)
 
         # Main frame
         main_frame = ttk.Frame(dict_popup, padding=15)
@@ -2212,6 +2226,13 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
             self._refresh_tray_menu()
 
         self.settings_window = SettingsWindow(self.root, self.config, on_settings_save, on_api_change)
+
+        # Ensure new window appears on top (same pattern as re-focusing existing window)
+        self.settings_window.window.attributes('-topmost', True)
+        self.settings_window.window.update()
+        self.settings_window.window.attributes('-topmost', False)
+        self.settings_window.window.lift()
+        self.settings_window.window.focus_force()
 
     def _open_settings_from_error(self):
         """Open settings from error tooltip."""

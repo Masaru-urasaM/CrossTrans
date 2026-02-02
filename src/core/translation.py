@@ -279,7 +279,7 @@ Rules (DO NOT include these in your response):
 2. **Source Language**: detected language
 3. **Definition**: explanation in {target_language} (REQUIRED)
 4. **Word Type**: noun/verb/adjective/adverb/etc.
-5. **Pronunciation**: /IPA/, /{target_language} phonetic/
+5. **Pronunciation**: /IPA/, / phonetic in {target_language} (Pronunciation, means how it is pronounced in the {target_language}.)/
 6. **Examples**:
    - Source language sentence → {target_language} translation
    - Source language sentence → {target_language} translation

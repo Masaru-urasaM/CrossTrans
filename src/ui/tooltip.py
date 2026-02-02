@@ -740,6 +740,8 @@ class TooltipManager:
         dialog.title("Select Source Language")
         dialog.configure(bg='#2b2b2b')
         dialog.attributes('-topmost', True)
+        dialog.transient(self.root)  # Make child of root window
+        dialog.grab_set()            # Modal: block parent interaction
 
         # Center on mouse position - taller if showing install prompt
         w = 400
@@ -753,9 +755,10 @@ class TooltipManager:
         frame.pack(fill=BOTH, expand=True)
 
         def open_settings_dict():
+            dialog.grab_release()  # Release grab before destroying
             dialog.destroy()
             if self._on_open_settings_dictionary_tab:
-                self._on_open_settings_dictionary_tab()
+                self.root.after(50, self._on_open_settings_dictionary_tab)  # Delay for focus settle
 
         if detected_but_not_installed and suggested_lang:
             # Case: Language detected but not installed - show prominent install option
@@ -826,20 +829,27 @@ class TooltipManager:
         def confirm():
             selected = lang_var.get()
             if selected:
+                dialog.grab_release()  # Release grab before destroying
                 dialog.destroy()
-                self._open_dictionary_with_language(text_to_analyze, selected, self._current_trial_info)
+                # Delay for focus settle before opening dictionary popup
+                self.root.after(50, lambda: self._open_dictionary_with_language(
+                    text_to_analyze, selected, self._current_trial_info))
+
+        def cancel():
+            dialog.grab_release()
+            dialog.destroy()
 
         confirm_kwargs = {"text": "Confirm", "command": confirm, "width": 10}
         if HAS_TTKBOOTSTRAP:
             confirm_kwargs["bootstyle"] = "primary"
         ttk.Button(btn_frame, **confirm_kwargs).pack(side=LEFT, padx=5)
 
-        cancel_kwargs = {"text": "Cancel", "command": dialog.destroy, "width": 10}
+        cancel_kwargs = {"text": "Cancel", "command": cancel, "width": 10}
         if HAS_TTKBOOTSTRAP:
             cancel_kwargs["bootstyle"] = "secondary"
         ttk.Button(btn_frame, **cancel_kwargs).pack(side=RIGHT, padx=5)
 
-        dialog.bind('<Escape>', lambda e: dialog.destroy())
+        dialog.bind('<Escape>', lambda e: cancel())
         dialog.bind('<Return>', lambda e: confirm())
 
     def _open_dictionary_with_language(self, text_to_analyze: str, language: str,
@@ -868,7 +878,9 @@ class TooltipManager:
             dict_popup.title(f"Dictionary ({language} → {target_lang})")
         dict_popup.configure(bg='#2b2b2b')
         dict_popup.attributes('-topmost', True)
-        dict_popup.after(100, lambda: dict_popup.attributes('-topmost', False))
+        dict_popup.lift()
+        dict_popup.focus_force()
+        dict_popup.after(100, lambda: dict_popup.attributes('-topmost', False) if dict_popup.winfo_exists() else None)
 
         # Calculate size and position - offset from tooltip
         popup_width = 650

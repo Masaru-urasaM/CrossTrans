@@ -1,6 +1,6 @@
 # CrossTrans
 
-![Version](https://img.shields.io/badge/version-1.9.8-blue.svg)
+![Version](https://img.shields.io/badge/version-1.9.8.2-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-yellow.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-informational.svg)
@@ -274,14 +274,22 @@ CrossTrans/
 
 ---
 
-## What's New in v1.9.8
+## What's New in v1.9.8.2
 
-### Stability Improvements
+### Dictionary Mode Improvements
+- **Hyphenated words preserved** - Words like "auto-update", "state-of-the-art" now stay as single tokens
+- **Better sentence detection** - Expanded punctuation list (55 characters) for accurate dictionary vs sentence detection
+- **Language pack info** - Guide tab updated with NLP language pack instructions
+
+### Performance (v1.9.8.1)
+- **Settings window opens instantly** - Lazy loading for heavy tabs (API, Dictionary, Guide)
+- **NLP pre-warming** - Dictionary tab loads faster on subsequent opens
+- **Cache optimization** - Fixed bug that was clearing cache on every Settings open
+
+### Stability (v1.9.8)
 - **Trial mode auto-recheck** - Automatically re-validates API keys every 24h
 - **Version upgrade detection** - Clears cache when upgrading to new version
-
-### Code Quality
-- **Settings refactored** - Split into modular package structure for better maintainability
+- **Settings refactored** - Split into modular package structure
 
 ### Previous in v1.9.7
 - **Screenshot Translation** - Win+Alt+S captures screen region for OCR translation
@@ -332,7 +340,7 @@ python main.py
 ```bash
 pip install pyinstaller
 pyinstaller CrossTrans.spec
-# Output: dist/CrossTrans_v1.9.8.exe
+# Output: dist/CrossTrans_v1.9.8.2.exe
 ```
 
 ### Running Tests
