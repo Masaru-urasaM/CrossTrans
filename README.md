@@ -2,7 +2,7 @@
 
 ![Version](https://img.shields.io/badge/version-1.9.8.2-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-yellow.svg)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
+![License](https://img.shields.io/badge/license-AGPL%20v3-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-informational.svg)
 
 A powerful Windows desktop application for instant text translation using AI. Select any text, press a hotkey, and get translations instantly - no window switching needed!
@@ -353,7 +353,7 @@ pytest tests/ --cov=src --cov-report=html
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the GNU Affero General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
 
 ---
 

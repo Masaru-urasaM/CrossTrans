@@ -80,7 +80,6 @@ a = Analysis(
         'ufal.udpipe',
         'pythainlp',
         'kiwipiepy',
-        'camel_tools',
         # spaCy dependencies
         'thinc',
         'thinc_apple_ops',

@@ -7,7 +7,7 @@ import mimetypes
 import os
 import fnmatch
 from typing import Tuple, Optional
-from src.constants import VISION_MODELS
+from src.core.remote_config import get_config
 
 
 class MultimodalProcessor:
@@ -19,10 +19,11 @@ class MultimodalProcessor:
         provider = provider.lower()
         model_name = model_name.lower()
         
-        if provider not in VISION_MODELS:
+        vision_models = get_config().vision_models
+        if provider not in vision_models:
             return False
-            
-        models = VISION_MODELS[provider]
+
+        models = vision_models[provider]
         for m in models:
             # Handle wildcards
             if '*' in m:

@@ -11,13 +11,14 @@ from typing import Optional, List, Dict, Any, Callable, TYPE_CHECKING
 
 import base64
 
-from src.constants import MODEL_PROVIDER_MAP, API_KEY_PATTERNS
+from src.core.remote_config import get_config
 from src.core.multimodal import MultimodalProcessor
 from src.core.ssl_pinning import get_ssl_context_for_url
 
 # Default models to try for each provider when model is "Auto"
 # Ordered by preference (best models first)
 # Keys match PROVIDERS_LIST exactly (Title Case)
+# NOTE: These are hardcoded fallbacks. The active list comes from get_config().
 DEFAULT_MODELS_BY_PROVIDER = {
     'Google': ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'],
     'OpenAI': ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo'],
@@ -86,8 +87,8 @@ class AIAPIManager:
         model_lower = model.lower()
         key = api_key.strip()
 
-        # 1. HIGHEST PRIORITY: Exact match in MODEL_PROVIDER_MAP
-        for provider, models in MODEL_PROVIDER_MAP.items():
+        # 1. HIGHEST PRIORITY: Exact match in model_provider_map
+        for provider, models in get_config().model_provider_map.items():
             for m in models:
                 if m.lower() == model_lower:
                     return provider
@@ -106,8 +107,8 @@ class AIAPIManager:
             if any(model.startswith(p) for p in ['meta-llama/', 'mistralai/', 'google/']):
                 return 'Together'
 
-        # 4. API Key Patterns (already returns Title Case from constants.py)
-        for pattern, provider in API_KEY_PATTERNS.items():
+        # 4. API Key Patterns (already returns Title Case)
+        for pattern, provider in get_config().api_key_patterns.items():
             if key.startswith(pattern):
                 return provider
 
@@ -432,20 +433,7 @@ class AIAPIManager:
             return self._call_anthropic(api_key, model_name, prompt, image_path)
 
         # --- OpenAI Compatible APIs ---
-        base_urls = {
-            'OpenAI': "https://api.openai.com/v1/chat/completions",
-            'Groq': "https://api.groq.com/openai/v1/chat/completions",
-            'DeepSeek': "https://api.deepseek.com/chat/completions",
-            'Mistral': "https://api.mistral.ai/v1/chat/completions",
-            'xAI': "https://api.x.ai/v1/chat/completions",
-            'Perplexity': "https://api.perplexity.ai/chat/completions",
-            'Cerebras': "https://api.cerebras.ai/v1/chat/completions",
-            'SambaNova': "https://api.sambanova.ai/v1/chat/completions",
-            'Together': "https://api.together.xyz/v1/chat/completions",
-            'SiliconFlow': "https://api.siliconflow.cn/v1/chat/completions",
-            'OpenRouter': "https://openrouter.ai/api/v1/chat/completions",
-            'HuggingFace': "https://router.huggingface.co/v1/chat/completions",
-        }
+        base_urls = get_config().provider_api_urls
 
         if provider in base_urls:
             return self._call_generic_openai_style(api_key, model_name, prompt, base_urls[provider], image_path)
@@ -504,7 +492,7 @@ class AIAPIManager:
 
         Returns Title Case provider name (e.g., 'Google', 'Groq').
         """
-        for pattern, provider in API_KEY_PATTERNS.items():
+        for pattern, provider in get_config().api_key_patterns.items():
             if api_key.startswith(pattern):
                 return provider
         # Default to Google if can't detect
@@ -534,8 +522,8 @@ class AIAPIManager:
                 # Clear cache and try all models
                 del self._working_models_cache[key_prefix]
 
-        # Try models for this provider
-        models_to_try = DEFAULT_MODELS_BY_PROVIDER.get(provider, [])
+        # Try models for this provider (from remote config, fallback to hardcoded)
+        models_to_try = get_config().default_models_by_provider.get(provider, [])
         if not models_to_try:
             logging.warning(f"[Auto-Model] No default models for provider: {provider}")
             return None
@@ -833,20 +821,7 @@ class AIAPIManager:
             return self._call_anthropic_multimodal(api_key, model_name, full_prompt, image_paths)
 
         # --- OpenAI Compatible APIs ---
-        base_urls = {
-            'OpenAI': "https://api.openai.com/v1/chat/completions",
-            'Groq': "https://api.groq.com/openai/v1/chat/completions",
-            'DeepSeek': "https://api.deepseek.com/chat/completions",
-            'Mistral': "https://api.mistral.ai/v1/chat/completions",
-            'xAI': "https://api.x.ai/v1/chat/completions",
-            'Perplexity': "https://api.perplexity.ai/chat/completions",
-            'Cerebras': "https://api.cerebras.ai/v1/chat/completions",
-            'SambaNova': "https://api.sambanova.ai/v1/chat/completions",
-            'Together': "https://api.together.xyz/v1/chat/completions",
-            'SiliconFlow': "https://api.siliconflow.cn/v1/chat/completions",
-            'OpenRouter': "https://openrouter.ai/api/v1/chat/completions",
-            'HuggingFace': "https://router.huggingface.co/v1/chat/completions",
-        }
+        base_urls = get_config().provider_api_urls
 
         if provider in base_urls:
             return self._call_openai_style_multimodal(api_key, model_name, full_prompt, base_urls[provider], image_paths)

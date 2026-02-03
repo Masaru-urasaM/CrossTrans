@@ -471,9 +471,16 @@ class AutoUpdater:
 
         try:
             current_exe = sys.executable
+            current_dir = os.path.dirname(current_exe)
             temp_dir = os.path.dirname(self.download_path)
+
+            # Determine new EXE path with version in filename
+            new_exe_name = f"CrossTrans_v{self.latest_version}.exe"
+            new_exe_path = os.path.join(current_dir, new_exe_name)
+
             logging.info(f"Installing update from: {self.download_path}")
             logging.info(f"Current EXE: {current_exe}")
+            logging.info(f"New EXE path: {new_exe_path}")
             logging.info(f"Target version: {self.latest_version}")
 
             # Create enhanced update batch script with timeout, retries, and verification
@@ -498,7 +505,8 @@ echo ============================================== > %LOGFILE%
 echo Update started at %DATE% %TIME% >> %LOGFILE%
 echo Target version: {self.latest_version} >> %LOGFILE%
 echo Source: {self.download_path} >> %LOGFILE%
-echo Target: {current_exe} >> %LOGFILE%
+echo Old EXE: {current_exe} >> %LOGFILE%
+echo New EXE: {new_exe_path} >> %LOGFILE%
 echo ============================================== >> %LOGFILE%
 
 :: Wait for app to close with 30-second timeout
@@ -527,51 +535,17 @@ echo Process closed after !WAITED! seconds >> %LOGFILE%
 echo Waiting for file handles to release... >> %LOGFILE%
 timeout /t 3 /nobreak >NUL
 
-:: Delete old backup
-echo Removing old backup if exists... >> %LOGFILE%
-del /F /Q "{current_exe}.bak" >NUL 2>&1
-
-:: Backup current version with 5 retries
-echo Creating backup (max 5 attempts)... >> %LOGFILE%
-set /a RETRY=0
-
-:backup_retry
-move /Y "{current_exe}" "{current_exe}.bak" >NUL 2>&1
-if errorlevel 1 (
-    set /a RETRY+=1
-    echo Backup attempt !RETRY! failed >> %LOGFILE%
-    if !RETRY! GEQ 5 (
-        echo FATAL: Cannot backup after 5 attempts >> %LOGFILE%
-        echo Update failed: File is locked by another process > %ERRORFILE%
-        echo {self.download_path} > %PENDINGFILE%
-        goto launch_old
-    )
-    timeout /t 2 /nobreak >NUL
-    goto backup_retry
-)
-
-if not exist "{current_exe}.bak" (
-    echo FATAL: Backup file not created >> %LOGFILE%
-    echo Update failed: Could not backup current version > %ERRORFILE%
-    echo {self.download_path} > %PENDINGFILE%
-    goto launch_old
-)
-
-echo Backup created successfully after !RETRY! retries >> %LOGFILE%
-
-:: Copy new version with 5 retries
-echo Installing new version (max 5 attempts)... >> %LOGFILE%
+:: Copy new version to new path with 5 retries
+echo Installing new version as {new_exe_name} (max 5 attempts)... >> %LOGFILE%
 set /a RETRY=0
 
 :copy_retry
-copy /Y "{self.download_path}" "{current_exe}" >NUL 2>&1
+copy /Y "{self.download_path}" "{new_exe_path}" >NUL 2>&1
 if errorlevel 1 (
     set /a RETRY+=1
     echo Copy attempt !RETRY! failed >> %LOGFILE%
     if !RETRY! GEQ 5 (
         echo FATAL: Cannot copy new version after 5 attempts >> %LOGFILE%
-        echo Restoring backup... >> %LOGFILE%
-        move /Y "{current_exe}.bak" "{current_exe}" >NUL 2>&1
         echo Update failed: Could not install new version > %ERRORFILE%
         echo {self.download_path} > %PENDINGFILE%
         goto launch_old
@@ -581,10 +555,8 @@ if errorlevel 1 (
 )
 
 :: Verify the new file exists
-if not exist "{current_exe}" (
+if not exist "{new_exe_path}" (
     echo FATAL: New version file not found after copy >> %LOGFILE%
-    echo Restoring backup... >> %LOGFILE%
-    move /Y "{current_exe}.bak" "{current_exe}" >NUL 2>&1
     echo Update failed: Installation incomplete > %ERRORFILE%
     echo {self.download_path} > %PENDINGFILE%
     goto launch_old
@@ -593,32 +565,57 @@ if not exist "{current_exe}" (
 :: Verify file size matches source
 echo Verifying file integrity... >> %LOGFILE%
 for %%I in ("{self.download_path}") do set SOURCE_SIZE=%%~zI
-for %%I in ("{current_exe}") do set DEST_SIZE=%%~zI
+for %%I in ("{new_exe_path}") do set DEST_SIZE=%%~zI
 echo Source size: !SOURCE_SIZE! bytes >> %LOGFILE%
 echo Dest size: !DEST_SIZE! bytes >> %LOGFILE%
 
 if not "!SOURCE_SIZE!"=="!DEST_SIZE!" (
     echo ERROR: File size mismatch - copy may be corrupted >> %LOGFILE%
-    echo Restoring backup... >> %LOGFILE%
-    move /Y "{current_exe}.bak" "{current_exe}" >NUL 2>&1
-    echo Update failed: File copy incomplete (size mismatch) > %ERRORFILE%
+    del /F /Q "{new_exe_path}" >NUL 2>&1
+    echo Update failed: File copy incomplete - size mismatch > %ERRORFILE%
     echo {self.download_path} > %PENDINGFILE%
     goto launch_old
 )
 
 echo File integrity verified successfully >> %LOGFILE%
+
+:: Backup old EXE (rename to .bak)
+echo Backing up old EXE... >> %LOGFILE%
+del /F /Q "{current_exe}.bak" >NUL 2>&1
+move /Y "{current_exe}" "{current_exe}.bak" >NUL 2>&1
+if errorlevel 1 (
+    echo WARNING: Could not backup old EXE, it may still exist >> %LOGFILE%
+)
+
 echo Installation successful >> %LOGFILE%
 
+:: Update Registry auto-start path if enabled
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "AITranslator" >NUL 2>&1
+if not errorlevel 1 (
+    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "AITranslator" /t REG_SZ /d "{new_exe_path}" /f >NUL 2>&1
+    echo Registry auto-start updated to {new_exe_name} >> %LOGFILE%
+)
+
 :: Write expected version for verification on next launch
-echo {self.latest_version}> %EXPECTEDFILE%
+echo {self.latest_version} > %EXPECTEDFILE%
 echo Update completed successfully > %SUCCESSFILE%
 
 :: Start new version
-echo Starting new version... >> %LOGFILE%
-start "" "{current_exe}"
+echo Starting new version: {new_exe_name} >> %LOGFILE%
+:: Delay to allow Windows Defender to finish scanning new EXE
+timeout /t 2 /nobreak >NUL
+start "" "{new_exe_path}"
 
-:: Wait and cleanup
-timeout /t 3 /nobreak >NUL
+:: Wait and verify the process started
+timeout /t 5 /nobreak >NUL
+tasklist /FI "IMAGENAME eq {new_exe_name}" 2>NUL | find /I "{new_exe_name}" >NUL
+if errorlevel 1 (
+    echo First launch failed, retrying... >> %LOGFILE%
+    timeout /t 3 /nobreak >NUL
+    start "" "{new_exe_path}"
+    timeout /t 3 /nobreak >NUL
+)
+
 echo Cleaning up temp files... >> %LOGFILE%
 rmdir /S /Q "{temp_dir}" >NUL 2>&1
 
@@ -650,13 +647,17 @@ del /F /Q "%~f0" >NUL 2>&1
             # Execute update script
             subprocess.Popen(
                 ['cmd', '/c', batch_path, str(os.getpid())],
-                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
+                creationflags=subprocess.CREATE_NO_WINDOW,
                 close_fds=True
             )
 
-            logging.info("Update script launched, exiting application...")
-            # Exit current app
-            sys.exit(0)
+            logging.info(f"Update script launched (PID: {os.getpid()}), force-exiting application...")
+            import time
+            time.sleep(0.5)  # Ensure log flush before exit
+            # Use os._exit() instead of sys.exit() because sys.exit() raises SystemExit
+            # which gets swallowed by Tkinter's after() callback handler, preventing process death.
+            # The batch script waits for this PID to die before proceeding with the update.
+            os._exit(0)
 
         except Exception as e:
             logging.error(f"Install failed: {e}", exc_info=True)

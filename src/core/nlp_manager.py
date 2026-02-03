@@ -484,14 +484,6 @@ LANGUAGE_PACKS: Dict[str, LanguagePack] = {
     ),
 
     # === OTHER LANGUAGES ===
-    "Arabic": LanguagePack(
-        name="Arabic",
-        code="ar",
-        packages=["camel-tools"],
-        size_mb=100,
-        module_check="camel_tools",
-        category="Middle Eastern"
-    ),
     "Hebrew": LanguagePack(
         name="Hebrew",
         code="he",
@@ -1584,10 +1576,6 @@ except Exception as e:
             elif language == "Thai":
                 from pythainlp.tokenize import word_tokenize as thai_tokenize
                 self._tokenizers[language] = lambda t: thai_tokenize(t)
-
-            elif language == "Arabic":
-                from camel_tools.tokenizers.word import simple_word_tokenize
-                self._tokenizers[language] = lambda t: simple_word_tokenize(t)
 
             # UDPipe-based tokenizers
             elif pack.udpipe_model:

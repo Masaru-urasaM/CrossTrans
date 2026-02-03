@@ -12,7 +12,7 @@ except ImportError:
     from tkinter import ttk
     HAS_TTKBOOTSTRAP = False
 
-from src.constants import MODEL_PROVIDER_MAP
+from src.core.remote_config import get_config
 
 
 def set_dark_title_bar(window):
@@ -46,15 +46,16 @@ def get_all_models_list(provider: str = "Auto") -> list:
         List of model names starting with "Auto", then sorted A-Z
     """
     models = []
+    model_provider_map = get_config().model_provider_map
 
     if provider == "Auto":
         # Add all models from all providers
-        for prov, model_list in MODEL_PROVIDER_MAP.items():
+        for prov, model_list in model_provider_map.items():
             models.extend(model_list)
     else:
         # Add models for specific provider only (keys are Title Case)
-        if provider in MODEL_PROVIDER_MAP:
-            models.extend(MODEL_PROVIDER_MAP[provider])
+        if provider in model_provider_map:
+            models.extend(model_provider_map[provider])
 
     # Sort alphabetically (case-insensitive)
     models.sort(key=lambda x: x.lower())

@@ -109,7 +109,7 @@ export default {
     // CORS headers
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, X-Device-ID, X-App-Context',
     };
 
@@ -118,7 +118,33 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
 
-    // Only allow POST
+    // --- Remote Config endpoint (GET /v1/config) ---
+    const url = new URL(request.url);
+    if (url.pathname === '/v1/config' && request.method === 'GET') {
+      try {
+        const config = await env.MODELS_KV.get('models_config', 'json');
+        if (!config) {
+          return new Response(JSON.stringify({ error: 'Config not found' }), {
+            status: 404,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        return new Response(JSON.stringify(config), {
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/json',
+            'Cache-Control': 'public, max-age=300',  // 5 min edge cache
+          }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: 'Failed to read config', detail: e.message }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+    }
+
+    // Only allow POST for translation endpoint
     if (request.method !== 'POST') {
       return new Response(JSON.stringify({ error: 'Method not allowed' }), {
         status: 405,

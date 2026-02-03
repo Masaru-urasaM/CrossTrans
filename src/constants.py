@@ -3,13 +3,17 @@ Constants and configuration values for CrossTrans.
 """
 
 # ============== VERSION ==============
-VERSION = "1.9.8"
+VERSION = "1.9.9"
 APP_NAME = "CrossTrans"
 GITHUB_REPO = "Masaru-urasaM/CrossTrans"
 FEEDBACK_URL = f"https://github.com/{GITHUB_REPO}/issues/new"
 
 # ============== NETWORK ==============
 LOCK_PORT = 47823  # Port for single instance lock
+
+# ============== REMOTE CONFIG ==============
+REMOTE_CONFIG_URL = "https://crossname.trial-api.workers.dev/v1/config"
+REMOTE_CONFIG_CACHE_TTL = 86400  # 24 hours in seconds
 
 # ============== TIMING ==============
 COOLDOWN = 2.0  # Translation cooldown in seconds

@@ -153,6 +153,10 @@ class TranslatorApp:
         # Check for update status from previous run (success/failure)
         self._check_update_status()
 
+        # Fetch remote model/provider config in background
+        from src.core.remote_config import get_config
+        get_config().fetch_remote_async()
+
         # Log DnD library availability
         logging.info(f"DnD libraries: tkinterdnd2={HAS_DND}, windnd={HAS_WINDND}")
 

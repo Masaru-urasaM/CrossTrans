@@ -17,7 +17,7 @@ except ImportError:
     from tkinter import ttk
     HAS_TTKBOOTSTRAP = False
 
-from src.constants import PROVIDERS_LIST, MODEL_PROVIDER_MAP, API_KEY_PATTERNS
+from src.core.remote_config import get_config
 from src.core.api_manager import AIAPIManager
 from src.core.multimodal import MultimodalProcessor
 from src.core.auth import require_auth
@@ -257,7 +257,7 @@ class APITabMixin:
         # Provider Combobox
         provider_var = tk.StringVar(value=provider)
         ttk.Label(row, text="Provider:", font=('Segoe UI', 9)).pack(side=LEFT)
-        provider_cb = ttk.Combobox(row, textvariable=provider_var, values=PROVIDERS_LIST, width=10, state="readonly")
+        provider_cb = ttk.Combobox(row, textvariable=provider_var, values=get_config().providers_list, width=10, state="readonly")
         provider_cb.pack(side=LEFT, padx=(3, 8))
 
         # Model Combobox (autocomplete - can select or type to filter)
@@ -285,7 +285,7 @@ class APITabMixin:
         key_var = tk.StringVar(value=key)
         ttk.Label(row, text="API Key:", font=('Segoe UI', 9)).pack(side=LEFT)
 
-        key_entry = ttk.Entry(row, textvariable=key_var, width=70, show="*")
+        key_entry = ttk.Entry(row, textvariable=key_var, width=28, show="*")
         key_entry.pack(side=LEFT, padx=(3, 5))
 
         # Store show state for this row
@@ -603,9 +603,9 @@ class APITabMixin:
             Provider name (Title Case) or empty string if not detected
         """
         key = api_key.strip()
-        for pattern, provider in API_KEY_PATTERNS.items():
+        for pattern, provider in get_config().api_key_patterns.items():
             if key.startswith(pattern):
-                return provider  # Already Title Case from constants.py
+                return provider  # Already Title Case
         return ""
 
     def _test_single_api(self, model_name, api_key, provider, result_label, silent=False, row_data=None):
@@ -644,19 +644,20 @@ class APITabMixin:
             # Case 1: Both Auto - first detect provider from API key pattern
             detected_provider = self._detect_provider_from_key(api_key)
 
-            if detected_provider and detected_provider in MODEL_PROVIDER_MAP:
+            model_map = get_config().model_provider_map
+            if detected_provider and detected_provider in model_map:
                 # Provider detected! Try ALL models of that provider
-                for model in MODEL_PROVIDER_MAP[detected_provider]:
+                for model in model_map[detected_provider]:
                     combinations_to_try.append((detected_provider, model))
             else:
                 # No pattern match - try ALL providers with ALL models
-                for prov_name, models in MODEL_PROVIDER_MAP.items():
+                for prov_name, models in model_map.items():
                     for model in models:
                         combinations_to_try.append((prov_name, model))
 
         elif provider != 'Auto' and (not model_name or model_name == 'Auto'):
             # Case 2: Provider specific, Model Auto - try ALL models of that provider
-            provider_models = MODEL_PROVIDER_MAP.get(provider, [])
+            provider_models = get_config().model_provider_map.get(provider, [])
             for model in provider_models:
                 combinations_to_try.append((provider, model))
 
@@ -669,7 +670,7 @@ class APITabMixin:
                 combinations_to_try.append((detected_provider, model_name))
             else:
                 # No pattern match - try that model with all providers
-                for prov_name in MODEL_PROVIDER_MAP.keys():
+                for prov_name in get_config().model_provider_map.keys():
                     combinations_to_try.append((prov_name, model_name))
 
         else:
