@@ -129,13 +129,16 @@ class TooltipManager:
 
         # Callbacks
         self._on_copy: Optional[Callable[[], None]] = None
+        self._on_copy_and_replace: Optional[Callable[[], None]] = None
         self._on_open_translator: Optional[Callable[[], None]] = None
         self._on_open_settings: Optional[Callable[[], None]] = None
         self._on_open_settings_dictionary_tab: Optional[Callable[[], None]] = None
         self._on_dictionary_lookup: Optional[Callable[[list, str], None]] = None
+        self.tooltip_replace_btn: Optional[tk.Button] = None
 
     def configure_callbacks(self,
                             on_copy: Optional[Callable[[], None]] = None,
+                            on_copy_and_replace: Optional[Callable[[], None]] = None,
                             on_open_translator: Optional[Callable[[], None]] = None,
                             on_open_settings: Optional[Callable[[], None]] = None,
                             on_open_settings_dictionary_tab: Optional[Callable[[], None]] = None,
@@ -144,12 +147,14 @@ class TooltipManager:
 
         Args:
             on_copy: Called when user clicks Copy button
+            on_copy_and_replace: Called when user clicks Replace button (copy + paste into source app)
             on_open_translator: Called when user clicks Open Translator
             on_open_settings: Called when user clicks Open Settings (error state)
             on_open_settings_dictionary_tab: Called to open Settings directly to Dictionary tab
             on_dictionary_lookup: Called when user performs dictionary lookup (words_list, target_lang)
         """
         self._on_copy = on_copy
+        self._on_copy_and_replace = on_copy_and_replace
         self._on_open_translator = on_open_translator
         self._on_open_settings = on_open_settings
         self._on_open_settings_dictionary_tab = on_open_settings_dictionary_tab
@@ -419,6 +424,23 @@ class TooltipManager:
             )
             self.tooltip_copy_btn.pack(side=LEFT)
 
+            # Replace button (copy translated text + paste into source app)
+            self.tooltip_replace_btn = tk.Button(
+                btn_frame,
+                text="Replace",
+                command=self._handle_copy_and_replace,
+                autostyle=False,
+                bg='#6f42c1',  # Bootstrap purple/indigo
+                fg='#ffffff',
+                activebackground='#5a32a3',
+                activeforeground='#ffffff',
+                font=('Segoe UI', 10),
+                relief='flat',
+                padx=12, pady=4,
+                cursor='hand2'
+            )
+            self.tooltip_replace_btn.pack(side=LEFT, padx=4)
+
             # Dictionary button - opens popup for original text
             self.tooltip_dict_btn = tk.Button(
                 btn_frame,
@@ -600,6 +622,11 @@ class TooltipManager:
         if self._on_copy:
             self._on_copy()
 
+    def _handle_copy_and_replace(self):
+        """Handle copy-and-replace button click."""
+        if self._on_copy_and_replace:
+            self._on_copy_and_replace()
+
     def _handle_open_translator(self):
         """Handle open translator button click."""
         if self._on_open_translator:
@@ -616,6 +643,14 @@ class TooltipManager:
         if self.tooltip_copy_btn:
             try:
                 self.tooltip_copy_btn.configure(text=text)
+            except tk.TclError:
+                pass
+
+    def set_replace_button_text(self, text: str):
+        """Set replace button text (e.g., for 'Replaced!' feedback)."""
+        if self.tooltip_replace_btn:
+            try:
+                self.tooltip_replace_btn.configure(text=text)
             except tk.TclError:
                 pass
 
@@ -1057,6 +1092,7 @@ class TooltipManager:
             self.tooltip = None
             self.tooltip_text = None
             self.tooltip_copy_btn = None
+            self.tooltip_replace_btn = None
             self.tooltip_dict_btn = None
             self._main_frame = None
 

@@ -3,7 +3,7 @@ Constants and configuration values for CrossTrans.
 """
 
 # ============== VERSION ==============
-VERSION = "1.9.9"
+VERSION = "1.9.10"
 APP_NAME = "CrossTrans"
 GITHUB_REPO = "Masaru-urasaM/CrossTrans"
 FEEDBACK_URL = f"https://github.com/{GITHUB_REPO}/issues/new"
