@@ -62,6 +62,8 @@ class Config:
         "trial_last_api_check": "",  # ISO datetime of last API check
         # Version tracking for cache clearing
         "last_run_version": None,  # Track version to detect upgrades
+        # Replace mode setting
+        "quick_replace": False,  # False = Manual Replace (preview), True = Quick Replace (immediate)
     }
 
     def __init__(self):
@@ -305,6 +307,16 @@ class Config:
     def set_screenshot_target_language(self, language: str):
         """Set target language for screenshot translation."""
         self._config['screenshot_target_language'] = language
+        self.save()
+
+    # Replace mode setting
+    def get_quick_replace(self) -> bool:
+        """Get whether Quick Replace mode is enabled."""
+        return self._config.get('quick_replace', False)
+
+    def set_quick_replace(self, enabled: bool):
+        """Set Quick Replace mode."""
+        self._config['quick_replace'] = enabled
         self.save()
 
     def restore_defaults(self):

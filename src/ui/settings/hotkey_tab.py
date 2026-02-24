@@ -100,6 +100,11 @@ class HotkeyTabMixin:
 
         self._create_screenshot_hotkey_section(hotkey_container)
 
+        # 4. Replace Mode section
+        ttk.Separator(hotkey_container).pack(fill=X, pady=20)
+        ttk.Label(hotkey_container, text="Replace Mode", font=('Segoe UI', 10, 'bold')).pack(anchor=W, pady=(0, 10))
+        self._create_replace_mode_section(hotkey_container)
+
         # Update scroll
         hotkey_container.update_idletasks()
         canvas.config(scrollregion=canvas.bbox("all"))
@@ -167,6 +172,45 @@ class HotkeyTabMixin:
         if hasattr(self, 'screenshot_lang_var'):
             self.config.set_screenshot_target_language(self.screenshot_lang_var.get())
         logging.info("Auto-saved screenshot settings")
+
+    def _create_replace_mode_section(self, parent):
+        """Create the Replace Mode configuration section."""
+        desc = ttk.Frame(parent)
+        desc.pack(fill=X, pady=(0, 10), padx=5)
+        ttk.Label(desc, text="Controls what happens when you click Replace in the tooltip.",
+                  font=('Segoe UI', 9), foreground='#888888').pack(anchor=W)
+
+        toggle_row = ttk.Frame(parent)
+        toggle_row.pack(fill=X, pady=5, padx=5)
+
+        self.quick_replace_var = tk.BooleanVar(value=self.config.get_quick_replace())
+
+        if HAS_TTKBOOTSTRAP:
+            ttk.Checkbutton(toggle_row,
+                            text="Quick Replace (paste immediately without preview)",
+                            variable=self.quick_replace_var,
+                            command=self._on_replace_mode_toggle,
+                            bootstyle="round-toggle-success").pack(anchor=W)
+        else:
+            ttk.Checkbutton(toggle_row,
+                            text="Quick Replace (paste immediately without preview)",
+                            variable=self.quick_replace_var,
+                            command=self._on_replace_mode_toggle).pack(anchor=W)
+
+        info = ttk.Frame(parent)
+        info.pack(fill=X, pady=(0, 5), padx=5)
+        ttk.Label(info,
+                  text="OFF = Manual Replace: Shows preview (strikethrough original \u2192 translated) with Agree/Cancel",
+                  font=('Segoe UI', 8), foreground='#888888').pack(anchor=W)
+        ttk.Label(info,
+                  text="ON = Quick Replace: Immediately pastes translation into the source app",
+                  font=('Segoe UI', 8), foreground='#888888').pack(anchor=W)
+
+    def _on_replace_mode_toggle(self):
+        """Handle Replace Mode toggle - auto-save immediately."""
+        enabled = self.quick_replace_var.get()
+        self.config.set_quick_replace(enabled)
+        logging.info(f"Replace mode changed: quick_replace={enabled}")
 
     def _add_default_hotkey_row(self, parent, language, hotkey):
         """Add a row for default languages with Restore button."""

@@ -1,6 +1,6 @@
 # CrossTrans
 
-![Version](https://img.shields.io/badge/version-1.9.9-blue.svg)
+![Version](https://img.shields.io/badge/version-1.9.10-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-yellow.svg)
 ![License](https://img.shields.io/badge/license-AGPL%20v3-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-informational.svg)
@@ -138,6 +138,10 @@ python main.py
 
 ### Tooltip Actions
 - **Copy** - Copy translation to clipboard
+- **Replace** - Replace selected text in source app with translation
+  - **Manual mode** (default): Shows preview with strikethrough original → translated text, then Agree/Cancel
+  - **Quick mode**: Immediately pastes translation (configurable in Settings → Hotkeys)
+  - **⚙ Gear icon**: Quick access to Replace mode settings
 - **Dictionary** - Open word-by-word lookup mode
 - **Open Translator** - Open full window with more options
 - **X** or `Escape` - Close tooltip
@@ -174,6 +178,7 @@ Features:
 - View default hotkeys
 - Record custom hotkeys (click "Record" then press keys)
 - Assign any language to any hotkey
+- Replace Mode toggle (Quick Replace vs Manual Replace)
 
 **API Key**
 - Add multiple API keys
@@ -275,7 +280,17 @@ CrossTrans/
 
 ---
 
-## What's New in v1.9.9
+## What's New in v1.9.10
+
+### Replace in Source App
+- **Replace button** - One-click replace selected text with translation directly in the source app
+- **Manual Replace mode** (default) - Preview with strikethrough original → translated text, then Agree/Cancel for safe replacement
+- **Quick Replace mode** - Immediate paste without preview for faster workflow
+- **⚙ Gear icon** - Dropdown menu next to Replace button for quick access to settings
+- **Replace Mode toggle** - Configurable in Settings → Hotkeys → Replace Mode section
+- **WS_EX_NOACTIVATE tooltip** - Tooltip doesn't steal focus from source app, keeping text selection alive
+
+### Previous in v1.9.9
 
 ### Dynamic Remote Model Configuration
 - **Models updated without rebuilding EXE** - Provider list, model names, and API URLs are now fetched from Cloudflare KV

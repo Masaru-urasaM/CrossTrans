@@ -89,13 +89,15 @@ def get_monitor_work_area(x: int, y: int) -> Tuple[int, int, int, int]:
 class TooltipManager:
     """Manages tooltip display for translation results."""
 
-    def __init__(self, root: tk.Tk):
+    def __init__(self, root: tk.Tk, config=None):
         """Initialize tooltip manager.
 
         Args:
             root: The root Tk window for screen info and scheduling
+            config: Config object for reading settings (e.g., replace mode)
         """
         self.root = root
+        self.config = config
         self.tooltip: Optional[tk.Toplevel] = None
         self.tooltip_text: Optional[tk.Text] = None
         self.tooltip_copy_btn: Optional[ttk.Button] = None
@@ -135,6 +137,9 @@ class TooltipManager:
         self._on_open_settings_dictionary_tab: Optional[Callable[[], None]] = None
         self._on_dictionary_lookup: Optional[Callable[[list, str], None]] = None
         self.tooltip_replace_btn: Optional[tk.Button] = None
+        self._replace_gear_btn: Optional[tk.Button] = None
+        self._btn_frame: Optional[ttk.Frame] = None
+        self._on_open_settings_hotkeys_tab: Optional[Callable[[], None]] = None
 
     def configure_callbacks(self,
                             on_copy: Optional[Callable[[], None]] = None,
@@ -142,7 +147,8 @@ class TooltipManager:
                             on_open_translator: Optional[Callable[[], None]] = None,
                             on_open_settings: Optional[Callable[[], None]] = None,
                             on_open_settings_dictionary_tab: Optional[Callable[[], None]] = None,
-                            on_dictionary_lookup: Optional[Callable[[list, str], None]] = None):
+                            on_dictionary_lookup: Optional[Callable[[list, str], None]] = None,
+                            on_open_settings_hotkeys_tab: Optional[Callable[[], None]] = None):
         """Configure callback functions for tooltip actions.
 
         Args:
@@ -152,6 +158,7 @@ class TooltipManager:
             on_open_settings: Called when user clicks Open Settings (error state)
             on_open_settings_dictionary_tab: Called to open Settings directly to Dictionary tab
             on_dictionary_lookup: Called when user performs dictionary lookup (words_list, target_lang)
+            on_open_settings_hotkeys_tab: Called to open Settings directly to Hotkeys tab
         """
         self._on_copy = on_copy
         self._on_copy_and_replace = on_copy_and_replace
@@ -159,6 +166,22 @@ class TooltipManager:
         self._on_open_settings = on_open_settings
         self._on_open_settings_dictionary_tab = on_open_settings_dictionary_tab
         self._on_dictionary_lookup = on_dictionary_lookup
+        self._on_open_settings_hotkeys_tab = on_open_settings_hotkeys_tab
+
+    def _apply_noactivate(self):
+        """Apply WS_EX_NOACTIVATE to tooltip window so it doesn't steal focus from source app."""
+        if not self.tooltip:
+            return
+        try:
+            hwnd = ctypes.windll.user32.GetParent(self.tooltip.winfo_id())
+            if not hwnd:
+                hwnd = self.tooltip.winfo_id()
+            GWL_EXSTYLE = -20
+            WS_EX_NOACTIVATE = 0x08000000
+            ex_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_NOACTIVATE)
+        except Exception:
+            pass  # Non-critical - tooltip still works, just may steal focus
 
     def capture_mouse_position(self):
         """Capture current mouse position for tooltip positioning."""
@@ -177,6 +200,7 @@ class TooltipManager:
 
         self.tooltip = tk.Toplevel(self.root)
         self.tooltip.overrideredirect(True)
+        self._apply_noactivate()
         self.tooltip.configure(bg='#2b2b2b')
         self.tooltip.attributes('-topmost', True)
 
@@ -334,6 +358,7 @@ class TooltipManager:
         # Create tooltip window
         self.tooltip = tk.Toplevel(self.root)
         self.tooltip.overrideredirect(True)
+        self._apply_noactivate()
 
         def on_tooltip_close():
             self.close()
@@ -400,16 +425,16 @@ class TooltipManager:
             ttk.Button(trial_frame, **guide_btn_kwargs).pack(side=RIGHT)
 
         # Button frame (Create FIRST to ensure it stays at BOTTOM)
-        btn_frame = ttk.Frame(main_frame)
-        btn_frame.pack(side=BOTTOM, fill=X, pady=(12, 0))
+        self._btn_frame = ttk.Frame(main_frame)
+        self._btn_frame.pack(side=BOTTOM, fill=X, pady=(12, 0))
 
-        btn_frame.bind("<Button-1>", self._start_move)
-        btn_frame.bind("<B1-Motion>", self._on_drag)
+        self._btn_frame.bind("<Button-1>", self._start_move)
+        self._btn_frame.bind("<B1-Motion>", self._on_drag)
 
         if not is_error:
             # Copy button
             self.tooltip_copy_btn = tk.Button(
-                btn_frame,
+                self._btn_frame,
                 text="Copy",
                 command=self._handle_copy,
                 autostyle=False,
@@ -426,7 +451,7 @@ class TooltipManager:
 
             # Replace button (copy translated text + paste into source app)
             self.tooltip_replace_btn = tk.Button(
-                btn_frame,
+                self._btn_frame,
                 text="Replace",
                 command=self._handle_copy_and_replace,
                 autostyle=False,
@@ -439,11 +464,28 @@ class TooltipManager:
                 padx=12, pady=4,
                 cursor='hand2'
             )
-            self.tooltip_replace_btn.pack(side=LEFT, padx=4)
+            self.tooltip_replace_btn.pack(side=LEFT, padx=(4, 0))
+
+            # Replace settings gear icon (opens Hotkeys tab in Settings)
+            self._replace_gear_btn = tk.Button(
+                self._btn_frame,
+                text="\u2699",  # ⚙ gear icon
+                command=self._handle_open_replace_settings,
+                autostyle=False,
+                bg='#495057',       # Dark grey (subtle)
+                fg='#ffffff',
+                activebackground='#5a6268',
+                activeforeground='#ffffff',
+                font=('Segoe UI', 10),
+                relief='flat',
+                padx=4, pady=4,
+                cursor='hand2'
+            )
+            self._replace_gear_btn.pack(side=LEFT, padx=(0, 4))
 
             # Dictionary button - opens popup for original text
             self.tooltip_dict_btn = tk.Button(
-                btn_frame,
+                self._btn_frame,
                 text="Dictionary",
                 command=self._open_dictionary_popup,
                 autostyle=False,
@@ -463,7 +505,7 @@ class TooltipManager:
 
             # Open Translator button
             self.tooltip_open_btn = tk.Button(
-                btn_frame,
+                self._btn_frame,
                 text="Open Translator",
                 command=self._handle_open_translator,
                 autostyle=False,
@@ -482,13 +524,13 @@ class TooltipManager:
             settings_btn_kwargs = {"text": "Open Settings", "command": self._handle_open_settings, "width": 14}
             if HAS_TTKBOOTSTRAP:
                 settings_btn_kwargs["bootstyle"] = "warning"
-            ttk.Button(btn_frame, **settings_btn_kwargs).pack(side=LEFT, padx=8)
+            ttk.Button(self._btn_frame, **settings_btn_kwargs).pack(side=LEFT, padx=8)
 
         # Close button
         close_btn_kwargs = {"text": "\u2715", "command": self.close, "width": 3}
         if HAS_TTKBOOTSTRAP:
             close_btn_kwargs["bootstyle"] = "secondary"
-        ttk.Button(btn_frame, **close_btn_kwargs).pack(side=RIGHT)
+        ttk.Button(self._btn_frame, **close_btn_kwargs).pack(side=RIGHT)
 
         # Translation text - USE FONT METRICS for correct sizing on all machines
         text_fg = '#ff6b6b' if is_error else '#ffffff'
@@ -623,9 +665,144 @@ class TooltipManager:
             self._on_copy()
 
     def _handle_copy_and_replace(self):
-        """Handle copy-and-replace button click."""
+        """Handle replace button - Quick or Manual mode based on config."""
+        is_quick = self.config and self.config.get_quick_replace()
+
+        if is_quick or not self._current_original:
+            # Quick Replace mode OR no original text → immediate replace
+            if self._on_copy_and_replace:
+                self._on_copy_and_replace()
+            return
+
+        self._show_replace_preview()
+
+    def _show_replace_preview(self):
+        """Transform tooltip to show replace preview with strikethrough original and translated text."""
+        original = self._current_original
+        translated = self._current_translation
+
+        if not self.tooltip_text or not self._btn_frame:
+            return
+
+        # --- Update text content ---
+        self.tooltip_text.config(state='normal')
+        self.tooltip_text.delete('1.0', tk.END)
+
+        # Configure tags
+        self.tooltip_text.tag_configure('strikethrough',
+                                         font=('Segoe UI', 11, 'overstrike'),
+                                         foreground='#888888')
+        self.tooltip_text.tag_configure('arrow',
+                                         font=('Segoe UI', 11),
+                                         foreground='#666666')
+        self.tooltip_text.tag_configure('translated',
+                                         font=('Segoe UI', 11),
+                                         foreground='#4ec9b0')
+
+        # Insert: strikethrough original → translated
+        self.tooltip_text.insert('1.0', original, 'strikethrough')
+        self.tooltip_text.insert(tk.END, '\n\n→\n\n', 'arrow')
+        self.tooltip_text.insert(tk.END, translated, 'translated')
+
+        self.tooltip_text.config(state='disabled')
+
+        # --- Replace button bar ---
+        for widget in self._btn_frame.winfo_children():
+            widget.destroy()
+
+        # Agree button (green - confirms replace)
+        tk.Button(
+            self._btn_frame,
+            text="\u2713 Agree",
+            command=self._handle_replace_agree,
+            autostyle=False,
+            bg='#198754',
+            fg='#ffffff',
+            activebackground='#157347',
+            activeforeground='#ffffff',
+            font=('Segoe UI', 10, 'bold'),
+            relief='flat',
+            padx=16, pady=4,
+            cursor='hand2'
+        ).pack(side=LEFT)
+
+        # Cancel button (grey - cancels replace)
+        tk.Button(
+            self._btn_frame,
+            text="\u2717 Cancel",
+            command=self._handle_replace_cancel,
+            autostyle=False,
+            bg='#6c757d',
+            fg='#ffffff',
+            activebackground='#5a6268',
+            activeforeground='#ffffff',
+            font=('Segoe UI', 10),
+            relief='flat',
+            padx=16, pady=4,
+            cursor='hand2'
+        ).pack(side=LEFT, padx=4)
+
+        # Close button (X) - still available
+        close_btn_kwargs = {"text": "\u2715", "command": self.close, "width": 3}
+        if HAS_TTKBOOTSTRAP:
+            close_btn_kwargs["bootstyle"] = "secondary"
+        ttk.Button(self._btn_frame, **close_btn_kwargs).pack(side=RIGHT)
+
+        # --- Resize tooltip to fit preview content ---
+        combined_text = original + '\n\n\u2192\n\n' + translated
+        new_width, new_height = self.calculate_size(combined_text)
+
+        if self.tooltip:
+            current_geo = self.tooltip.geometry()
+            parts = current_geo.split('+')
+            current_wh = parts[0].split('x')
+            final_width = max(int(current_wh[0]), new_width)
+            final_height = max(int(current_wh[1]), new_height)
+
+            # Update text widget height
+            try:
+                ui_font = font.Font(family='Segoe UI', size=11)
+                line_height = int(ui_font.metrics("linespace"))
+            except tk.TclError:
+                line_height = 20
+            VERTICAL_PADDING = 100
+            new_text_height = max(1, (final_height - VERTICAL_PADDING) // line_height)
+            self.tooltip_text.config(height=new_text_height)
+
+            # Reposition to stay within screen
+            x, y, adjusted_height = self._calculate_position(final_width, final_height)
+            self.tooltip.geometry(f"{final_width}x{adjusted_height}+{int(x)}+{int(y)}")
+
+    def _handle_replace_agree(self):
+        """User confirmed replace - execute the actual copy+paste."""
         if self._on_copy_and_replace:
             self._on_copy_and_replace()
+
+    def _handle_replace_cancel(self):
+        """User cancelled replace - close tooltip, original text unchanged."""
+        self.close()
+
+    def _handle_open_replace_settings(self):
+        """Show dropdown menu with Replace settings options."""
+        menu = tk.Menu(self.root, tearoff=0,
+                       bg='#2b2b2b', fg='#ffffff',
+                       activebackground='#495057', activeforeground='#ffffff',
+                       font=('Segoe UI', 10), relief='flat', bd=1)
+        menu.add_command(
+            label="\u2699 Hotkey Settings",
+            command=self._goto_hotkey_settings
+        )
+        # Position menu below the gear button
+        if self._replace_gear_btn:
+            x = self._replace_gear_btn.winfo_rootx()
+            y = self._replace_gear_btn.winfo_rooty() + self._replace_gear_btn.winfo_height()
+            menu.post(x, y)
+
+    def _goto_hotkey_settings(self):
+        """Navigate to Hotkeys tab in Settings."""
+        self.close()
+        if self._on_open_settings_hotkeys_tab:
+            self._on_open_settings_hotkeys_tab()
 
     def _handle_open_translator(self):
         """Handle open translator button click."""
@@ -1093,7 +1270,9 @@ class TooltipManager:
             self.tooltip_text = None
             self.tooltip_copy_btn = None
             self.tooltip_replace_btn = None
+            self._replace_gear_btn = None
             self.tooltip_dict_btn = None
+            self._btn_frame = None
             self._main_frame = None
 
     @property

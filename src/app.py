@@ -138,14 +138,15 @@ class TranslatorApp:
         self.screenshot_capture = ScreenshotCapture(self.root)
 
         # Tooltip manager
-        self.tooltip_manager = TooltipManager(self.root)
+        self.tooltip_manager = TooltipManager(self.root, self.config)
         self.tooltip_manager.configure_callbacks(
             on_copy=self._on_tooltip_copy,
             on_copy_and_replace=self._on_tooltip_copy_and_replace,
             on_open_translator=self._on_tooltip_open_translator,
             on_open_settings=self.show_settings,
             on_open_settings_dictionary_tab=self._show_settings_dictionary_tab,
-            on_dictionary_lookup=self._on_tooltip_dictionary_lookup
+            on_dictionary_lookup=self._on_tooltip_dictionary_lookup,
+            on_open_settings_hotkeys_tab=self._show_settings_hotkeys_tab
         )
 
         # Screenshot handler
@@ -331,77 +332,34 @@ class TranslatorApp:
     def _on_tooltip_copy_and_replace(self):
         """Copy translated text and paste it into the source application.
 
-        Flow: copy to clipboard -> close tooltip -> restore focus -> Ctrl+V paste.
-        Text is always copied to clipboard first as fallback if replace fails.
+        With WS_EX_NOACTIVATE on tooltip, source app keeps focus + selection.
+        Just copy to clipboard, close tooltip, and simulate Ctrl+V.
         """
         translated_text = self.current_translated
         if not translated_text:
             self.toast.show_warning("No translation to replace")
             return
 
-        source_hwnd = getattr(self, '_source_hwnd', None)
-
-        # Always copy to clipboard first (fallback if replace fails)
+        # Always copy to clipboard first (fallback if paste fails)
         pyperclip.copy(translated_text)
 
-        # Close tooltip immediately
+        # Close tooltip (source app still has focus due to WS_EX_NOACTIVATE)
         self.tooltip_manager.close()
 
-        # Validate source window
-        if not source_hwnd:
-            self.toast.show_warning("Source window not tracked. Text copied to clipboard.")
-            return
-
-        user32 = ctypes.windll.user32
-        if not user32.IsWindow(source_hwnd):
-            self.toast.show_warning("Source window closed. Text copied to clipboard.")
-            return
-
-        # Run focus-restore + paste in background thread (has sleep delays)
-        def do_replace():
+        # Paste in background thread (needs small delay for tooltip to fully close)
+        def do_paste():
             try:
-                # Unlock foreground window restriction (pattern from auth.py)
-                user32.AllowSetForegroundWindow(-1)  # ASFW_ANY
-
-                # Alt key trick to bypass Windows' foreground lock
-                VK_MENU = 0x12
-                KEYEVENTF_EXTENDEDKEY = 0x0001
-                KEYEVENTF_KEYUP = 0x0002
-                user32.keybd_event(VK_MENU, 0, KEYEVENTF_EXTENDEDKEY, 0)
-                user32.keybd_event(VK_MENU, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0)
-                user32.LockSetForegroundWindow(2)  # LSFW_UNLOCK
-
-                # Restore source window (handles minimized case too)
-                user32.ShowWindow(source_hwnd, 9)  # SW_RESTORE
-                result = user32.SetForegroundWindow(source_hwnd)
-                user32.BringWindowToTop(source_hwnd)
-
-                if not result:
-                    self.root.after(0, lambda: self.toast.show_warning(
-                        "Could not focus source window. Text copied to clipboard."))
-                    return
-
-                # Wait for focus to settle
-                time.sleep(0.2)
-
-                # Verify and retry once if needed
-                if user32.GetForegroundWindow() != source_hwnd:
-                    user32.SetForegroundWindow(source_hwnd)
-                    time.sleep(0.15)
-
-                # Simulate Ctrl+V to paste (replaces selected text in source app)
+                time.sleep(0.15)
                 import keyboard
                 keyboard.press_and_release('ctrl+v')
-
                 time.sleep(0.1)
                 self.root.after(0, lambda: self.toast.show_success("Replaced!"))
-
             except Exception as e:
-                logging.error(f"Copy-and-replace failed: {e}")
+                logging.error(f"Replace paste failed: {e}")
                 self.root.after(0, lambda: self.toast.show_warning(
                     "Replace failed. Text copied to clipboard."))
 
-        threading.Thread(target=do_replace, daemon=True).start()
+        threading.Thread(target=do_paste, daemon=True).start()
 
     def _on_tooltip_open_translator(self):
         """Handle open translator from tooltip."""
@@ -1199,6 +1157,13 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         """Open dictionary popup window with word buttons for original text."""
         original = self.original_text.get('1.0', tk.END).strip()
         self.dictionary_popup.open_from_text(original, self.popup)
+
+    def _show_settings_hotkeys_tab(self):
+        """Open settings window at Hotkeys tab.
+
+        Used by tooltip gear icon to quickly access Replace mode toggle.
+        """
+        self._show_settings_tab("Hotkeys")
 
     def _show_settings_dictionary_tab(self):
         """Open settings window and navigate directly to Dictionary tab.
