@@ -9,7 +9,6 @@ import ctypes
 import queue
 import logging
 import threading
-import webbrowser
 from typing import Dict, Tuple
 
 import pyperclip
@@ -340,6 +339,16 @@ class TranslatorApp:
             self.toast.show_warning("No translation to replace")
             return
 
+        # Preserve trailing newline from original selection
+        # When user selects a full line, the selection includes the trailing newline.
+        # Without preserving it, the next line would jump up after replace.
+        original_text = self.current_original
+        if original_text and original_text.endswith('\n') and not translated_text.endswith('\n'):
+            if original_text.endswith('\r\n'):
+                translated_text += '\r\n'
+            else:
+                translated_text += '\n'
+
         # Always copy to clipboard first (fallback if paste fails)
         pyperclip.copy(translated_text)
 
@@ -578,16 +587,6 @@ class TranslatorApp:
             self.copy_btn = ttk.Button(btn_frame, text="Copy",
                                        command=self._copy_translation, width=12)
         self.copy_btn.pack(side=LEFT, padx=10)
-
-        # Open Gemini button
-        if HAS_TTKBOOTSTRAP:
-            self.gemini_btn = ttk.Button(btn_frame, text="✦ Open Gemini",
-                                         command=self._open_in_gemini,
-                                         bootstyle="info", width=15)
-        else:
-            self.gemini_btn = ttk.Button(btn_frame, text="✦ Open Gemini",
-                                         command=self._open_in_gemini, width=15)
-        self.gemini_btn.pack(side=LEFT)
 
         # History button
         if HAS_TTKBOOTSTRAP:
@@ -1205,20 +1204,6 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
             self.settings_window.open_dictionary_tab()
             # Re-focus window after switching tab
             self._focus_settings_window()
-
-    def _open_in_gemini(self):
-        """Open Gemini web with translation prompt."""
-        original = self.original_text.get('1.0', tk.END).strip()
-        if not original:
-            self.toast.show_warning("No content to translate")
-            return
-
-        prompt = f"Translate the following text to {self.selected_language}:\n\n{original}"
-        pyperclip.copy(prompt)
-        self.gemini_btn.configure(text="Copied! Opening...")
-        self.toast.show_info("Prompt copied! Opening Gemini...")
-        webbrowser.open("https://gemini.google.com/app")
-        self.popup.after(2000, lambda: self.gemini_btn.configure(text="✦ Open Gemini"))
 
     def _open_history(self):
         """Open history dialog."""

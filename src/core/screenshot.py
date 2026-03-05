@@ -3,6 +3,7 @@ Screenshot Capture Module for CrossTrans.
 Supports multi-monitor setups with proper coordinate handling.
 """
 import ctypes
+import logging
 import tkinter as tk
 import tempfile
 import os
@@ -64,7 +65,7 @@ class ScreenshotCapture:
             # Capture full screen (all monitors on Windows if supported by Pillow)
             self.original_image = ImageGrab.grab(all_screens=True)
         except Exception as e:
-            print(f"Screenshot error: {e}")
+            logging.error(f"Screenshot error: {e}")
             if callback:
                 callback(None)
             return
@@ -160,7 +161,7 @@ class ScreenshotCapture:
                 self.callback(path)
                 
         except Exception as e:
-            print(f"Crop failed: {e}")
+            logging.error(f"Crop failed: {e}")
 
     def _close(self, call_callback=False):
         if self.top:

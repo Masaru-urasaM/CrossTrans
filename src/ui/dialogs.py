@@ -3,6 +3,8 @@ Dialog windows for CrossTrans.
 """
 import webbrowser
 
+from src.core.remote_config import get_config
+
 import tkinter as tk
 from tkinter import BOTH, X, LEFT, RIGHT, W
 
@@ -68,18 +70,13 @@ class APIErrorDialog:
         # Option 1: Get API key
         ttk.Label(instructions, text="1. Get a free API key:",
                   font=('Segoe UI', 10, 'bold')).pack(anchor=W)
-        if HAS_TTKBOOTSTRAP:
-            ttk.Button(instructions, text="   Google AI Studio (Free, 1500 req/day)",
-                       command=lambda: webbrowser.open("https://aistudio.google.com/app/apikey"),
-                       bootstyle="link").pack(anchor=W)
-        else:
-            ttk.Button(instructions, text="   Google AI Studio (Free, 1500 req/day)",
-                       command=lambda: webbrowser.open("https://aistudio.google.com/app/apikey")).pack(anchor=W)
+        ttk.Label(instructions, text="   Open Settings → Guide tab for instructions",
+                  font=('Segoe UI', 10)).pack(anchor=W)
 
         # Option 2: Enable Trial Mode
         ttk.Label(instructions, text="\n2. Enable Trial Mode:",
                   font=('Segoe UI', 10, 'bold')).pack(anchor=W)
-        ttk.Label(instructions, text="   Use shared API without your own key (100 requests/day)",
+        ttk.Label(instructions, text=f"   Use shared API without your own key ({get_config().trial_daily_limit} requests/day)",
                   font=('Segoe UI', 10)).pack(anchor=W)
         ttk.Label(instructions, text="   Go to Settings → API Key → Enable Trial Mode",
                   font=('Segoe UI', 10), foreground='#888888').pack(anchor=W)
@@ -160,7 +157,7 @@ class TrialExhaustedDialog:
         else:
             ttk.Label(main, text="Trial Quota Exhausted", font=('Segoe UI', 16, 'bold')).pack(anchor=W)
 
-        ttk.Label(main, text="You've used all 100 free translations for today.",
+        ttk.Label(main, text=f"You've used all {get_config().trial_daily_limit} free translations for today.",
                   font=('Segoe UI', 10), wraplength=450).pack(anchor=W, pady=(10, 5))
 
         ttk.Label(main, text="Quota resets at midnight, or you can get unlimited access now.",
@@ -172,15 +169,10 @@ class TrialExhaustedDialog:
         instructions = ttk.Frame(main)
         instructions.pack(fill=X, pady=10)
 
-        ttk.Label(instructions, text="1. Get a FREE API key (takes 1 minute):",
+        ttk.Label(instructions, text="1. Get a FREE API key:",
                   font=('Segoe UI', 10)).pack(anchor=W)
-        if HAS_TTKBOOTSTRAP:
-            ttk.Button(instructions, text="https://aistudio.google.com/app/apikey",
-                       command=lambda: webbrowser.open("https://aistudio.google.com/app/apikey"),
-                       bootstyle="link").pack(anchor=W, padx=(15, 0))
-        else:
-            ttk.Button(instructions, text="https://aistudio.google.com/app/apikey",
-                       command=lambda: webbrowser.open("https://aistudio.google.com/app/apikey")).pack(anchor=W, padx=(15, 0))
+        ttk.Label(instructions, text="   Open Settings → Guide tab for instructions",
+                  font=('Segoe UI', 10), foreground='#888888').pack(anchor=W, padx=(15, 0))
 
         ttk.Label(instructions, text="\n2. Paste your API key in Settings > API Key tab.",
                   font=('Segoe UI', 10)).pack(anchor=W)
@@ -270,14 +262,9 @@ class TrialFeatureDialog:
         ttk.Label(features_frame, text="  - Unlimited text translations", font=('Segoe UI', 10)).pack(anchor=W)
         ttk.Label(features_frame, text="  - File translation (PDF, DOCX, TXT, images)", font=('Segoe UI', 10)).pack(anchor=W)
 
-        # Get API key link
-        if HAS_TTKBOOTSTRAP:
-            ttk.Button(main, text="Get FREE API Key (1 minute)",
-                       command=lambda: webbrowser.open("https://aistudio.google.com/app/apikey"),
-                       bootstyle="link").pack(anchor=W, pady=(10, 0))
-        else:
-            ttk.Button(main, text="Get FREE API Key (1 minute)",
-                       command=lambda: webbrowser.open("https://aistudio.google.com/app/apikey")).pack(anchor=W, pady=(10, 0))
+        # Get API key guidance
+        ttk.Label(main, text="Open Settings → Guide tab for API key instructions",
+                  font=('Segoe UI', 10), foreground='#888888').pack(anchor=W, pady=(10, 0))
 
         # Buttons
         btn_frame = ttk.Frame(main)

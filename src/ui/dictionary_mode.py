@@ -220,24 +220,45 @@ class WordButtonFrame:
         self.text_widget.configure(state='normal')
         self.text_widget.delete('1.0', tk.END)
 
-        # Tokenize text using NLP if available
-        words = self._tokenize_text(text)
+        # Split text by newlines first to preserve line structure
+        lines = text.split('\n')
 
-        # Create a label for each word and embed in text widget
-        for i, word in enumerate(words):
-            label = WordLabel(
-                self.text_widget, word, i,
-                on_click=self._on_word_click,
-                on_drag_enter=self._on_word_drag_enter
-            )
-            self.word_labels.append(label)
+        for line_idx, line in enumerate(lines):
+            # Insert newline between lines (not before first line)
+            if line_idx > 0:
+                self.text_widget.insert(tk.END, '\n')
 
-            # Insert the label as a window in the text widget
-            self.text_widget.window_create(tk.END, window=label.label)
+            # Skip empty lines (but the \n above still creates the blank line)
+            if not line.strip():
+                continue
 
-            # Add space after each word (except last)
-            if i < len(words) - 1:
-                self.text_widget.insert(tk.END, " ")
+            # Tokenize each line separately using NLP
+            words = self._tokenize_text(line)
+
+            # Create a label for each word and embed in text widget
+            # Punctuation/symbol-only tokens are shown as plain text (non-clickable)
+            for i, word in enumerate(words):
+                if not word:
+                    continue
+
+                # Check if this token is a real word (has at least one Unicode letter)
+                is_word = bool(re.search(r'[^\W\d_]', word, re.UNICODE))
+
+                if is_word:
+                    label = WordLabel(
+                        self.text_widget, word, len(self.word_labels),
+                        on_click=self._on_word_click,
+                        on_drag_enter=self._on_word_drag_enter
+                    )
+                    self.word_labels.append(label)
+                    self.text_widget.window_create(tk.END, window=label.label)
+                else:
+                    # Punctuation/symbol: insert as plain text (visible but not clickable)
+                    self.text_widget.insert(tk.END, word)
+
+                # Add space after each token (except last in line)
+                if i < len(words) - 1:
+                    self.text_widget.insert(tk.END, " ")
 
         # Disable text widget again
         self.text_widget.configure(state='disabled')

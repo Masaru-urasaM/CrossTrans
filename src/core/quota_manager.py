@@ -15,8 +15,6 @@ from typing import Optional
 class QuotaManager:
     """Manages trial mode quota tracking per device."""
 
-    DAILY_LIMIT = 100  # Maximum translations per day in trial mode
-
     def __init__(self, config):
         """Initialize QuotaManager.
 
@@ -26,6 +24,15 @@ class QuotaManager:
         self.config = config
         self._device_id: Optional[str] = None
 
+    def _get_daily_limit(self) -> int:
+        """Get daily limit from remote config (dynamic), with hardcoded fallback."""
+        try:
+            from src.core.remote_config import get_config
+            return get_config().trial_daily_limit
+        except Exception:
+            from src.constants import TRIAL_DAILY_QUOTA
+            return TRIAL_DAILY_QUOTA
+
     @property
     def device_id(self) -> str:
         """Get or create unique device ID."""
@@ -34,53 +41,42 @@ class QuotaManager:
         return self._device_id
 
     def _get_or_create_device_id(self) -> str:
-        """Get existing device ID or create a new one.
+        """Get or create deterministic device ID.
 
-        Uses hardware-based identification (MAC address + username hash)
-        for persistence across reinstalls.
+        Always verifies stored ID matches current hardware.
+        If mismatch (e.g., old random-based ID), regenerates.
         """
-        # Check if device_id already exists in config
+        deterministic_id = self._generate_device_id()
         existing_id = self.config.get('device_id')
-        if existing_id:
+
+        if existing_id == deterministic_id:
             return existing_id
 
-        # Generate new device ID
-        device_id = self._generate_device_id()
+        # Stored ID doesn't match hardware → replace with deterministic one
+        if existing_id:
+            logging.info(f"Device ID migrated to deterministic: {deterministic_id[:8]}...")
+        else:
+            logging.info(f"Generated device ID: {deterministic_id[:8]}...")
 
-        # Save to config
-        self.config.set('device_id', device_id)
-
-        logging.info(f"Generated new device ID: {device_id[:8]}...")
-        return device_id
+        self.config.set('device_id', deterministic_id)
+        return deterministic_id
 
     def _generate_device_id(self) -> str:
-        """Generate a unique device ID based on hardware identifiers.
+        """Generate a deterministic device ID based on hardware identifiers.
 
-        Combines:
-        - MAC address (uuid.getnode())
-        - Windows username and domain
-        - A random component for additional uniqueness
+        Combines MAC address + Windows username/domain.
+        Deterministic: same hardware always produces same ID,
+        so deleting config.json cannot reset server-side quota.
         """
         try:
-            # Get MAC address-based identifier
             mac_id = str(uuid.getnode())
-
-            # Get user identifier
             username = os.environ.get('USERNAME', 'unknown')
             domain = os.environ.get('USERDOMAIN', 'local')
-            user_id = f"{domain}\\{username}"
-
-            # Combine identifiers
-            combined = f"{mac_id}:{user_id}:{uuid.uuid4().hex[:8]}"
-
-            # Hash to create fixed-length ID
-            device_id = hashlib.sha256(combined.encode()).hexdigest()[:32]
-
-            return device_id
+            combined = f"crosstrans:{mac_id}:{domain}\\{username}"
+            return hashlib.sha256(combined.encode()).hexdigest()[:32]
         except Exception as e:
             logging.warning(f"Failed to generate hardware-based ID: {e}")
-            # Fallback to pure random UUID
-            return uuid.uuid4().hex[:32]
+            return hashlib.md5(str(uuid.getnode()).encode()).hexdigest()[:32]
 
     def get_quota_info(self) -> dict:
         """Get current quota information.
@@ -101,10 +97,10 @@ class QuotaManager:
         if quota.get('reset_date') != today:
             quota = self._reset_quota()
 
-        remaining = max(0, self.DAILY_LIMIT - quota.get('used_today', 0))
+        remaining = max(0, self._get_daily_limit() - quota.get('used_today', 0))
 
         return {
-            'daily_limit': self.DAILY_LIMIT,
+            'daily_limit': self._get_daily_limit(),
             'used_today': quota.get('used_today', 0),
             'remaining': remaining,
             'reset_date': quota.get('reset_date', today),
@@ -131,7 +127,7 @@ class QuotaManager:
         quota_info = self.get_quota_info()
 
         if quota_info['remaining'] < count:
-            logging.warning(f"Trial quota exhausted. Used: {quota_info['used_today']}/{self.DAILY_LIMIT}")
+            logging.warning(f"Trial quota exhausted. Used: {quota_info['used_today']}/{self._get_daily_limit()}")
             return False
 
         # Update quota
@@ -139,7 +135,7 @@ class QuotaManager:
         quota['used_today'] = quota.get('used_today', 0) + count
         self.config.set('trial_quota', quota)
 
-        logging.debug(f"Trial quota used: {quota['used_today']}/{self.DAILY_LIMIT}")
+        logging.debug(f"Trial quota used: {quota['used_today']}/{self._get_daily_limit()}")
         return True
 
     def is_quota_available(self) -> bool:
@@ -163,7 +159,7 @@ class QuotaManager:
     def _create_default_quota(self) -> dict:
         """Create default quota structure."""
         return {
-            'daily_limit': self.DAILY_LIMIT,
+            'daily_limit': self._get_daily_limit(),
             'used_today': 0,
             'reset_date': date.today().isoformat(),
             'device_id': self.device_id,
@@ -173,7 +169,7 @@ class QuotaManager:
     def _reset_quota(self) -> dict:
         """Reset quota for a new day."""
         quota = {
-            'daily_limit': self.DAILY_LIMIT,
+            'daily_limit': self._get_daily_limit(),
             'used_today': 0,
             'reset_date': date.today().isoformat(),
             'device_id': self.device_id,
@@ -204,8 +200,9 @@ class QuotaManager:
         Returns:
             str: Detailed message for exhausted quota.
         """
+        limit = self._get_daily_limit()
         return (
-            "Daily trial quota exhausted (100 translations/day).\n\n"
+            f"Daily trial quota exhausted ({limit} translations/day).\n\n"
             "To continue translating:\n"
             "1. Open Settings > Guide tab\n"
             "2. Follow instructions to get a free API key\n"

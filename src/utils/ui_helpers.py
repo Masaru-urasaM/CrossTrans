@@ -58,13 +58,13 @@ def set_dark_title_bar(window) -> None:
 
 
 def filter_dictionary_words(words: List[str]) -> List[str]:
-    """Filter out punctuation, symbols, and special characters from words list.
+    """Filter out punctuation, symbols, numbers, and special characters from words list.
 
     Args:
         words: List of words to filter
 
     Returns:
-        Filtered list containing only valid words (at least one letter/digit)
+        Filtered list containing only valid words (at least one Unicode letter)
     """
     if not words:
         return []
@@ -75,11 +75,11 @@ def filter_dictionary_words(words: List[str]) -> List[str]:
             continue
         # Strip leading/trailing punctuation and whitespace
         cleaned = word.strip()
-        # Remove leading/trailing punctuation (keep internal ones like don't, e-mail)
+        # Remove leading/trailing non-word characters (keep internal ones like don't, e-mail)
         cleaned = re.sub(r'^[^\w]+|[^\w]+$', '', cleaned, flags=re.UNICODE)
-        # Check if the cleaned word has at least one letter or CJK character
-        # This allows words like "日本語" but filters out pure punctuation like "-", "...", "!!!"
-        if cleaned and re.search(r'[\w\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]', cleaned, re.UNICODE):
+        # Require at least one Unicode letter (not just digits/underscore/symbols)
+        # [^\W\d_] matches any Unicode letter: Latin, CJK, Cyrillic, Arabic, Thai, Korean, etc.
+        if cleaned and re.search(r'[^\W\d_]', cleaned, re.UNICODE):
             filtered.append(cleaned)
 
     return filtered

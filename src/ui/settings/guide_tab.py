@@ -3,6 +3,8 @@ User Guide tab functionality for Settings window.
 """
 import webbrowser
 
+from src.core.remote_config import get_config
+
 import tkinter as tk
 from tkinter import BOTH, X, LEFT, RIGHT, W, NW
 
@@ -60,31 +62,15 @@ class GuideTabMixin:
         ])
 
         # === Section 2: How to Get Free API Key ===
-        self._create_guide_section(guide_container, "How to Get a Free API Key", [
-            "Google Gemini offers a generous free tier (1,500 requests/day):",
+        self._create_guide_section(guide_container, "How to Get an API Key", [
+            "Many AI providers offer free API keys. Here's how to get started:",
             "",
-            "1. Go to Google AI Studio:",
-        ])
-
-        # Clickable link for Google AI Studio
-        link_frame = ttk.Frame(guide_container)
-        link_frame.pack(anchor=W, padx=20)
-        if HAS_TTKBOOTSTRAP:
-            link_btn = ttk.Button(link_frame, text="https://aistudio.google.com/app/apikey",
-                                  command=lambda: webbrowser.open("https://aistudio.google.com/app/apikey"),
-                                  bootstyle="link")
-        else:
-            link_btn = ttk.Button(link_frame, text="https://aistudio.google.com/app/apikey",
-                                  command=lambda: webbrowser.open("https://aistudio.google.com/app/apikey"))
-        link_btn.pack(anchor=W)
-
-        self._create_guide_content(guide_container, [
+            "1. Choose a provider from the 'Supported AI Providers' list below",
+            "2. Sign up on their website and create an API key",
+            "3. Open Settings > API Key tab > Paste in 'API Key' field",
+            "4. Click 'Test' to verify the connection",
             "",
-            "2. Sign in with your Google account",
-            "3. Click 'Create API Key' button",
-            "4. Copy the generated key",
-            "5. Open Settings > API Key tab > Paste in 'API Key' field",
-            "6. Click 'Test' to verify the connection",
+            "The app auto-detects your provider from the API key format.",
         ])
 
         # === Section 3: Default Hotkeys ===
@@ -183,7 +169,7 @@ class GuideTabMixin:
             "  • If primary API fails, backup is used automatically",
             "",
             "Trial Mode:",
-            "  • 100 free translations/day without API key",
+            f"  • {get_config().trial_daily_limit} free translations/day without API key",
             "  • Quota resets at midnight",
             "  • Get your own API key for unlimited use",
         ])
@@ -212,19 +198,19 @@ class GuideTabMixin:
             "15 providers with 180+ models:",
             "",
             "Free Tier Available:",
-            "  • Google Gemini - 1,500 req/day (Recommended)",
-            "  • Groq - Fast inference, Llama 3.3",
-            "  • Cerebras - High throughput",
-            "  • DeepSeek - DeepSeek-R1, V3",
-            "  • SambaNova - Llama 405B",
-            "  • SiliconFlow - Qwen 2.5, DeepSeek-V3",
-            "  • HuggingFace - Qwen 2.5, Llama 3.x",
+            "  • Google Gemini",
+            "  • Groq",
+            "  • Cerebras",
+            "  • DeepSeek",
+            "  • SambaNova",
+            "  • SiliconFlow",
+            "  • HuggingFace",
             "",
             "Premium Providers:",
-            "  • OpenAI (o3, GPT-4.1, GPT-4o)",
-            "  • Anthropic (Claude 4.5, Claude 3.5)",
-            "  • xAI (Grok 3)",
-            "  • Mistral AI, Perplexity, Together, SiliconFlow",
+            "  • OpenAI",
+            "  • Anthropic",
+            "  • xAI",
+            "  • Mistral AI, Perplexity, Together",
             "  • OpenRouter (400+ aggregated models)",
             "",
             "Auto-detection:",

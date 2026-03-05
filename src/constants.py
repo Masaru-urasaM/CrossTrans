@@ -12,7 +12,7 @@ FEEDBACK_URL = f"https://github.com/{GITHUB_REPO}/issues/new"
 LOCK_PORT = 47823  # Port for single instance lock
 
 # ============== REMOTE CONFIG ==============
-REMOTE_CONFIG_URL = "https://crossname.trial-api.workers.dev/v1/config"
+REMOTE_CONFIG_URL = "https://crosstrans.trial-api.workers.dev/v1/config"
 REMOTE_CONFIG_CACHE_TTL = 86400  # 24 hours in seconds
 
 # ============== TIMING ==============
@@ -353,14 +353,14 @@ VISION_MODELS = {
 # ============== TRIAL MODE ==============
 # Configuration for trial mode (users without API keys)
 TRIAL_MODE_ENABLED = True  # Set to False to disable trial mode completely
-TRIAL_DAILY_QUOTA = 100  # Maximum translations per day
+TRIAL_DAILY_QUOTA = 20  # Maximum translations per day
 TRIAL_PROVIDER = "cerebras"  # Provider for trial mode (Cerebras has generous free tier)
 TRIAL_MODEL = "llama-3.3-70b"  # Model for trial mode
 
 # Proxy server URL for trial mode (protects your API key)
 # Set this to your deployed Cloudflare Worker URL
 # TRIAL_PROXY_URL = ""  # e.g., "https://your-translator-proxy.workers.dev/v1/translate"
-TRIAL_PROXY_URL = "https://crossname.trial-api.workers.dev"
+TRIAL_PROXY_URL = "https://crosstrans.trial-api.workers.dev"
 
 # Trial mode restrictions
 TRIAL_VISION_ENABLED = False  # Vision/OCR disabled in trial mode

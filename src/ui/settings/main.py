@@ -92,9 +92,7 @@ class SettingsWindow(
         try:
             self._create_widgets()
         except Exception as e:
-            print(f"Error creating settings widgets: {e}")
-            import traceback
-            traceback.print_exc()
+            logging.exception(f"Error creating settings widgets: {e}")
 
     def _create_widgets(self):
         """Create settings UI with lazy-loaded tabs for fast startup."""

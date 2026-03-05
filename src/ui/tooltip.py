@@ -5,6 +5,7 @@ Handles translation result tooltips and loading indicators.
 import ctypes
 import logging
 import math
+import re
 import time
 import tkinter as tk
 from tkinter import BOTH, X, LEFT, RIGHT, TOP, BOTTOM
@@ -24,6 +25,83 @@ from src.ui.toast import ToastManager
 # Dictionary button colors (dark red) - consistent with dictionary_mode.py
 DICT_BUTTON_COLOR = "#822312"  # Dark red (main color)
 DICT_BUTTON_ACTIVE = '#9A3322'  # Lighter red (hover/active)
+
+# 20 professional highlight colors for dictionary word entries
+HIGHLIGHT_COLORS = [
+    "#F4A261", "#2EC4B6", "#E76F51", "#90BE6D", "#9D4EDD",
+    "#F9C74F", "#4CC9F0", "#FF6B6B", "#43AA8B", "#FFB703",
+    "#7B68EE", "#FF9F1C", "#00B4D8", "#E9C46A", "#80ED99",
+    "#F72585", "#48CAE4", "#FFAFCC", "#A8DADC", "#CDB4DB",
+]
+
+
+def _align_dictionary_text(result: str) -> str:
+    """Align dictionary result text so labels and values form clean columns.
+
+    Transforms:
+        1. **Translation**: value
+        2. **Source Language**: value
+
+    Into tab-aligned format where all values start at the same column:
+        1. **Translation**:      value
+        2. **Source Language**:   value
+
+    Only aligns numbered field lines (N. **Label**: value).
+    Other lines (headers, examples, separators) pass through unchanged.
+    """
+    lines = result.split('\n')
+    output = []
+
+    # Process in chunks per word entry (between ## headers)
+    chunk = []  # Lines in current entry
+
+    def _align_chunk(chunk_lines):
+        """Align numbered field lines within a single word entry."""
+        if not chunk_lines:
+            return []
+
+        # Find max label width among numbered lines in this chunk
+        max_label_len = 0
+        for line in chunk_lines:
+            m = re.match(r'^(\d+\.\s+\*\*.+?\*\*:)\s*', line)
+            if m:
+                max_label_len = max(max_label_len, len(m.group(1)))
+
+        if max_label_len == 0:
+            return chunk_lines  # No numbered fields found
+
+        # Pad to nearest multiple of 4 + 2 for clean spacing
+        pad_to = max_label_len + 2
+
+        aligned = []
+        for line in chunk_lines:
+            m = re.match(r'^(\d+\.\s+\*\*.+?\*\*:)\s*(.*)', line)
+            if m:
+                label_part = m.group(1)
+                value_part = m.group(2)
+                # Pad label to align values
+                aligned.append(label_part.ljust(pad_to) + value_part)
+            else:
+                aligned.append(line)
+        return aligned
+
+    for line in lines:
+        if line.strip().startswith('## '):
+            # Flush previous chunk
+            output.extend(_align_chunk(chunk))
+            chunk = [line]
+        elif line.strip() == '---':
+            # Flush chunk before separator
+            output.extend(_align_chunk(chunk))
+            chunk = []
+            output.append(line)
+        else:
+            chunk.append(line)
+
+    # Flush last chunk
+    output.extend(_align_chunk(chunk))
+
+    return '\n'.join(output)
 
 
 def get_monitor_work_area(x: int, y: int) -> Tuple[int, int, int, int]:
@@ -283,7 +361,7 @@ class TooltipManager:
             Tuple of (width, height) in pixels
         """
         MAX_WIDTH = 800
-        MIN_WIDTH = 320
+        MIN_WIDTH = 500  # Ensure all 5 buttons + close fit in button bar
         MIN_HEIGHT = 130  # Unified minimum height
 
         # Get max height from current monitor's work area
@@ -1304,8 +1382,12 @@ class TooltipManager:
         """
         # Stop lookup animation first
         self.stop_dictionary_animation()
+
+        # Align dictionary fields for clean column display
+        display_text = _align_dictionary_text(result)
+
         # Calculate size based on result text (MIN_HEIGHT already in calculate_size)
-        width, height = self.calculate_size(result)
+        width, height = self.calculate_size(display_text)
         height = height + 30  # Title bar compensation for Toplevel window
 
         # Create SEPARATE dictionary result window
@@ -1401,68 +1483,36 @@ class TooltipManager:
             close_btn_kwargs["bootstyle"] = "secondary"
         ttk.Button(btn_frame, **close_btn_kwargs).pack(side=RIGHT)
 
-        # Result text - SAME calculation as Normal mode for consistency
+        # Result text with monospace font for aligned columns
         try:
-            ui_font = font.Font(family='Segoe UI', size=11)
+            ui_font = font.Font(family='Consolas', size=10)
             base_line_height = ui_font.metrics("linespace")
             avg_char_width = ui_font.measure("m")
         except tk.TclError:
-            base_line_height = 20
+            base_line_height = 18
             avg_char_width = 8
 
-        VERTICAL_PADDING = 100  # Must match calculate_size()
+        VERTICAL_PADDING = 100
         LINE_HEIGHT = int(base_line_height)
-
         text_height = max(1, (height - VERTICAL_PADDING) // LINE_HEIGHT)
         text_width = max(30, width // avg_char_width)
 
         result_text = tk.Text(main_frame, wrap=tk.WORD,
                               bg='#2b2b2b', fg='#ffffff',
-                              font=('Segoe UI', 11), relief='flat',
+                              font=('Consolas', 10), relief='flat',
                               width=text_width, height=text_height,
                               borderwidth=0, highlightthickness=0)
-        result_text.insert('1.0', result)
+        result_text.insert('1.0', display_text)
 
-        # Highlight looked-up words with distinct colors for each word
+        # Highlight looked-up words with distinct colors
         if looked_up_words:
-            # 20 professional colors - easy to distinguish, not too bright/dark
-            # Arranged so adjacent colors are visually distinct
-            HIGHLIGHT_COLORS = [
-                "#F4A261",  # Sandy orange
-                "#2EC4B6",  # Teal
-                "#E76F51",  # Coral red
-                "#90BE6D",  # Sage green
-                "#9D4EDD",  # Purple
-                "#F9C74F",  # Soft yellow
-                "#4CC9F0",  # Sky blue
-                "#FF6B6B",  # Soft red
-                "#43AA8B",  # Mint
-                "#FFB703",  # Amber
-                "#7B68EE",  # Medium slate blue
-                "#FF9F1C",  # Orange peel
-                "#00B4D8",  # Pacific cyan
-                "#E9C46A",  # Gold
-                "#80ED99",  # Light green
-                "#F72585",  # Pink
-                "#48CAE4",  # Light blue
-                "#FFAFCC",  # Light pink
-                "#A8DADC",  # Powder blue
-                "#CDB4DB",  # Soft lavender
-            ]
-
-            # Create a tag for each word with its own color
             for i, word in enumerate(looked_up_words):
                 if not word:
                     continue
-                # Cycle through colors if more words than colors
                 color = HIGHLIGHT_COLORS[i % len(HIGHLIGHT_COLORS)]
                 tag_name = f"lookup_word_{i}"
-
-                result_text.tag_configure(tag_name,
-                                          foreground=color,
-                                          font=('Segoe UI', 11, 'bold'))
-
-                # Find and highlight this word
+                result_text.tag_configure(tag_name, foreground=color,
+                                          font=('Consolas', 10, 'bold'))
                 start_idx = "1.0"
                 while True:
                     pos = result_text.search(word, start_idx, stopindex="end", nocase=True)

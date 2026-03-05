@@ -22,6 +22,7 @@ from src.constants import (
     PROVIDERS_LIST as _HARDCODED_PROVIDERS_LIST,
     API_KEY_PATTERNS as _HARDCODED_API_KEY_PATTERNS,
     VISION_MODELS as _HARDCODED_VISION_MODELS,
+    TRIAL_DAILY_QUOTA as _HARDCODED_TRIAL_DAILY_QUOTA,
 )
 
 # Supported remote config schema versions
@@ -310,6 +311,15 @@ class RemoteConfigManager:
         """Return 'remote', 'cached', or 'hardcoded'."""
         with self._config_lock:
             return self._config.get('_source', 'hardcoded')
+
+    @property
+    def trial_daily_limit(self) -> int:
+        """Return the trial daily limit from remote config, with hardcoded fallback."""
+        with self._config_lock:
+            val = self._config.get('trial_daily_limit')
+            if isinstance(val, (int, float)) and val > 0:
+                return int(val)
+            return _HARDCODED_TRIAL_DAILY_QUOTA
 
     @property
     def config_updated_at(self) -> str:

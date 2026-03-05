@@ -60,6 +60,11 @@ backup/
 .CLAUDE.md
 CLAUDE.md
 
+# Cloudflare (contains proxy logic, provider config, account data - private)
+cloudflare_worker.js
+wrangler.toml
+.wrangler/
+
 # Local development scripts (not needed for users)
 restart.bat
 run_silent.vbs

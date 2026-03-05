@@ -197,10 +197,6 @@ Only return the translation, no explanations or additional text.
 If the text is already in {target_language}, still provide a natural rephrasing.
 
 Additional instructions from user: {custom_prompt}"""
-        elif self._is_dictionary_query(text):
-            # Dictionary Mode - auto-detected for 1-4 words
-            # Delegate to dictionary_lookup() to avoid prompt duplication
-            return self.dictionary_lookup(text, target_language)
         else:
             # No custom prompt (quick hotkey translation) → enforce target language
             # Structure: text first with delimiters, then rules at end
@@ -280,7 +276,9 @@ Rules (DO NOT include these in your response):
 3. **Definition**: explanation in {target_language} (REQUIRED)
 4. **Word Type**: noun/verb/adjective/adverb/etc.
 5. **Pronunciation**: /IPA/, / phonetic in {target_language} (Pronunciation, means how it is pronounced in the {target_language}.)/
-6. **Examples**:
+6. **Synonyms** (if any): synonym1 → {target_language} translation, synonym2 → {target_language} translation, synonym3 → {target_language} translation
+7. **Antonyms** (if any): antonym1 → {target_language} translation, antonym2 → {target_language} translation, antonym3 → {target_language} translation
+8. **Examples**:
    - Source language sentence → {target_language} translation
    - Source language sentence → {target_language} translation
 
@@ -289,6 +287,7 @@ Rules (DO NOT include these in your response):
 **CRITICAL**:
 - ALWAYS start each entry with ## [Word] header (for me highlighting it later)
 - FILL IN all fields - never leave blank after colon
+- Synonyms/Antonyms: list in source language with {target_language} translation, comma-separated. Write "None" if no synonyms/antonyms exist.
 - Examples must be in source language (same as input word)
 - All translations must be in {target_language}
 - Provide entry for ALL {len(words)} word(s)

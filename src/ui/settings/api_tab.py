@@ -112,21 +112,10 @@ class APITabMixin:
         ttk.Label(api_container, text="⚠ No API keys = Trial Mode (limited quota, may not work as expected)",
                   font=('Segoe UI', 8, 'italic'), foreground='#ff9900').pack(anchor=W, pady=(2, 0))
 
-        # Google AI Studio link for easy API key registration
+        # API key help - point to Guide tab
         ttk.Separator(api_container).pack(fill=X, pady=10)
-        ttk.Label(api_container, text="Get your free API key:",
-                  font=('Segoe UI', 10, 'bold')).pack(anchor=W)
-
-        if HAS_TTKBOOTSTRAP:
-            studio_link = ttk.Button(api_container,
-                                     text="Google AI Studio (Free, 1500 req/day)",
-                                     command=lambda: webbrowser.open("https://aistudio.google.com/app/apikey"),
-                                     bootstyle="link")
-        else:
-            studio_link = ttk.Button(api_container,
-                                     text="Google AI Studio (Free, 1500 req/day)",
-                                     command=lambda: webbrowser.open("https://aistudio.google.com/app/apikey"))
-        studio_link.pack(anchor=W)
+        ttk.Label(api_container, text="Need an API key? See the Guide tab for instructions.",
+                  font=('Segoe UI', 9), foreground='#888888').pack(anchor=W)
 
         # ===== CAPABILITY STATUS (Auto-managed) =====
         ttk.Separator(api_container).pack(fill=X, pady=15)
@@ -182,7 +171,7 @@ class APITabMixin:
         ttk.Separator(api_container).pack(fill=X, pady=15)
         ttk.Label(api_container, text="Trial Mode:",
                   font=('Segoe UI', 10, 'bold')).pack(anchor=W)
-        ttk.Label(api_container, text="Use shared API when your keys don't work (100 requests/day limit)",
+        ttk.Label(api_container, text=f"Use shared API when your keys don't work ({get_config().trial_daily_limit} requests/day limit)",
                   font=('Segoe UI', 9), foreground='#888888').pack(anchor=W, pady=(2, 10))
 
         # Toggle frame
@@ -561,9 +550,7 @@ class APITabMixin:
             if notify_change and self.on_api_change_callback:
                 self.on_api_change_callback()
         except Exception as e:
-            print(f"Error saving API keys to config: {e}")
-            import traceback
-            traceback.print_exc()
+            logging.exception(f"Error saving API keys to config: {e}")
 
     def _update_api_add_button(self):
         """Enable/disable add button based on limit."""
@@ -954,7 +941,7 @@ class APITabMixin:
             self.trial_forced_var.set(True)
             self.config.set_trial_mode_forced(True)
             self.config.set_trial_last_api_check(datetime.now().isoformat())
-            self._update_trial_status_label("Trial Mode enabled (100 req/day)")
+            self._update_trial_status_label(f"Trial Mode enabled ({get_config().trial_daily_limit} req/day)")
             self._update_trial_toggle_button()
             logging.info("Trial mode enabled - no working API keys found")
 
@@ -982,7 +969,7 @@ class APITabMixin:
         """Update trial status label with text and appropriate color."""
         if not text:
             if self.trial_forced_var.get():
-                text = "Active - 100 requests/day"
+                text = f"Active - {get_config().trial_daily_limit} requests/day"
                 color = '#28a745'  # Green
             else:
                 text = "Disabled"

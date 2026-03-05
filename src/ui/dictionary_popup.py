@@ -475,6 +475,13 @@ class DictionaryPopup:
         if not words:
             return
 
+        # Filter out punctuation, symbols, and special characters
+        from src.utils.ui_helpers import filter_dictionary_words
+        words = filter_dictionary_words(words)
+        if not words:
+            self.toast.show_info("No valid words to look up")
+            return
+
         # Show loading toast
         display_text = ", ".join(words[:3]) + ("..." if len(words) > 3 else "")
         self.toast.show_info(f"Looking up {len(words)} word(s): {display_text}")

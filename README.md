@@ -14,7 +14,7 @@ A powerful Windows desktop application for instant text translation using AI. Se
 - **Instant Translation** - Select text, press hotkey, get translation in tooltip
 - **Screenshot Translation** - Win+Alt+S to capture and translate any screen region
 - **Free Trial Mode** - 100 translations/day without API key
-- **15 AI Providers** - Google Gemini (free!), OpenAI, Claude, DeepSeek, Groq, HuggingFace, and more
+- **15 AI Providers** - Google, OpenAI, Anthropic, DeepSeek, Groq, and more (many offer free tiers)
 - **File Processing** - Translate documents (.docx, .txt, .srt, .pdf) and images
 - **120+ Languages** - Comprehensive language support
 - **Custom Hotkeys** - Configure any key combination for any language
@@ -55,22 +55,17 @@ A powerful Windows desktop application for instant text translation using AI. Se
 
 ### Multi-Provider Support
 
-| Provider | Models | Free Tier |
-|----------|--------|-----------|
-| **Google Gemini** | Gemini 2.5, 2.0, 1.5 | 1,500 req/day |
-| **OpenAI** | o3, GPT-4.1, GPT-4o | No |
-| **Anthropic** | Claude 4.5, Claude 3.5 | No |
-| **DeepSeek** | DeepSeek-R1, V3 | Yes |
-| **Groq** | Llama 3.3, Mixtral | Yes |
-| **xAI** | Grok 3, Grok 2 | No |
-| **Mistral** | Mistral Large, Pixtral | No |
-| **Perplexity** | Sonar Pro, Reasoning | No |
-| **Cerebras** | Llama 4, Llama 3.3 | Yes |
-| **SambaNova** | DeepSeek-R1, Llama 405B | Yes |
-| **Together** | Llama 3.3, Qwen 2.5 | No |
-| **SiliconFlow** | Qwen 2.5, DeepSeek-V3 | Yes |
-| **OpenRouter** | 400+ models | Varies |
-| **HuggingFace** | Qwen 2.5, Llama 3.x, Gemma | Yes |
+| Provider | Provider |
+|----------|----------|
+| Google Gemini | OpenAI |
+| Anthropic | DeepSeek |
+| Groq | xAI |
+| Mistral | Perplexity |
+| Cerebras | SambaNova |
+| Together | SiliconFlow |
+| OpenRouter (400+) | HuggingFace |
+
+Many providers offer free API keys. See Settings → Guide tab for details.
 
 **Smart Routing** - Automatically detects provider from API key or model name.
 
@@ -82,7 +77,7 @@ A powerful Windows desktop application for instant text translation using AI. Se
 - **Translation History** - Review and reuse past translations (up to 100 entries)
 
 ### Smart Features
-- **Dictionary Mode** - Click words to select, get definitions, pronunciation, examples
+- **Dictionary Mode** - Click words to select, get definitions, pronunciation, synonyms, antonyms, examples
 - **Custom Prompts** - Add instructions like "Make it formal" or "Technical terms only"
 - **Clipboard Preservation** - Your files/images in clipboard are preserved
 - **Auto-start** - Optionally start with Windows
@@ -120,11 +115,9 @@ python main.py
 # Double-click run_silent.vbs
 ```
 
-### Get Your Free API Key (Optional)
+### Get an API Key (Optional)
 
-1. Go to [Google AI Studio](https://aistudio.google.com/app/apikey)
-2. Click "Create API Key"
-3. Copy the key and paste in Settings
+Many providers offer free API keys. Get one from any supported provider and paste it in Settings → API Key tab. See the in-app Guide tab for step-by-step instructions.
 
 ---
 
@@ -290,6 +283,16 @@ CrossTrans/
 - **Replace Mode toggle** - Configurable in Settings → Hotkeys → Replace Mode section
 - **WS_EX_NOACTIVATE tooltip** - Tooltip doesn't steal focus from source app, keeping text selection alive
 
+### Dictionary Mode Improvements
+- **Synonyms & Antonyms** - Dictionary now shows synonyms and antonyms with translations (8-field output)
+- **Smart word filtering** - Punctuation, symbols, and pure numbers no longer appear as clickable word buttons
+- **Unicode letter detection** - Filter works across all languages (Latin, CJK, Cyrillic, Arabic, Thai, Korean)
+- **Dedicated mode only** - Dictionary lookup only through the Dictionary button, no auto-detection on short text
+
+### Generic API Guidance
+- Removed provider-specific API key links and pricing from all UI dialogs
+- Guide tab now shows generic instructions for any supported provider
+
 ### Previous in v1.9.9
 
 ### Dynamic Remote Model Configuration
@@ -383,7 +386,7 @@ This project is licensed under the GNU Affero General Public License v3.0 - see 
 
 ## Acknowledgments
 
-- Powered by Google Gemini AI, OpenAI, Anthropic, and other AI providers
+- Powered by 15+ AI providers including Google, OpenAI, Anthropic, and more
 - Built with Python, Tkinter, and ttkbootstrap
 - Icons and UI inspired by modern design principles
 

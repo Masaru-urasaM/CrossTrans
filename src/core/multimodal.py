@@ -3,6 +3,7 @@ Multimodal Processing Module for CrossTrans.
 Handles image encoding and vision model capabilities.
 """
 import base64
+import logging
 import mimetypes
 import os
 import fnmatch
@@ -53,5 +54,5 @@ class MultimodalProcessor:
                 encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
             return encoded_string, mime_type
         except Exception as e:
-            print(f"Error encoding image: {e}")
+            logging.error(f"Error encoding image: {e}")
             return None, None

@@ -148,13 +148,13 @@ class PasswordDialog:
     def _create_dialog(self, title: str):
         self.dialog = tk.Toplevel(self.parent)
         self.dialog.title(title)
-        self.dialog.geometry("420x220")
+        self.dialog.geometry("420x260")
         self.dialog.resizable(False, False)
 
         # Center and make modal
         self.dialog.update_idletasks()
         x = (self.dialog.winfo_screenwidth() - 420) // 2
-        y = (self.dialog.winfo_screenheight() - 220) // 2
+        y = (self.dialog.winfo_screenheight() - 260) // 2
         self.dialog.geometry(f"+{x}+{y}")
 
         self.dialog.transient(self.parent)
@@ -224,10 +224,6 @@ class PasswordDialog:
 
     def _verify(self):
         password = self.password_var.get()
-
-        if not password:
-            self.error_label.configure(text="Please enter your password")
-            return
 
         self.error_label.configure(text="Verifying...", foreground='#888888')
         self.dialog.update()
@@ -359,99 +355,107 @@ class WaitingDialog:
             self.dialog.destroy()
 
 
+def _run_windows_hello(parent) -> bool:
+    """Run Windows Hello authentication flow.
+
+    Returns:
+        True if verified successfully, False if failed/cancelled.
+    """
+    result_container = {'result': None, 'done': False}
+
+    def on_hello_result(success: bool):
+        result_container['result'] = success
+        result_container['done'] = True
+
+    # Start Windows Hello in background
+    WindowsHelloAuth.verify_async(
+        on_hello_result,
+        "CrossTrans - Verify your identity to view API keys"
+    )
+
+    # Function to find and bring Windows Hello dialog to front
+    def bring_windows_hello_to_front():
+        try:
+            user32 = ctypes.windll.user32
+
+            # Allow any process to set foreground
+            user32.AllowSetForegroundWindow(-1)  # ASFW_ANY
+
+            # Unlock foreground
+            user32.LockSetForegroundWindow(2)  # LSFW_UNLOCK
+
+            # Find Windows Security dialog by class name
+            class_names = [
+                "Credential Dialog Xaml Host",
+                "Windows.UI.Core.CoreWindow",
+                "ApplicationFrameWindow"
+            ]
+
+            hwnd = None
+            for class_name in class_names:
+                hwnd = user32.FindWindowW(class_name, None)
+                if hwnd:
+                    break
+
+            if hwnd:
+                SW_RESTORE = 9
+                user32.ShowWindow(hwnd, SW_RESTORE)
+                user32.SetForegroundWindow(hwnd)
+                user32.BringWindowToTop(hwnd)
+
+                HWND_TOPMOST = -1
+                SWP_NOMOVE = 0x0002
+                SWP_NOSIZE = 0x0001
+                SWP_SHOWWINDOW = 0x0040
+                user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                                   SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
+
+        except Exception as e:
+            logging.debug(f"Could not bring Windows Hello to front: {e}")
+
+    # Try to bring Windows Hello to front multiple times
+    for i in range(5):
+        time.sleep(0.1)
+        bring_windows_hello_to_front()
+        if result_container['done']:
+            break
+
+    # Wait for result (check periodically without blocking)
+    while not result_container['done']:
+        if not parent.winfo_exists():
+            break
+        try:
+            parent.update()
+            bring_windows_hello_to_front()
+        except tk.TclError:
+            break
+        time.sleep(0.1)
+
+    return bool(result_container.get('result'))
+
+
 def require_auth(parent) -> bool:
     """
-    Authenticate user with Windows Hello (preferred) or password fallback.
+    Authenticate user via PIN/Fingerprint/Face or password.
 
     Flow:
-    1. If Windows Hello available → show native dialog (PIN/Fingerprint/Face)
-    2. If user verifies → return True
-    3. If user cancels or WH not available → show password dialog
-    4. Password dialog has 5-attempt soft limit
+    1. If no password on account → auto-authenticate
+    2. If PIN/Fingerprint/Face available → use automatically
+    3. If that fails/cancelled → fall through to password dialog
 
     Returns:
         True if authenticated successfully
     """
-    # Try Windows Hello first
+    # Check if account has no password - auto-authenticate
+    if verify_password(""):
+        logging.info("Account has no password - auto-authenticated")
+        return True
+
+    # Auto-use PIN/Fingerprint/Face if available
     if WindowsHelloAuth.is_available():
-        result_container = {'result': None, 'done': False}
-
-        def on_hello_result(success: bool):
-            result_container['result'] = success
-            result_container['done'] = True
-
-        # Start Windows Hello in background
-        WindowsHelloAuth.verify_async(
-            on_hello_result,
-            "CrossTrans - Verify your identity to view API keys"
-        )
-
-        # Function to find and bring Windows Hello dialog to front
-        def bring_windows_hello_to_front():
-            try:
-                user32 = ctypes.windll.user32
-
-                # Allow any process to set foreground
-                user32.AllowSetForegroundWindow(-1)  # ASFW_ANY
-
-                # Unlock foreground
-                user32.LockSetForegroundWindow(2)  # LSFW_UNLOCK
-
-                # Find Windows Security dialog by class name
-                # Common class names for Windows Hello/Security dialogs
-                class_names = [
-                    "Credential Dialog Xaml Host",
-                    "Windows.UI.Core.CoreWindow",
-                    "ApplicationFrameWindow"
-                ]
-
-                hwnd = None
-                for class_name in class_names:
-                    hwnd = user32.FindWindowW(class_name, None)
-                    if hwnd:
-                        break
-
-                if hwnd:
-                    # Bring to front
-                    SW_SHOW = 5
-                    SW_RESTORE = 9
-                    user32.ShowWindow(hwnd, SW_RESTORE)
-                    user32.SetForegroundWindow(hwnd)
-                    user32.BringWindowToTop(hwnd)
-
-                    # Also try SetWindowPos with HWND_TOPMOST
-                    HWND_TOPMOST = -1
-                    SWP_NOMOVE = 0x0002
-                    SWP_NOSIZE = 0x0001
-                    SWP_SHOWWINDOW = 0x0040
-                    user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-                                       SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
-
-            except Exception as e:
-                logging.debug(f"Could not bring Windows Hello to front: {e}")
-
-        # Try to bring Windows Hello to front multiple times
-        for i in range(5):
-            time.sleep(0.1)
-            bring_windows_hello_to_front()
-            if result_container['done']:
-                break
-
-        # Wait for result (check periodically without blocking)
-        while not result_container['done']:
-            if not parent.winfo_exists():
-                break
-            try:
-                parent.update()
-                # Keep trying to bring Windows Hello to front
-                bring_windows_hello_to_front()
-            except tk.TclError:
-                break
-            time.sleep(0.1)
-
-        if result_container['result']:
+        if _run_windows_hello(parent):
             return True
-        # Windows Hello cancelled/failed → fall through to password
+        # Failed/cancelled → fall through to password
 
     # Fallback: Password dialog
     dialog = PasswordDialog(parent)

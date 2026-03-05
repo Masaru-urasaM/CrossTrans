@@ -187,7 +187,7 @@ class UpdateManagerMixin:
         # Center
         self.progress_win.update_idletasks()
         x = self.window.winfo_x() + (self.window.winfo_width() - 350) // 2
-        y = self.window.winfo_y() + (self.window.winfo_height() - 120) // 2
+        y = self.window.winfo_y() + (self.window.winfo_height() - 150) // 2
         self.progress_win.geometry(f"+{x}+{y}")
 
         frame = ttk.Frame(self.progress_win, padding=15)
