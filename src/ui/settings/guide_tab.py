@@ -15,7 +15,21 @@ except ImportError:
     from tkinter import ttk
     HAS_TTKBOOTSTRAP = False
 
-from src.constants import GITHUB_REPO, FEEDBACK_URL
+from src.constants import GITHUB_REPO, FEEDBACK_URL, LANGUAGES
+
+# Unicode icons for section headers (Segoe UI safe)
+SECTION_ICONS = {
+    "Getting Started": "\u25B6",        # ▶ right-pointing triangle
+    "Tooltip Actions": "\u2139",        # ℹ information source
+    "Replace Feature": "\u21C4",        # ⇄ right arrow over left arrow
+    "Hotkeys": "\u2328",               # ⌨ keyboard
+    "Screenshot Translation": "\u2316",  # ⌖ position indicator
+    "Dictionary Mode": "\u2261",        # ≡ triple bar
+    "File Translation": "\u2197",       # ↗ north east arrow
+    "AI Providers": "\u2601",           # ☁ cloud
+    "Tips & Tricks": "\u2605",          # ★ black star
+    "Troubleshooting": "\u2692",        # ⚒ hammer and pick
+}
 
 
 class GuideTabMixin:
@@ -49,173 +63,236 @@ class GuideTabMixin:
         guide_container.bind("<MouseWheel>", _on_mousewheel)
 
         # Header
-        ttk.Label(guide_container, text="User Guide", font=('Segoe UI', 14, 'bold')).pack(anchor=W, pady=(0, 5))
+        ttk.Label(guide_container, text="User Guide",
+                  font=('Segoe UI', 14, 'bold')).pack(anchor=W, pady=(0, 5))
         ttk.Label(guide_container, text="Everything you need to know about CrossTrans",
                   font=('Segoe UI', 9), foreground='#888888').pack(anchor=W, pady=(0, 15))
 
-        # === Section 1: Quick Start ===
-        self._create_guide_section(guide_container, "Quick Start", [
-            "1. Select any text in any application (browser, Word, PDF viewer, etc.)",
+        # Dynamic values
+        lang_count = len(LANGUAGES)
+        trial_limit = get_config().trial_daily_limit
+
+        # === Section 1: Getting Started ===
+        self._create_guide_section(guide_container, "Getting Started", [
+            f"CrossTrans translates text instantly using AI \u2014 {lang_count} languages supported.",
+            "",
+            "Try it now (no setup needed):",
+            f"  \u2022 {trial_limit} free translations/day without an API key",
+            "  \u2022 Just select text and press a hotkey",
+            "",
+            "How to translate:",
+            "1. Select any text in any application (browser, Word, PDF, etc.)",
             "2. Press a hotkey (e.g., Win+Alt+V for Vietnamese)",
             "3. Translation appears in a tooltip near your cursor",
-            "4. Click 'Copy' to copy the translation, or press Escape to close",
+            "4. Use the tooltip buttons: Copy, Replace, Dictionary, or Open Translator",
+            "",
+            "Want unlimited translations? Get a free API key (see AI Providers below).",
         ])
 
-        # === Section 2: How to Get Free API Key ===
-        self._create_guide_section(guide_container, "How to Get an API Key", [
-            "Many AI providers offer free API keys. Here's how to get started:",
+        # === Section 2: Tooltip Actions ===
+        self._create_guide_section(guide_container, "Tooltip Actions", [
+            "When a translation appears, the tooltip provides these controls:",
             "",
-            "1. Choose a provider from the 'Supported AI Providers' list below",
-            "2. Sign up on their website and create an API key",
-            "3. Open Settings > API Key tab > Paste in 'API Key' field",
-            "4. Click 'Test' to verify the connection",
+            "Button Bar:",
+            "  \u2022 Copy               \u2192  Copy translation to clipboard",
+            "  \u2022 Replace            \u2192  Paste translation into source app",
+            "  \u2022 \u2699 (gear icon)      \u2192  Quick access to Replace mode settings",
+            "  \u2022 Dictionary         \u2192  Look up individual words interactively",
+            "  \u2022 Open Translator    \u2192  Open full translator window with text",
+            "  \u2022 \u2715 (close)          \u2192  Close the tooltip",
             "",
-            "The app auto-detects your provider from the API key format.",
+            "Other actions:",
+            "  \u2022 Press Escape to close the tooltip",
+            "  \u2022 Tooltip stays on top and doesn't steal focus from your app",
         ])
 
-        # === Section 3: Default Hotkeys ===
-        self._create_guide_section(guide_container, "Default Hotkeys", [
-            "Translation Hotkeys:",
-            "  • Win + Alt + V  →  Translate to Vietnamese",
-            "  • Win + Alt + E  →  Translate to English",
-            "  • Win + Alt + J  →  Translate to Japanese",
-            "  • Win + Alt + C  →  Translate to Chinese (Simplified)",
+        # === Section 3: Replace Feature ===
+        self._create_guide_section(guide_container, "Replace Feature", [
+            "Replace selected text in the source app with the translation.",
             "",
-            "Screenshot Translation:",
-            "  • Win + Alt + S  →  Capture screen region for OCR",
+            "Two modes (toggle in Settings \u2192 Hotkeys \u2192 Replace Mode):",
             "",
-            "You can customize hotkeys in the 'Hotkeys' tab.",
+            "Manual Replace (default):",
+            "  1. Click 'Replace' in tooltip",
+            "  2. Preview shows: original (strikethrough) \u2192 translated text",
+            "  3. Click 'Agree' to replace, or 'Cancel' to keep original",
+            "",
+            "Quick Replace:",
+            "  \u2022 Click 'Replace' \u2192 immediately pastes translation",
+            "  \u2022 No preview step \u2014 faster workflow",
+            "",
+            "How it works:",
+            "  \u2022 Translation is copied to clipboard, then Ctrl+V is simulated",
+            "  \u2022 Source app keeps focus (tooltip doesn't steal focus)",
+            "  \u2022 Toggle mode via the \u2699 gear icon or Settings \u2192 Hotkeys",
         ])
 
-        # === Section 3.5: Screenshot Translation ===
+        # === Section 4: Hotkeys ===
+        self._create_guide_section(guide_container, "Hotkeys", [
+            "Default Translation Hotkeys:",
+            "  \u2022 Win + Alt + V  \u2192  Translate to Vietnamese",
+            "  \u2022 Win + Alt + E  \u2192  Translate to English",
+            "  \u2022 Win + Alt + J  \u2192  Translate to Japanese",
+            "  \u2022 Win + Alt + C  \u2192  Translate to Chinese (Simplified)",
+            "",
+            "Screenshot:",
+            "  \u2022 Win + Alt + S  \u2192  Capture screen region for OCR translation",
+            "",
+            "Custom Hotkeys:",
+            "  \u2022 Add up to 4 additional language hotkeys",
+            f"  \u2022 Choose from {lang_count} languages with any key combination",
+            "  \u2022 All hotkeys are fully customizable in Settings \u2192 Hotkeys",
+        ])
+
+        # === Section 5: Screenshot Translation ===
         self._create_guide_section(guide_container, "Screenshot Translation", [
             "Capture any screen region for instant OCR and translation:",
             "",
             "How to use:",
             "1. Press Win + Alt + S",
-            "2. Screen dims with selection overlay",
-            "3. Click and drag to select region",
+            "2. Screen dims with a selection overlay",
+            "3. Click and drag to select a region",
             "4. Release to capture and translate",
             "",
             "Features:",
-            "  • Multi-monitor support",
-            "  • Configurable target language in Hotkeys tab",
-            "  • 'Open Translator' loads screenshot into Attachments",
+            "  \u2022 Multi-monitor support",
+            "  \u2022 Configurable target language in Settings \u2192 Hotkeys",
+            "  \u2022 'Open Translator' loads screenshot into Attachments",
             "",
             "Requirements:",
-            "  • Vision-capable API (Gemini 2.0+, GPT-4o, Claude 3)",
-            "  • Test API in Settings > API Key to check capability",
+            "  \u2022 Vision-capable API (e.g., Gemini, GPT-4o, Claude 3)",
+            "  \u2022 Test your API in Settings \u2192 API Key to check capability",
         ])
 
+        # === Section 6: Dictionary Mode ===
+        self._create_guide_section(guide_container, "Dictionary Mode", [
+            "Look up words interactively with detailed definitions.",
+            "",
+            "How to use:",
+            "  1. After translating, click 'Dictionary' in the tooltip",
+            "  2. Words appear as clickable buttons",
+            "  3. Click words to select, then click 'Dictionary Lookup'",
+            "",
+            "Word Selection:",
+            "  \u2022 Click on any word to select/deselect",
+            "  \u2022 Drag across words to select a range",
+            "  \u2022 Shift+Click to extend selection",
+            "  \u2022 Hyphenated words stay together (e.g., 'state-of-the-art')",
+            "",
+            "Lookup Results (8 fields):",
+            "  \u2022 Translation, Definition, Word Type",
+            "  \u2022 Pronunciation (IPA)",
+            "  \u2022 Synonyms with translations",
+            "  \u2022 Antonyms with translations",
+            "  \u2022 Example sentences with translations",
+            "",
+            "Language Packs:",
+            "  \u2022 Install NLP packs for better word tokenization",
+            "  \u2022 Supports Japanese, Chinese, Korean, and 30+ languages",
+            "  \u2022 Manage in Settings \u2192 Dictionary tab",
+        ])
+
+        # === Section 7: File Translation ===
         self._create_guide_section(guide_container, "File Translation", [
             "Translate entire documents with a single click:",
             "",
             "Supported formats:",
-            "  • .txt   - Plain text files",
-            "  • .docx  - Microsoft Word documents",
-            "  • .srt   - Subtitle files",
-            "  • .pdf   - PDF documents (text-based and scanned)",
+            "  \u2022 .txt   \u2014 Plain text files",
+            "  \u2022 .docx  \u2014 Microsoft Word documents",
+            "  \u2022 .srt   \u2014 Subtitle files (timestamps preserved)",
+            "  \u2022 .pdf   \u2014 PDF documents (text-based and scanned)",
             "",
             "How to use:",
-            "1. Right-click tray icon > 'Open Translator'",
+            "1. Right-click tray icon \u2192 'Open Translator'",
             "2. Click the '+' button or drag & drop files",
             "3. Select target language",
             "4. Click 'Translate'",
             "",
             "Tips:",
-            "  • You can add multiple files at once",
-            "  • Images (PNG, JPG) are also supported for OCR",
-            "  • Double-click any attachment to preview/open",
+            "  \u2022 Add multiple files at once for batch translation",
+            "  \u2022 Images (PNG, JPG, WebP, GIF) are supported via OCR",
+            "  \u2022 Double-click any attachment to preview with default app",
         ])
 
-        self._create_guide_section(guide_container, "Dictionary Mode", [
-            "Click the 'Dictionary' button to look up words interactively:",
+        # === Section 8: AI Providers ===
+        try:
+            provider_count = len(get_config().providers_list) - 1  # Exclude "Auto"
+        except Exception:
+            provider_count = 15
+        self._create_guide_section(guide_container, "AI Providers", [
+            f"{provider_count} providers with 180+ models:",
             "",
-            "Word Selection:",
-            "  • Click on any word to select/deselect it",
-            "  • Drag across multiple words to select a range",
-            "  • Shift+Click to select from anchor to clicked word",
+            "  \u2022 Google Gemini, OpenAI, Anthropic, DeepSeek",
+            "  \u2022 Groq, xAI, Mistral, Perplexity",
+            "  \u2022 Cerebras, SambaNova, Together, SiliconFlow",
+            "  \u2022 OpenRouter (400+ aggregated models), HuggingFace",
             "",
-            "Dictionary Lookup:",
-            "  • Select words and click 'Dictionary Lookup'",
-            "  • Get translation, definition, word type, pronunciation",
-            "  • Example sentences with translations",
+            "Many providers offer free API keys. Visit their website to sign up.",
             "",
-            "Features:",
-            "  • Words flow like a paragraph with line wrapping",
-            "  • Hyphenated words stay together (auto-update, state-of-the-art)",
-            "  • 'Expand' button for larger view",
-            "  • Results appear in a separate window",
+            "Setup:",
+            "  1. Sign up on a provider's website and create an API key",
+            "  2. Open Settings \u2192 API Key \u2192 paste your key",
+            "  3. Click 'Test' to verify the connection",
             "",
-            "Language Packs:",
-            "  • Install NLP packs for better tokenization",
-            "  • Supports Japanese, Chinese, Vietnamese, and 30+ languages",
-            "  • Settings > Dictionary tab to manage language packs",
+            "Smart Features:",
+            "  \u2022 Auto-detects provider from API key format",
+            "  \u2022 Add multiple API keys for automatic failover",
+            "  \u2022 Provider and model lists update automatically",
         ])
 
-        # === Section 6: Tips & Tricks ===
+        # === Section 9: Tips & Tricks ===
         self._create_guide_section(guide_container, "Tips & Tricks", [
-            "Custom Prompts:",
-            "  • Add instructions in the 'Custom prompt' field",
-            "  • Examples: 'formal tone', 'casual', 'technical terms'",
+            "System Features:",
+            "  \u2022 System tray icon for quick access (right-click for menu)",
+            "  \u2022 Start with Windows (Settings \u2192 General)",
+            "  \u2022 Auto-update notifications (Settings \u2192 General)",
             "",
             "Translation History:",
-            "  • Click the clock icon to view past translations",
-            "  • Search through history with keywords",
-            "  • Copy any previous translation",
+            "  \u2022 Click the clock icon to view past translations",
+            "  \u2022 Search through history with keywords",
+            "  \u2022 Last 100 translations are saved",
             "",
-            "Multiple API Keys:",
-            "  • Add backup keys for failover redundancy",
-            "  • If primary API fails, backup is used automatically",
+            "Full Translator Window:",
+            "  \u2022 Open via tooltip 'Open Translator' or system tray menu",
+            "  \u2022 Add custom prompts (e.g., 'formal tone', 'technical terms')",
+            "  \u2022 Attach files and images for translation",
+            f"  \u2022 Choose from {lang_count} target languages",
             "",
             "Trial Mode:",
-            f"  • {get_config().trial_daily_limit} free translations/day without API key",
-            "  • Quota resets at midnight",
-            "  • Get your own API key for unlimited use",
+            f"  \u2022 {trial_limit} free translations/day without API key",
+            "  \u2022 Quota resets at midnight",
+            "  \u2022 Get your own API key for unlimited translations",
+            "",
+            "Security:",
+            "  \u2022 API keys are encrypted with Windows DPAPI",
+            "  \u2022 Optional Windows Hello protection for API key access",
         ])
 
-        # === Section 7: Troubleshooting ===
+        # === Section 10: Troubleshooting ===
         self._create_guide_section(guide_container, "Troubleshooting", [
             "Hotkey not working?",
-            "  • Check if another app is using the same hotkey",
-            "  • Try running CrossTrans as Administrator",
-            "  • Reconfigure hotkeys in Settings > Hotkeys",
+            "  \u2022 Check if another app uses the same hotkey",
+            "  \u2022 Try running CrossTrans as Administrator",
+            "  \u2022 Reconfigure in Settings \u2192 Hotkeys",
             "",
             "API Error / Connection Failed?",
-            "  • Verify your API key is correct",
-            "  • Click 'Test' to check the connection",
-            "  • Make sure you have internet access",
-            "  • Check if you've exceeded API quota",
+            "  \u2022 Verify your API key is correct",
+            "  \u2022 Click 'Test' to check the connection",
+            "  \u2022 Check internet access and API quota",
             "",
             "Translation not appearing?",
-            "  • Make sure text is selected before pressing hotkey",
-            "  • Try copying text manually (Ctrl+C) first",
-            "  • Some applications block clipboard access",
-        ])
-
-        # === Section 8: Supported Providers ===
-        self._create_guide_section(guide_container, "Supported AI Providers", [
-            "15 providers with 180+ models:",
+            "  \u2022 Make sure text is selected before pressing hotkey",
+            "  \u2022 Try copying text manually (Ctrl+C) first",
+            "  \u2022 Some applications block clipboard access",
             "",
-            "Free Tier Available:",
-            "  • Google Gemini",
-            "  • Groq",
-            "  • Cerebras",
-            "  • DeepSeek",
-            "  • SambaNova",
-            "  • SiliconFlow",
-            "  • HuggingFace",
+            "Replace not working?",
+            "  \u2022 The source app must keep the text selected",
+            "  \u2022 Some apps block simulated Ctrl+V \u2014 try manual paste",
+            "  \u2022 Translation is always on clipboard as a fallback",
             "",
-            "Premium Providers:",
-            "  • OpenAI",
-            "  • Anthropic",
-            "  • xAI",
-            "  • Mistral AI, Perplexity, Together",
-            "  • OpenRouter (400+ aggregated models)",
-            "",
-            "Auto-detection:",
-            "  • App detects provider from API key pattern",
-            "  • Smart fallback tries multiple models automatically",
+            "App won't start?",
+            "  \u2022 Only one instance can run at a time (check system tray)",
+            "  \u2022 If crashed, close via Task Manager, then restart",
         ])
 
         # Footer
@@ -223,7 +300,8 @@ class GuideTabMixin:
         footer_frame = ttk.Frame(guide_container)
         footer_frame.pack(fill=X)
 
-        ttk.Label(footer_frame, text="Need more help?", font=('Segoe UI', 9, 'bold')).pack(anchor=W)
+        ttk.Label(footer_frame, text="Need more help?",
+                  font=('Segoe UI', 9, 'bold')).pack(anchor=W)
 
         links_frame = ttk.Frame(footer_frame)
         links_frame.pack(anchor=W, pady=5)
@@ -250,12 +328,12 @@ class GuideTabMixin:
         self.window.after(100, update_scroll)
 
     def _create_guide_section(self, parent, title, content_lines):
-        """Create a collapsible section in the guide."""
-        # Section header
+        """Create a section in the guide with icon prefix."""
         ttk.Separator(parent).pack(fill=X, pady=10)
-        ttk.Label(parent, text=title, font=('Segoe UI', 11, 'bold')).pack(anchor=W, pady=(5, 10))
-
-        # Content
+        icon = SECTION_ICONS.get(title, "")
+        display_title = f"{icon}  {title}" if icon else title
+        ttk.Label(parent, text=display_title,
+                  font=('Segoe UI', 11, 'bold')).pack(anchor=W, pady=(5, 10))
         self._create_guide_content(parent, content_lines)
 
     def _create_guide_content(self, parent, content_lines):
@@ -264,7 +342,7 @@ class GuideTabMixin:
             if line == "":
                 # Empty line for spacing
                 ttk.Label(parent, text="").pack(anchor=W)
-            elif line.startswith("  •"):
+            elif line.startswith("  \u2022"):
                 # Bullet point with indent
                 ttk.Label(parent, text=line, font=('Segoe UI', 9),
                          foreground='#cccccc').pack(anchor=W, padx=(20, 0))
