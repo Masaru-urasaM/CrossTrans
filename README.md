@@ -1,6 +1,6 @@
 # CrossTrans
 
-![Version](https://img.shields.io/badge/version-1.9.10-blue.svg)
+![Version](https://img.shields.io/badge/version-1.9.11-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-yellow.svg)
 ![License](https://img.shields.io/badge/license-AGPL%20v3-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-informational.svg)
@@ -13,10 +13,10 @@ A powerful Windows desktop application for instant text translation using AI. Se
 
 - **Instant Translation** - Select text, press hotkey, get translation in tooltip
 - **Screenshot Translation** - Win+Alt+S to capture and translate any screen region
-- **Free Trial Mode** - 100 translations/day without API key
+- **Free Trial Mode** - Daily free translations without API key
 - **15 AI Providers** - Google, OpenAI, Anthropic, DeepSeek, Groq, and more (many offer free tiers)
 - **File Processing** - Translate documents (.docx, .txt, .srt, .pdf) and images
-- **120+ Languages** - Comprehensive language support
+- **100+ Languages** - Comprehensive language support
 - **Custom Hotkeys** - Configure any key combination for any language
 
 ---
@@ -35,7 +35,7 @@ A powerful Windows desktop application for instant text translation using AI. Se
 **+ 4 customizable hotkeys** for any language of your choice.
 
 ### Free Trial Mode
-- **100 free translations per day** without any API key
+- **Daily free translations** without any API key (limit set dynamically)
 - Perfect for trying out the app before getting your own API key
 - Quota resets at midnight
 
@@ -77,7 +77,7 @@ Many providers offer free API keys. See Settings → Guide tab for details.
 - **Translation History** - Review and reuse past translations (up to 100 entries)
 
 ### Smart Features
-- **Dictionary Mode** - Click words to select, get definitions, pronunciation, synonyms, antonyms, examples
+- **Dictionary Mode** - Click words to select, get definitions, pronunciation, synonyms, antonyms, examples (requires Python installed for language pack download)
 - **Custom Prompts** - Add instructions like "Make it formal" or "Technical terms only"
 - **Clipboard Preservation** - Your files/images in clipboard are preserved
 - **Auto-start** - Optionally start with Windows
@@ -98,6 +98,9 @@ Many providers offer free API keys. See Settings → Guide tab for details.
 3. Run the application
 4. Start translating immediately with trial mode, or enter your API key in Settings
 
+> **Note:** On first run, Windows SmartScreen may show "Windows protected your PC".
+> Click **"More info"** → **"Run anyway"**. This is normal for unsigned applications.
+
 ### Option 2: Run from Source
 
 ```bash
@@ -111,8 +114,6 @@ pip install -r requirements.txt
 # Run
 python main.py
 
-# Or run without console window
-# Double-click run_silent.vbs
 ```
 
 ### Get an API Key (Optional)
@@ -144,7 +145,7 @@ Right-click tray icon -> "Open Translator" or click from tooltip
 
 Features:
 - Edit original text
-- Choose from 120+ languages
+- Choose from 100+ languages
 - Add custom prompt for translation style
 - Attach images or files
 - View translation history
@@ -201,40 +202,55 @@ CrossTrans/
 ├── config.py               # Configuration management
 ├── requirements.txt        # Dependencies
 ├── src/
-│   ├── app.py              # Main application
+│   ├── app.py              # Main application coordinator
 │   ├── constants.py        # Languages, providers, models
 │   ├── core/
-│   │   ├── remote_config.py # Dynamic model/provider config (Cloudflare KV)
-│   │   ├── api_manager.py  # AI provider management
-│   │   ├── translation.py  # Translation service
-│   │   ├── hotkey.py       # Global hotkey system
-│   │   ├── clipboard.py    # Clipboard operations
-│   │   ├── multimodal.py   # Vision processing
-│   │   ├── file_processor.py # Document text extraction
-│   │   ├── pdf_ocr.py      # Scanned PDF OCR
-│   │   ├── screenshot.py   # Screenshot capture for OCR
-│   │   ├── history.py      # Translation history
-│   │   ├── crypto.py       # Secure API key storage (DPAPI)
-│   │   ├── ssl_pinning.py  # SSL certificate pinning
-│   │   ├── auth.py         # Windows Hello authentication
-│   │   ├── drop_handler.py # Drag-drop handler
-│   │   ├── quota_manager.py # Trial mode quota tracking
-│   │   ├── trial_api.py    # Trial mode API handler
+│   │   ├── remote_config.py    # Dynamic model/provider config (Cloudflare KV)
+│   │   ├── api_manager.py     # AI provider management
+│   │   ├── translation.py     # Translation service
+│   │   ├── hotkey.py          # Global hotkey system
+│   │   ├── clipboard.py       # Clipboard operations
+│   │   ├── multimodal.py      # Vision processing
+│   │   ├── file_processor.py  # Document text extraction
+│   │   ├── pdf_ocr.py         # Scanned PDF OCR
+│   │   ├── screenshot.py      # Screenshot capture for OCR
+│   │   ├── history.py         # Translation history
+│   │   ├── crypto.py          # Secure API key storage (DPAPI)
+│   │   ├── ssl_pinning.py     # SSL certificate pinning
+│   │   ├── auth.py            # Windows Hello authentication
+│   │   ├── drop_handler.py    # Drag-drop handler
+│   │   ├── nlp_manager.py     # NLP language pack management
+│   │   ├── quota_manager.py   # Trial mode quota tracking
+│   │   ├── trial_api.py       # Trial mode API handler
+│   │   ├── trial_manager.py   # Trial mode status & dialogs
+│   │   ├── update_ui_manager.py # Update status checking & UI
 │   │   └── provider_health.py # Smart provider fallback
 │   ├── ui/
-│   │   ├── settings.py     # Settings window
-│   │   ├── attachments.py  # File attachment widget
-│   │   ├── dictionary_mode.py # Dictionary word selection
-│   │   ├── history_dialog.py # History viewer with search
-│   │   ├── progress_dialog.py # Progress indicator
-│   │   ├── toast.py        # Toast notifications
-│   │   ├── tray.py         # System tray manager
-│   │   ├── tooltip.py      # Tooltip widget
-│   │   └── dialogs.py      # Error dialogs
+│   │   ├── tooltip.py          # Translation tooltip popup
+│   │   ├── attachments.py      # File attachment widget
+│   │   ├── dictionary_mode.py  # Dictionary word selection
+│   │   ├── dictionary_popup.py # Dictionary popup manager
+│   │   ├── expanded_window.py  # Fullscreen translation view
+│   │   ├── screenshot_handler.py # Screenshot/vision handler
+│   │   ├── history_dialog.py   # History viewer with search
+│   │   ├── progress_dialog.py  # Progress indicator
+│   │   ├── toast.py            # Toast notifications
+│   │   ├── tray.py             # System tray manager
+│   │   ├── dialogs.py          # Error/trial dialogs
+│   │   └── settings/           # Settings window (modular tabs)
+│   │       ├── main.py         # SettingsWindow base
+│   │       ├── api_tab.py      # API Key tab
+│   │       ├── hotkey_tab.py   # Hotkeys tab
+│   │       ├── general_tab.py  # General settings tab
+│   │       ├── dictionary_tab.py # Dictionary/NLP tab
+│   │       ├── guide_tab.py    # User guide tab
+│   │       ├── widgets.py      # Custom widgets (AutocompleteCombobox)
+│   │       └── update_manager.py # Update checking & downloading
 │   ├── assets/             # Icon assets
 │   └── utils/
 │       ├── logging_setup.py    # Logging
 │       ├── single_instance.py  # Prevent duplicates
+│       ├── ui_helpers.py       # Dark title bar, word filtering
 │       └── updates.py          # Auto-update
 ├── tests/                  # Unit tests
 └── logs/                   # Application logs
@@ -267,13 +283,27 @@ CrossTrans/
 - Go to Settings -> API Key -> Click "Test"
 - If test shows "Image OK", vision is enabled
 
+### Dictionary Mode Not Working
+- Dictionary Language Packs require Python 3.10+ installed on your system
+- The EXE itself doesn't need Python, but downloading language packs uses pip
+- Go to Settings → Dictionary tab to install language packs
+- If Python is not found, install it from [python.org](https://python.org) (check "Add to PATH")
+
 ### Trial Mode Issues
 - Trial mode requires internet connection
+- Daily quota is set dynamically (check the app UI for current limit)
 - If quota exhausted, wait until midnight or add your own API key
 
 ---
 
-## What's New in v1.9.10
+## What's New in v1.9.11
+
+### Hardened for Public Release
+- **Cleaned .gitignore** - Ensured no sensitive or dev-only files leak into the repository
+- **Standardized API Settings buttons** - All error dialogs now consistently show "Open API Key Settings" button that navigates directly to Settings > API Key tab
+- **Fixed trial dialogs bug** - "Open Settings" button in Trial Exhausted and Trial Feature dialogs was never rendered due to a callback parameter mismatch
+
+### Previous in v1.9.10
 
 ### Replace in Source App
 - **Replace button** - One-click replace selected text with translation directly in the source app
@@ -343,7 +373,7 @@ CrossTrans/
 - 180+ models from 14 providers
 
 ### Previous in v1.7.0-1.9.0
-- Trial Mode - 100 free translations/day without API key
+- Trial Mode - Free daily translations without API key
 - Windows Hello Authentication for API key protection
 - Smart Provider Fallback - auto-switch to backup API
 - Scanned PDF OCR support
@@ -367,7 +397,7 @@ python main.py
 ```bash
 pip install pyinstaller
 pyinstaller CrossTrans.spec
-# Output: dist/CrossTrans_v1.9.9.exe
+# Output: dist/CrossTrans_v{version}.exe
 ```
 
 ### Running Tests

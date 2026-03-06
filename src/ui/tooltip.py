@@ -598,8 +598,8 @@ class TooltipManager:
             )
             self.tooltip_open_btn.pack(side=LEFT, padx=4)
         else:
-            # For errors, show "Open Settings" button
-            settings_btn_kwargs = {"text": "Open Settings", "command": self._handle_open_settings, "width": 14}
+            # For errors, show "API Settings" button (opens Settings → API Key tab)
+            settings_btn_kwargs = {"text": "API Settings", "command": self._handle_open_settings, "width": 14}
             if HAS_TTKBOOTSTRAP:
                 settings_btn_kwargs["bootstyle"] = "warning"
             ttk.Button(self._btn_frame, **settings_btn_kwargs).pack(side=LEFT, padx=8)

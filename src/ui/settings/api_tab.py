@@ -21,7 +21,7 @@ from src.core.remote_config import get_config
 from src.core.api_manager import AIAPIManager
 from src.core.multimodal import MultimodalProcessor
 from src.core.auth import require_auth
-from src.ui.settings.widgets import AutocompleteCombobox, get_all_models_list
+from src.ui.settings.widgets import AutocompleteCombobox, get_all_models_list, hide_combobox_scrollbar
 
 
 class APITabMixin:
@@ -248,6 +248,7 @@ class APITabMixin:
         ttk.Label(row, text="Provider:", font=('Segoe UI', 9)).pack(side=LEFT)
         provider_cb = ttk.Combobox(row, textvariable=provider_var, values=get_config().providers_list, width=10, state="readonly")
         provider_cb.pack(side=LEFT, padx=(3, 8))
+        hide_combobox_scrollbar(provider_cb)
 
         # Model Combobox (autocomplete - can select or type to filter)
         model_var = tk.StringVar(value=model if model else "Auto")
@@ -276,6 +277,9 @@ class APITabMixin:
 
         key_entry = ttk.Entry(row, textvariable=key_var, width=28, show="*")
         key_entry.pack(side=LEFT, padx=(3, 5))
+
+        # Auto-save when user manually edits key field and focus leaves
+        key_entry.bind('<FocusOut>', lambda e: self._on_api_key_edited())
 
         # Store show state for this row
         show_state = {'showing': False, 'authenticated': False}
@@ -408,11 +412,15 @@ class APITabMixin:
             from tkinter import messagebox
             if not messagebox.askyesno("Confirm Clear", msg, parent=self.window): return
 
-        # Clear keys in all rows
+        # Clear keys in all rows and reset test labels
         for row in self.api_rows:
             row['key_var'].set("")
+            if HAS_TTKBOOTSTRAP:
+                row['test_label'].config(text="", bootstyle="secondary")
+            else:
+                row['test_label'].config(text="", foreground="gray")
 
-        # Save immediately as requested
+        # Save immediately as requested (also refreshes capability toggles)
         self._save_api_keys_to_config(secure=True)
 
         # Force garbage collection to clear strings from RAM immediately
@@ -546,11 +554,31 @@ class APITabMixin:
             # Update the vision/file toggles based on new capabilities
             self.config._auto_update_toggles()
 
+            # Refresh UI toggles to reflect current state
+            self._refresh_vision_toggle_state()
+            self._refresh_file_toggle_state()
+
             # Trigger API change callback to update trial mode status
             if notify_change and self.on_api_change_callback:
                 self.on_api_change_callback()
         except Exception as e:
             logging.exception(f"Error saving API keys to config: {e}")
+
+    def _on_api_key_edited(self):
+        """Handle manual API key edits - save and refresh states."""
+        try:
+            # Clear test labels for rows with empty keys
+            for row in self.api_rows:
+                if not row['key_var'].get().strip() and row['test_label'].cget('text'):
+                    if HAS_TTKBOOTSTRAP:
+                        row['test_label'].config(text="", bootstyle="secondary")
+                    else:
+                        row['test_label'].config(text="", foreground="gray")
+
+            # Save current state and refresh capability toggles
+            self._save_api_keys_to_config(notify_change=True)
+        except Exception as e:
+            logging.debug(f"Error in _on_api_key_edited: {e}")
 
     def _update_api_add_button(self):
         """Enable/disable add button based on limit."""
@@ -700,17 +728,20 @@ class APITabMixin:
                 capability_str = " | ".join(capability_parts) if capability_parts else ""
                 label_text = f"OK! {capability_str}" if capability_str else "OK!"
 
-                # Store capabilities in config
+                # Update UI dropdowns with working combination if row_data provided
+                if row_data:
+                    row_data['provider_var'].set(try_provider)
+                    row_data['model_var'].set(try_model)
+
+                # AUTO-SAVE first: updates model name in config so capability lookup matches
+                self._save_single_api_row(try_provider, try_model, api_key, row_data)
+
+                # Store capabilities in config (must be after save so model name matches)
                 self.config.update_api_capabilities(api_key, try_model, is_vision, is_file_capable)
 
                 # Refresh toggle states
                 self._refresh_vision_toggle_state()
                 self._refresh_file_toggle_state()
-
-                # Update UI dropdowns with working combination if row_data provided
-                if row_data:
-                    row_data['provider_var'].set(try_provider)
-                    row_data['model_var'].set(try_model)
 
                 # Build detailed message
                 capability_msg = ""
@@ -733,8 +764,6 @@ class APITabMixin:
                             "Test Result",
                             f"Connection Verified!\n\nProvider: {display_name}\nModel: {try_model}\nStatus: OK{capability_msg}",
                             parent=self.window)
-                # AUTO-SAVE: Save this API row immediately after successful test
-                self._save_single_api_row(try_provider, try_model, api_key, row_data)
 
                 # Notify main app to refresh attachments (if callback provided)
                 if self.on_api_change_callback:
@@ -768,6 +797,16 @@ class APITabMixin:
 
         # AUTO-SAVE: Save API row even if test failed (user requested)
         self._save_single_api_row(provider, model_name, api_key, row_data)
+
+        # Clear capabilities for this failed API key (was previously marked capable)
+        # Normalize "Auto" to "" to match config storage format
+        config_model = '' if model_name == 'Auto' else model_name
+        self.config.update_api_capabilities(api_key, config_model, False, False)
+
+        # Refresh toggle states (other keys may still have capabilities)
+        self._refresh_vision_toggle_state()
+        self._refresh_file_toggle_state()
+
         logging.info(f"Auto-saved API key (test failed) for {provider}/{model_name}")
 
     def _refresh_vision_toggle_state(self):

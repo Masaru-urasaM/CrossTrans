@@ -142,7 +142,7 @@ class TranslatorApp:
             on_copy=self._on_tooltip_copy,
             on_copy_and_replace=self._on_tooltip_copy_and_replace,
             on_open_translator=self._on_tooltip_open_translator,
-            on_open_settings=self.show_settings,
+            on_open_settings=lambda: self._show_settings_tab("API Key"),
             on_open_settings_dictionary_tab=self._show_settings_dictionary_tab,
             on_dictionary_lookup=self._on_tooltip_dictionary_lookup,
             on_open_settings_hotkeys_tab=self._show_settings_hotkeys_tab
@@ -181,6 +181,7 @@ class TranslatorApp:
 
         # Drop handler
         self.drop_handler = DropHandler(self.root)
+        self.drop_handler.configure(on_open_settings_tab=self._show_settings_tab)
 
         # Translation animation state
         self._translate_animation_running = False
@@ -618,7 +619,8 @@ class TranslatorApp:
             try:
                 # Ensure popup window is fully realized before creating DnD widgets
                 self.popup.update_idletasks()
-                self.attachment_area = AttachmentArea(content_frame, self.config, on_change=None)
+                self.attachment_area = AttachmentArea(content_frame, self.config, on_change=None,
+                                                     on_open_settings_tab=self._show_settings_tab)
                 self.attachment_area.pack(fill=X, pady=(0, 10))
 
                 # Load pending attachment (e.g., from screenshot hotkey)
@@ -1293,11 +1295,6 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         self.settings_window.window.lift()
         self.settings_window.window.focus_force()
 
-    def _open_settings_from_error(self):
-        """Open settings from error tooltip."""
-        self.close_tooltip()
-        self.show_settings()
-
     def _refresh_tray_menu(self):
         """Refresh tray menu to reflect updated hotkeys."""
         self.tray_manager.refresh_menu()
@@ -1324,7 +1321,8 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
                     from src.ui.attachments import AttachmentArea
                     self.popup.update_idletasks()
                     self.attachment_area = AttachmentArea(
-                        self._content_frame, self.config, on_change=None
+                        self._content_frame, self.config, on_change=None,
+                        on_open_settings_tab=self._show_settings_tab
                     )
                     # Pack before the original_header (after content_frame top)
                     self.attachment_area.pack(fill=X, pady=(0, 10), before=self._original_header)

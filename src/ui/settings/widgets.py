@@ -64,6 +64,15 @@ def get_all_models_list(provider: str = "Auto") -> list:
     return ["Auto"] + models
 
 
+def hide_combobox_scrollbar(combo):
+    """Hide the scrollbar in a ttk Combobox dropdown (mousewheel still works)."""
+    try:
+        popup = combo.tk.call('ttk::combobox::PopdownWindow', str(combo))
+        combo.tk.call(str(popup) + '.f.sb', 'configure', '-width', '0')
+    except Exception:
+        pass
+
+
 class AutocompleteCombobox(ttk.Combobox):
     """Combobox with autocomplete filtering.
 
@@ -75,6 +84,9 @@ class AutocompleteCombobox(ttk.Combobox):
         self._all_values = list(kwargs.pop('values', []))
         super().__init__(master, **kwargs)
         self['values'] = self._all_values
+
+        # Hide dropdown scrollbar (mousewheel still works)
+        hide_combobox_scrollbar(self)
 
         # Bind key release for filtering
         self.bind('<KeyRelease>', self._on_key_release)

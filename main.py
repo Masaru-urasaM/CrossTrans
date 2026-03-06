@@ -27,6 +27,13 @@ from src.utils.single_instance import is_already_running
 
 def main():
     """Main entry point for CrossTrans."""
+    # Enable DPI awareness for crisp UI on high-DPI displays (must be before any tkinter)
+    import ctypes
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)  # PROCESS_SYSTEM_DPI_AWARE
+    except Exception:
+        pass  # Older Windows versions don't have this API
+
     # Setup logging first
     setup_logging()
 

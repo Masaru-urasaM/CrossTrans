@@ -27,10 +27,11 @@ except ImportError:
 class AttachmentArea(ttk.Frame):
     """Widget to display and manage attachments."""
 
-    def __init__(self, parent, config, on_change=None):
+    def __init__(self, parent, config, on_change=None, on_open_settings_tab=None):
         super().__init__(parent)
         self.config = config
         self.on_change = on_change
+        self.on_open_settings_tab = on_open_settings_tab
         self.attachments = []  # List of {'type': 'image'|'file', 'path': str}
         self.thumbnails = []   # Keep references to avoid GC
 
@@ -248,15 +249,18 @@ class AttachmentArea(ttk.Frame):
             self.add_menu.grab_release()
 
     def _open_settings_hint(self):
-        """Hint to open settings - just shows a message for now."""
-        from tkinter import messagebox
-        messagebox.showinfo("Enable Upload Features",
-                           "To enable upload features:\n\n"
-                           "1. Open Settings from the system tray\n"
-                           "2. Go to 'API Key' tab\n"
-                           "3. Enable 'Upload Image Mode' or 'Upload File Mode'\n\n"
-                           "Note: These options require a working API key.",
-                           parent=self)
+        """Open Settings at API Key tab directly."""
+        if self.on_open_settings_tab:
+            self.on_open_settings_tab("API Key")
+        else:
+            from tkinter import messagebox
+            messagebox.showinfo("Enable Upload Features",
+                               "To enable upload features:\n\n"
+                               "1. Open Settings from the system tray\n"
+                               "2. Go to 'API Key' tab\n"
+                               "3. Enable 'Upload Image Mode' or 'Upload File Mode'\n\n"
+                               "Note: These options require a working API key.",
+                               parent=self)
 
     def add_file(self, file_path, show_warning=False):
         """Add a file attachment."""

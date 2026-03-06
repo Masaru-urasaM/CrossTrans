@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-# CrossTrans v1.9.9 - PyInstaller Build Configuration
+# CrossTrans v1.9.11 - PyInstaller Build Configuration
 # Build command: pyinstaller CrossTrans.spec --clean --noconfirm
 
 a = Analysis(

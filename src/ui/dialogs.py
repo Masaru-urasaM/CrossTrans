@@ -181,15 +181,15 @@ class TrialExhaustedDialog:
         btn_frame = ttk.Frame(main)
         btn_frame.pack(fill=X, pady=20)
 
-        if self.on_open_settings:
+        if self.on_open_settings or self.on_open_settings_tab:
             if HAS_TTKBOOTSTRAP:
-                ttk.Button(btn_frame, text="Open Settings",
+                ttk.Button(btn_frame, text="Open API Key Settings",
                            command=self._open_settings,
-                           bootstyle="success", width=15).pack(side=LEFT)
+                           bootstyle="success", width=20).pack(side=LEFT)
             else:
-                ttk.Button(btn_frame, text="Open Settings",
+                ttk.Button(btn_frame, text="Open API Key Settings",
                            command=self._open_settings,
-                           width=15).pack(side=LEFT)
+                           width=20).pack(side=LEFT)
 
         if HAS_TTKBOOTSTRAP:
             ttk.Button(btn_frame, text="Close", command=self.window.destroy,
@@ -270,15 +270,15 @@ class TrialFeatureDialog:
         btn_frame = ttk.Frame(main)
         btn_frame.pack(fill=X, pady=(15, 0))
 
-        if self.on_open_settings:
+        if self.on_open_settings or self.on_open_settings_tab:
             if HAS_TTKBOOTSTRAP:
-                ttk.Button(btn_frame, text="Open Settings",
+                ttk.Button(btn_frame, text="Open API Key Settings",
                            command=self._open_settings,
-                           bootstyle="success", width=15).pack(side=LEFT)
+                           bootstyle="success", width=20).pack(side=LEFT)
             else:
-                ttk.Button(btn_frame, text="Open Settings",
+                ttk.Button(btn_frame, text="Open API Key Settings",
                            command=self._open_settings,
-                           width=15).pack(side=LEFT)
+                           width=20).pack(side=LEFT)
 
         if HAS_TTKBOOTSTRAP:
             ttk.Button(btn_frame, text="Close", command=self.window.destroy,

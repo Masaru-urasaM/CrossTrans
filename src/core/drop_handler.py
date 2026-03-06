@@ -48,19 +48,24 @@ class DropHandler:
 
         # Callbacks
         self._on_files_dropped: Optional[Callable[[List[str]], None]] = None
+        self._on_open_settings_tab: Optional[Callable[[str], None]] = None
 
         # WM_DROPFILES state
         self._original_wndproc = None
         self._wndproc_callback = None
 
     def configure(self,
-                  on_files_dropped: Optional[Callable[[List[str]], None]] = None):
-        """Configure callback for file drops.
+                  on_files_dropped: Optional[Callable[[List[str]], None]] = None,
+                  on_open_settings_tab: Optional[Callable[[str], None]] = None):
+        """Configure callbacks for file drops.
 
         Args:
             on_files_dropped: Called with list of file paths when files are dropped
+            on_open_settings_tab: Called with tab name to open settings at specific tab
         """
         self._on_files_dropped = on_files_dropped
+        if on_open_settings_tab is not None:
+            self._on_open_settings_tab = on_open_settings_tab
 
     def set_popup(self, popup: Optional[tk.Toplevel]):
         """Set the popup window reference.
@@ -286,7 +291,7 @@ class DropHandler:
             self._on_files_dropped(paths)
 
     def _show_upload_disabled_warning(self):
-        """Show warning dialog that upload is disabled."""
+        """Show warning dialog that upload is disabled, then open Settings."""
         message = (
             "Cannot add files.\n\n"
             "Upload features are not enabled.\n"
@@ -306,6 +311,10 @@ class DropHandler:
                 message,
                 parent=self._popup if self._popup else None
             )
+
+        # Auto-open Settings at API Key tab after dismissing warning
+        if self._on_open_settings_tab:
+            self._on_open_settings_tab("API Key")
 
     def check_drop_queue(self):
         """Check drop queue for files (runs on main Tkinter thread)."""

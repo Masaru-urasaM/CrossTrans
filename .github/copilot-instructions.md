@@ -1,6 +1,6 @@
 # CrossTrans Copilot Instructions
 
-**CrossTrans v1.9.10** — Windows desktop translation app with 15 AI API providers, instant hotkey translation, screenshot OCR, and trial mode.
+**CrossTrans v1.9.11** — Windows desktop translation app with 15 AI API providers, instant hotkey translation, screenshot OCR, and trial mode.
 
 **See [CLAUDE.md](../CLAUDE.md) for comprehensive technical documentation.**
 
@@ -94,7 +94,7 @@ When user selects "Auto" for model:
 ## 🚨 Critical Gotchas & Anti-Patterns
 
 ### Update System (MUST READ)
-**See [docs/SYSTEM_INTERNALS.md](../docs/SYSTEM_INTERNALS.md) for full details.**
+**See [CLAUDE.md](../CLAUDE.md) "Auto-Update System" section for full details.**
 
 | Gotcha | Impact | Solution |
 |--------|--------|----------|
@@ -105,7 +105,7 @@ When user selects "Auto" for model:
 
 ### PyInstaller First-Launch Gotcha
 Fresh-built EXE may fail on **first double-click** (Windows Defender scanning). **Not a bug** — works on 2nd attempt.  
-Update system's batch retry handles this. See [SYSTEM_INTERNALS.md](../docs/SYSTEM_INTERNALS.md).
+Update system's batch retry handles this. See [CLAUDE.md](../CLAUDE.md) "Auto-Update System" section.
 
 ### Tkinter DnD Library
 Always check flags before drag-and-drop:
@@ -194,8 +194,7 @@ CrossTrans/
 │   │   ├── clipboard.py          # Clipboard manager
 │   │   ├── history.py            # Translation history
 │   │   └── [15+ other modules]   # Crypto, auth, file processing, etc.
-│   ├── ui/                       # UI components (20+ files)
-│   │   ├── app.py                # App window + widget layout
+│   ├── ui/                       # UI components (12+ files)
 │   │   ├── tooltip.py            # Translation popup (Copy, Replace, Dict)
 │   │   ├── tray.py               # System tray manager
 │   │   ├── dictionary_popup.py   # Dictionary UI (extracted module)
@@ -216,8 +215,7 @@ CrossTrans/
 │       └── generate_icons.py     # Icon generation from SVG
 ├── tests/                        # pytest test suite
 ├── docs/
-│   ├── SYSTEM_INTERNALS.md       # Detailed update/auto-start docs
-│   └── models_config_template.json
+│   └── models_config_template.json  # Template JSON for Cloudflare KV config
 ├── CLAUDE.md                     # 📖 DETAILED TECHNICAL DOCUMENTATION
 ├── README.md                     # User-facing feature list
 └── requirements.txt
@@ -233,7 +231,7 @@ CrossTrans/
 - Auto-start: Registry entry `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\AITranslator`
 
 ### Environment
-- **Python**: ≥3.8 (f-strings, type hints used)
+- **Python**: ≥3.10
 - **UI Framework**: Tkinter (stdlib) + ttkbootstrap
 - **Key Dependencies**: pyperclip, pystray, pywin32, Pillow, keyboard, PyPDF2, python-docx
 - **Windows Hello**: Optional (winsdk, requires VS Build Tools)
@@ -293,13 +291,6 @@ See [CLAUDE.md](../CLAUDE.md) line 4—this is a hard requirement.
   - Replace button implementation
   - Configuration details
 
-- **[docs/SYSTEM_INTERNALS.md](../docs/SYSTEM_INTERNALS.md)** — Auto-update & auto-start technical details
-  - Update flow diagram
-  - Batch script implementation
-  - Registry sync
-  - Retry logic
-  - Verification checklist
-
 - **[README.md](../README.md)** — User-facing feature documentation
 
 ---
@@ -309,10 +300,10 @@ See [CLAUDE.md](../CLAUDE.md) line 4—this is a hard requirement.
 1. **Always consult [CLAUDE.md](../CLAUDE.md)** first—it has detailed design decisions and gotchas
 2. **Remote config is key**: Use `get_config()` singleton instead of hardcoded constants from the start
 3. **Use callback injection**: New UI components should never accept `app` reference
-4. **Update system is fragile**: Read [SYSTEM_INTERNALS.md](../docs/SYSTEM_INTERNALS.md) carefully if touching `updates.py`
+4. **Update system is fragile**: Read CLAUDE.md "Auto-Update System" section carefully if touching `updates.py`
 5. **Test on fresh build**: Always test update system with a clean build (see "Test update system" task)
 6. **Check single instance**: If app won't launch, check if another instance is already running on port 47823
 
 ---
 
-**Last Updated**: March 2026 | **Version**: 1.9.10
+**Last Updated**: March 2026 | **Version**: 1.9.11
