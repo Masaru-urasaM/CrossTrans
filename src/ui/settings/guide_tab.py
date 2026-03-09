@@ -1,7 +1,12 @@
 """
 User Guide tab functionality for Settings window.
 """
+import sys
+import os
+import logging
 import webbrowser
+
+from PIL import Image, ImageTk
 
 from src.core.remote_config import get_config
 
@@ -20,8 +25,8 @@ from src.constants import GITHUB_REPO, FEEDBACK_URL, LANGUAGES
 # Unicode icons for section headers (Segoe UI safe)
 SECTION_ICONS = {
     "Getting Started": "\u25B6",        # ▶ right-pointing triangle
-    "Tooltip Actions": "\u2139",        # ℹ information source
-    "Replace Feature": "\u21C4",        # ⇄ right arrow over left arrow
+    "Quick Translate": "\u26A1",        # ⚡ high voltage (speed)
+    "Replace Mode": "\u21C4",           # ⇄ right arrow over left arrow
     "Hotkeys": "\u2328",               # ⌨ keyboard
     "Screenshot Translation": "\u2316",  # ⌖ position indicator
     "Dictionary Mode": "\u2261",        # ≡ triple bar
@@ -35,8 +40,52 @@ SECTION_ICONS = {
 class GuideTabMixin:
     """Mixin class providing User Guide tab functionality."""
 
+    def _get_screenshot_path(self, filename):
+        """Get absolute path to a screenshot, works for dev and PyInstaller bundle."""
+        if hasattr(sys, '_MEIPASS'):
+            base_path = sys._MEIPASS
+        else:
+            # Running as script - go up 3 levels from src/ui/settings/ to project root
+            base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        return os.path.join(base_path, 'docs', 'screenshots', filename)
+
+    def _add_guide_image(self, parent, filename, caption=None, max_width=600):
+        """Add a screenshot image to the guide tab.
+
+        Silently skips if the image file is missing or fails to load.
+        """
+        path = self._get_screenshot_path(filename)
+        if not os.path.exists(path):
+            return
+        try:
+            img = Image.open(path)
+            # Resize if wider than max_width, keeping aspect ratio
+            if img.width > max_width:
+                ratio = max_width / img.width
+                new_size = (max_width, int(img.height * ratio))
+                img = img.resize(new_size, Image.LANCZOS)
+            photo = ImageTk.PhotoImage(img)
+            self._guide_images.append(photo)  # Prevent GC
+            try:
+                bg = parent.cget('background')
+            except Exception:
+                bg = '#2b2b2b'  # Dark theme fallback
+            label = tk.Label(parent, image=photo, bg=bg if bg else '#2b2b2b')
+            label.pack(anchor=W, padx=20, pady=(5, 2))
+            # Bind mousewheel so scrolling works over images
+            label.bind("<MouseWheel>", lambda e: parent.event_generate("<MouseWheel>", delta=e.delta))
+            if caption:
+                cap_label = ttk.Label(parent, text=caption, font=('Segoe UI', 8, 'italic'),
+                                      foreground='#666666')
+                cap_label.pack(anchor=W, padx=20, pady=(0, 5))
+                cap_label.bind("<MouseWheel>", lambda e: parent.event_generate("<MouseWheel>", delta=e.delta))
+        except Exception as e:
+            logging.warning(f"Failed to load guide screenshot {filename}: {e}")
+
     def _create_guide_tab(self, parent):
         """Create user guide tab with helpful instructions."""
+        self._guide_images = []  # Keep PhotoImage references to prevent GC
+
         # Scrollable container
         canvas = tk.Canvas(parent, highlightthickness=0)
         guide_container = ttk.Frame(canvas)
@@ -83,15 +132,15 @@ class GuideTabMixin:
             "How to translate:",
             "1. Select any text in any application (browser, Word, PDF, etc.)",
             "2. Press a hotkey (e.g., Win+Alt+V for Vietnamese)",
-            "3. Translation appears in a tooltip near your cursor",
-            "4. Use the tooltip buttons: Copy, Replace, Dictionary, or Open Translator",
+            "3. Translation appears in a popup near your cursor",
+            "4. Use the popup buttons: Copy, Replace, Dictionary, or Open Translator",
             "",
             "Want unlimited translations? Get a free API key (see AI Providers below).",
         ])
 
-        # === Section 2: Tooltip Actions ===
-        self._create_guide_section(guide_container, "Tooltip Actions", [
-            "When a translation appears, the tooltip provides these controls:",
+        # === Section 2: Quick Translate ===
+        self._create_guide_section(guide_container, "Quick Translate", [
+            "When a translation appears, the popup provides these controls:",
             "",
             "Button Bar:",
             "  \u2022 Copy               \u2192  Copy translation to clipboard",
@@ -99,21 +148,23 @@ class GuideTabMixin:
             "  \u2022 \u2699 (gear icon)      \u2192  Quick access to Replace mode settings",
             "  \u2022 Dictionary         \u2192  Look up individual words interactively",
             "  \u2022 Open Translator    \u2192  Open full translator window with text",
-            "  \u2022 \u2715 (close)          \u2192  Close the tooltip",
+            "  \u2022 \u2715 (close)          \u2192  Close the popup",
             "",
             "Other actions:",
-            "  \u2022 Press Escape to close the tooltip",
-            "  \u2022 Tooltip stays on top and doesn't steal focus from your app",
+            "  \u2022 Press Escape to close the popup",
+            "  \u2022 Popup stays on top and doesn't steal focus from your app",
         ])
+        self._add_guide_image(guide_container, "quick_translate.png",
+                              "Quick Translate with Copy, Replace, Dictionary, Open Translator buttons")
 
-        # === Section 3: Replace Feature ===
-        self._create_guide_section(guide_container, "Replace Feature", [
+        # === Section 3: Replace Mode ===
+        self._create_guide_section(guide_container, "Replace Mode", [
             "Replace selected text in the source app with the translation.",
             "",
             "Two modes (toggle in Settings \u2192 Hotkeys \u2192 Replace Mode):",
             "",
             "Manual Replace (default):",
-            "  1. Click 'Replace' in tooltip",
+            "  1. Click 'Replace' in the popup",
             "  2. Preview shows: original (strikethrough) \u2192 translated text",
             "  3. Click 'Agree' to replace, or 'Cancel' to keep original",
             "",
@@ -123,9 +174,13 @@ class GuideTabMixin:
             "",
             "How it works:",
             "  \u2022 Translation is copied to clipboard, then Ctrl+V is simulated",
-            "  \u2022 Source app keeps focus (tooltip doesn't steal focus)",
+            "  \u2022 Source app keeps focus (popup doesn't steal focus)",
             "  \u2022 Toggle mode via the \u2699 gear icon or Settings \u2192 Hotkeys",
         ])
+        self._add_guide_image(guide_container, "replace_preview_translated.png",
+                              "Translation preview")
+        self._add_guide_image(guide_container, "replace_preview_replaced.png",
+                              "Replace preview with Agree/Cancel")
 
         # === Section 4: Hotkeys ===
         self._create_guide_section(guide_container, "Hotkeys", [
@@ -163,13 +218,17 @@ class GuideTabMixin:
             "  \u2022 Vision-capable API (e.g., Gemini, GPT-4o, Claude 3)",
             "  \u2022 Test your API in Settings \u2192 API Key to check capability",
         ])
+        self._add_guide_image(guide_container, "screenshot_ocr_when_drag.png",
+                              "Drag to select screen region")
+        self._add_guide_image(guide_container, "screenshot_ocr_result.png",
+                              "OCR translation result")
 
         # === Section 6: Dictionary Mode ===
         self._create_guide_section(guide_container, "Dictionary Mode", [
             "Look up words interactively with detailed definitions.",
             "",
             "How to use:",
-            "  1. After translating, click 'Dictionary' in the tooltip",
+            "  1. After translating, click 'Dictionary' in the popup",
             "  2. Words appear as clickable buttons",
             "  3. Click words to select, then click 'Dictionary Lookup'",
             "",
@@ -191,6 +250,10 @@ class GuideTabMixin:
             "  \u2022 Supports Japanese, Chinese, Korean, and 30+ languages",
             "  \u2022 Manage in Settings \u2192 Dictionary tab",
         ])
+        self._add_guide_image(guide_container, "dictionary_mode_selected.png",
+                              "Word selection buttons")
+        self._add_guide_image(guide_container, "dictionary_mode_look_up.png",
+                              "Dictionary lookup result")
 
         # === Section 7: File Translation ===
         self._create_guide_section(guide_container, "File Translation", [
@@ -213,6 +276,8 @@ class GuideTabMixin:
             "  \u2022 Images (PNG, JPG, WebP, GIF) are supported via OCR",
             "  \u2022 Double-click any attachment to preview with default app",
         ])
+        self._add_guide_image(guide_container, "translator_window.png",
+                              "Full Translator window")
 
         # === Section 8: AI Providers ===
         try:
@@ -239,6 +304,8 @@ class GuideTabMixin:
             "  \u2022 Add multiple API keys for automatic failover",
             "  \u2022 Provider and model lists update automatically",
         ])
+        self._add_guide_image(guide_container, "settings_api.png",
+                              "API Key settings with test result")
 
         # === Section 9: Tips & Tricks ===
         self._create_guide_section(guide_container, "Tips & Tricks", [
@@ -253,7 +320,7 @@ class GuideTabMixin:
             "  \u2022 Last 100 translations are saved",
             "",
             "Full Translator Window:",
-            "  \u2022 Open via tooltip 'Open Translator' or system tray menu",
+            "  \u2022 Open via popup 'Open Translator' or system tray menu",
             "  \u2022 Add custom prompts (e.g., 'formal tone', 'technical terms')",
             "  \u2022 Attach files and images for translation",
             f"  \u2022 Choose from {lang_count} target languages",
@@ -267,6 +334,8 @@ class GuideTabMixin:
             "  \u2022 API keys are encrypted with Windows DPAPI",
             "  \u2022 Optional Windows Hello protection for API key access",
         ])
+        self._add_guide_image(guide_container, "translator_window_expand.png",
+                              "Expanded translator view")
 
         # === Section 10: Troubleshooting ===
         self._create_guide_section(guide_container, "Troubleshooting", [

@@ -40,7 +40,7 @@ pytest tests/ --cov=src
   - Manages services: hotkeys, translation, file processor, clipboard
   - Handles window lifecycle and UI state
   - Injects callbacks into modular UI components
-- **[src/ui/](../src/ui/)**: UI components (tooltip, tray, dialogs, settings)
+- **[src/ui/](../src/ui/)**: UI components (quick_translate, tray, dialogs, settings)
 - **[src/core/](../src/core/)**: Business logic (22 modules)
 - **[src/utils/](../src/utils/)**: Utilities (update system, single instance, logging)
 
@@ -53,7 +53,7 @@ Extracted UI modules **never accept app reference** — avoid circular imports:
 # ✓ CORRECT: Inject callbacks
 self.screenshot_handler = ScreenshotHandler(self.root, self.config, ...)
 self.screenshot_handler.configure_callbacks(
-    on_show_tooltip=self.show_tooltip,
+    on_show_quick_translate=self.show_quick_translate,
     get_selected_language=lambda: self.selected_language
 )
 
@@ -195,7 +195,7 @@ CrossTrans/
 │   │   ├── history.py            # Translation history
 │   │   └── [15+ other modules]   # Crypto, auth, file processing, etc.
 │   ├── ui/                       # UI components (12+ files)
-│   │   ├── tooltip.py            # Translation popup (Copy, Replace, Dict)
+│   │   ├── quick_translate.py     # Quick Translate popup (Copy, Replace, Dict)
 │   │   ├── tray.py               # System tray manager
 │   │   ├── dictionary_popup.py   # Dictionary UI (extracted module)
 │   │   ├── screenshot_handler.py # Screenshot OCR (extracted module)
@@ -257,7 +257,7 @@ See [CLAUDE.md](../CLAUDE.md) line 4—this is a hard requirement.
 
 ### Naming
 - Classes: PascalCase (`ScreenshotHandler`, `TranslatorApp`)
-- Functions/methods: snake_case (`configure_callbacks`, `_show_tooltip`)
+- Functions/methods: snake_case (`configure_callbacks`, `_show_quick_translate`)
 - Constants: UPPER_CASE (`VERSION`, `MAX_RETRIES`)
 - Private: Leading underscore (`_callbacks`, `_working_models_cache`)
 

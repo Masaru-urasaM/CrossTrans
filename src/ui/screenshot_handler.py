@@ -38,26 +38,26 @@ class ScreenshotHandler:
         self._screenshot_target_language: Optional[str] = None
 
         # Callbacks
-        self._on_show_tooltip: Optional[Callable] = None
-        self._get_tooltip_manager: Optional[Callable] = None
+        self._on_show_quick_translate: Optional[Callable] = None
+        self._get_quick_translate_manager: Optional[Callable] = None
         self._on_show_settings_tab: Optional[Callable] = None
         self._get_selected_language: Optional[Callable] = None
 
     def configure_callbacks(self,
-                           on_show_tooltip: Optional[Callable] = None,
-                           get_tooltip_manager: Optional[Callable] = None,
+                           on_show_quick_translate: Optional[Callable] = None,
+                           get_quick_translate_manager: Optional[Callable] = None,
                            on_show_settings_tab: Optional[Callable] = None,
                            get_selected_language: Optional[Callable] = None):
         """Configure callback functions.
 
         Args:
-            on_show_tooltip: Callback to show translation tooltip
-            get_tooltip_manager: Callback to get the tooltip manager
+            on_show_quick_translate: Callback to show translation popup
+            get_quick_translate_manager: Callback to get the quick translate manager
             on_show_settings_tab: Callback to open settings and navigate to a tab
             get_selected_language: Callback to get the currently selected language
         """
-        self._on_show_tooltip = on_show_tooltip
-        self._get_tooltip_manager = get_tooltip_manager
+        self._on_show_quick_translate = on_show_quick_translate
+        self._get_quick_translate_manager = get_quick_translate_manager
         self._on_show_settings_tab = on_show_settings_tab
         self._get_selected_language = get_selected_language
 
@@ -166,11 +166,11 @@ class ScreenshotHandler:
             target_lang = self._get_selected_language() if self._get_selected_language else "Vietnamese"
 
         # Show loading indicator
-        if self._get_tooltip_manager:
-            tooltip_manager = self._get_tooltip_manager()
-            if tooltip_manager:
-                tooltip_manager.capture_mouse_position()
-                tooltip_manager.show_loading(f"Screenshot -> {target_lang}")
+        if self._get_quick_translate_manager:
+            qt_manager = self._get_quick_translate_manager()
+            if qt_manager:
+                qt_manager.capture_mouse_position()
+                qt_manager.show_loading(f"Screenshot -> {target_lang}")
 
         # Process in background thread
         def process_screenshot():
@@ -204,9 +204,9 @@ Instructions:
                 # Get trial info
                 trial_info = self.translation_service.get_trial_info()
 
-                # Show result in tooltip (image path preserved for "Open Translator")
-                if self._on_show_tooltip:
-                    self.root.after(0, lambda: self._on_show_tooltip(original, translated, target_lang, trial_info))
+                # Show result in popup (image path preserved for "Open Translator")
+                if self._on_show_quick_translate:
+                    self.root.after(0, lambda: self._on_show_quick_translate(original, translated, target_lang, trial_info))
 
                 # Save to history
                 self.translation_service.history_manager.add_entry(
@@ -216,10 +216,10 @@ Instructions:
             except Exception as e:
                 logging.error(f"Screenshot translation failed: {e}")
                 # Close loading animation FIRST (must use after() - we're in background thread)
-                if self._get_tooltip_manager:
-                    tooltip_manager = self._get_tooltip_manager()
-                    if tooltip_manager:
-                        self.root.after(0, tooltip_manager.close)
+                if self._get_quick_translate_manager:
+                    qt_manager = self._get_quick_translate_manager()
+                    if qt_manager:
+                        self.root.after(0, qt_manager.close)
                 # Show error toast (50ms delay ensures close() executes first)
                 error_msg = str(e)
                 self.root.after(50, lambda: self.toast.show_error(f"Screenshot translation failed: {error_msg}"))

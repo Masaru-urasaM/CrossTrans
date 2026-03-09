@@ -177,7 +177,7 @@ class HotkeyTabMixin:
         """Create the Replace Mode configuration section."""
         desc = ttk.Frame(parent)
         desc.pack(fill=X, pady=(0, 10), padx=5)
-        ttk.Label(desc, text="Controls what happens when you click Replace in the tooltip.",
+        ttk.Label(desc, text="Controls what happens when you click Replace in the popup.",
                   font=('Segoe UI', 9), foreground='#888888').pack(anchor=W)
 
         toggle_row = ttk.Frame(parent)

@@ -1,6 +1,6 @@
 """
-Tooltip Manager for CrossTrans.
-Handles translation result tooltips and loading indicators.
+Quick Translate Manager for CrossTrans.
+Handles translation result popups and loading indicators.
 """
 import ctypes
 import logging
@@ -164,11 +164,11 @@ def get_monitor_work_area(x: int, y: int) -> Tuple[int, int, int, int]:
     return None
 
 
-class TooltipManager:
-    """Manages tooltip display for translation results."""
+class QuickTranslateManager:
+    """Manages popup display for translation results."""
 
     def __init__(self, root: tk.Tk, config=None):
-        """Initialize tooltip manager.
+        """Initialize quick translate manager.
 
         Args:
             root: The root Tk window for screen info and scheduling
@@ -176,10 +176,10 @@ class TooltipManager:
         """
         self.root = root
         self.config = config
-        self.tooltip: Optional[tk.Toplevel] = None
-        self.tooltip_text: Optional[tk.Text] = None
-        self.tooltip_copy_btn: Optional[ttk.Button] = None
-        self.tooltip_dict_btn: Optional[ttk.Button] = None
+        self.popup: Optional[tk.Toplevel] = None
+        self.popup_text: Optional[tk.Text] = None
+        self.popup_copy_btn: Optional[ttk.Button] = None
+        self.popup_dict_btn: Optional[ttk.Button] = None
         self.toast = ToastManager(root)  # For shake notifications
 
         # Mouse position captured when hotkey was pressed
@@ -214,7 +214,7 @@ class TooltipManager:
         self._on_open_settings: Optional[Callable[[], None]] = None
         self._on_open_settings_dictionary_tab: Optional[Callable[[], None]] = None
         self._on_dictionary_lookup: Optional[Callable[[list, str], None]] = None
-        self.tooltip_replace_btn: Optional[tk.Button] = None
+        self.popup_replace_btn: Optional[tk.Button] = None
         self._replace_gear_btn: Optional[tk.Button] = None
         self._btn_frame: Optional[ttk.Frame] = None
         self._on_open_settings_hotkeys_tab: Optional[Callable[[], None]] = None
@@ -227,7 +227,7 @@ class TooltipManager:
                             on_open_settings_dictionary_tab: Optional[Callable[[], None]] = None,
                             on_dictionary_lookup: Optional[Callable[[list, str], None]] = None,
                             on_open_settings_hotkeys_tab: Optional[Callable[[], None]] = None):
-        """Configure callback functions for tooltip actions.
+        """Configure callback functions for quick translate actions.
 
         Args:
             on_copy: Called when user clicks Copy button
@@ -247,27 +247,27 @@ class TooltipManager:
         self._on_open_settings_hotkeys_tab = on_open_settings_hotkeys_tab
 
     def _apply_noactivate(self):
-        """Apply WS_EX_NOACTIVATE to tooltip window so it doesn't steal focus from source app."""
-        if not self.tooltip:
+        """Apply WS_EX_NOACTIVATE to popup window so it doesn't steal focus from source app."""
+        if not self.popup:
             return
         try:
-            hwnd = ctypes.windll.user32.GetParent(self.tooltip.winfo_id())
+            hwnd = ctypes.windll.user32.GetParent(self.popup.winfo_id())
             if not hwnd:
-                hwnd = self.tooltip.winfo_id()
+                hwnd = self.popup.winfo_id()
             GWL_EXSTYLE = -20
             WS_EX_NOACTIVATE = 0x08000000
             ex_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
             ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_NOACTIVATE)
         except Exception:
-            pass  # Non-critical - tooltip still works, just may steal focus
+            pass  # Non-critical - popup still works, just may steal focus
 
     def capture_mouse_position(self):
-        """Capture current mouse position for tooltip positioning."""
+        """Capture current mouse position for popup positioning."""
         self._last_mouse_x = self.root.winfo_pointerx()
         self._last_mouse_y = self.root.winfo_pointery()
 
     def show_loading(self, target_lang: str):
-        """Show loading indicator tooltip with animation.
+        """Show loading indicator popup with animation.
 
         Args:
             target_lang: The target language for translation
@@ -276,13 +276,13 @@ class TooltipManager:
 
         self._loading_target_lang = target_lang
 
-        self.tooltip = tk.Toplevel(self.root)
-        self.tooltip.overrideredirect(True)
+        self.popup = tk.Toplevel(self.root)
+        self.popup.overrideredirect(True)
         self._apply_noactivate()
-        self.tooltip.configure(bg='#2b2b2b')
-        self.tooltip.attributes('-topmost', True)
+        self.popup.configure(bg='#2b2b2b')
+        self.popup.attributes('-topmost', True)
 
-        frame = ttk.Frame(self.tooltip, padding=12)
+        frame = ttk.Frame(self.popup, padding=12)
         frame.pack(fill=BOTH, expand=True)
 
         # Create loading label with initial text
@@ -297,7 +297,7 @@ class TooltipManager:
         )
         self._loading_label.pack()
 
-        self.tooltip.geometry(f"+{self._last_mouse_x + 15}+{self._last_mouse_y + 20}")
+        self.popup.geometry(f"+{self._last_mouse_x + 15}+{self._last_mouse_y + 20}")
 
         # Start loading animation
         self._loading_animation_running = True
@@ -306,11 +306,11 @@ class TooltipManager:
         self._animate_loading()
 
     def _animate_loading(self):
-        """Animate the loading tooltip with dots and pulse effect."""
+        """Animate the loading popup with dots and pulse effect."""
         if not self._loading_animation_running:
             return
 
-        if not self.tooltip or not self._loading_label:
+        if not self.popup or not self._loading_label:
             self._loading_animation_running = False
             return
 
@@ -341,15 +341,15 @@ class TooltipManager:
             self._loading_animation_step += 1
 
             # Schedule next frame (400ms)
-            if self.tooltip and self.tooltip.winfo_exists():
-                self.tooltip.after(400, self._animate_loading)
+            if self.popup and self.popup.winfo_exists():
+                self.popup.after(400, self._animate_loading)
 
         except tk.TclError:
             # Widget destroyed
             self._loading_animation_running = False
 
     def calculate_size(self, text: str) -> Tuple[int, int]:
-        """Calculate optimal tooltip dimensions based on text content.
+        """Calculate optimal popup dimensions based on text content.
 
         Uses 20% safety margin on line height for cross-machine font rendering
         compatibility (handles DPI, ClearType, font substitution differences).
@@ -413,7 +413,7 @@ class TooltipManager:
         return int(width), int(max(MIN_HEIGHT, min(height, MAX_HEIGHT)))
 
     def show(self, translated: str, target_lang: str, trial_info: dict = None, original: str = ""):
-        """Show tooltip with translation result.
+        """Show popup with translation result.
 
         Args:
             translated: The translated text
@@ -433,28 +433,28 @@ class TooltipManager:
         if trial_info and trial_info.get('is_trial') and not is_error:
             height += 35  # Extra space for trial header row
 
-        # Create tooltip window
-        self.tooltip = tk.Toplevel(self.root)
-        self.tooltip.overrideredirect(True)
+        # Create popup window
+        self.popup = tk.Toplevel(self.root)
+        self.popup.overrideredirect(True)
         self._apply_noactivate()
 
-        def on_tooltip_close():
+        def on_popup_close():
             self.close()
 
-        self.tooltip.protocol("WM_DELETE_WINDOW", on_tooltip_close)
+        self.popup.protocol("WM_DELETE_WINDOW", on_popup_close)
 
         # Color based on error status
         if is_error:
-            self.tooltip.configure(bg='#3d1f1f')
+            self.popup.configure(bg='#3d1f1f')
         else:
-            self.tooltip.configure(bg='#2b2b2b')
+            self.popup.configure(bg='#2b2b2b')
 
         # Set topmost initially, then remove so it can go behind other windows
-        self.tooltip.attributes('-topmost', True)
-        self.tooltip.after(100, lambda: self.tooltip.attributes('-topmost', False) if self.tooltip else None)
+        self.popup.attributes('-topmost', True)
+        self.popup.after(100, lambda: self.popup.attributes('-topmost', False) if self.popup else None)
 
         # Main frame
-        main_frame = ttk.Frame(self.tooltip, padding=15)
+        main_frame = ttk.Frame(self.popup, padding=15)
         main_frame.pack(fill=BOTH, expand=True)
         self._main_frame = main_frame
 
@@ -511,7 +511,7 @@ class TooltipManager:
 
         if not is_error:
             # Copy button
-            self.tooltip_copy_btn = tk.Button(
+            self.popup_copy_btn = tk.Button(
                 self._btn_frame,
                 text="Copy",
                 command=self._handle_copy,
@@ -525,10 +525,10 @@ class TooltipManager:
                 padx=12, pady=4,
                 cursor='hand2'
             )
-            self.tooltip_copy_btn.pack(side=LEFT)
+            self.popup_copy_btn.pack(side=LEFT)
 
             # Replace button (copy translated text + paste into source app)
-            self.tooltip_replace_btn = tk.Button(
+            self.popup_replace_btn = tk.Button(
                 self._btn_frame,
                 text="Replace",
                 command=self._handle_copy_and_replace,
@@ -542,7 +542,7 @@ class TooltipManager:
                 padx=12, pady=4,
                 cursor='hand2'
             )
-            self.tooltip_replace_btn.pack(side=LEFT, padx=(4, 0))
+            self.popup_replace_btn.pack(side=LEFT, padx=(4, 0))
 
             # Replace settings gear icon (opens Hotkeys tab in Settings)
             self._replace_gear_btn = tk.Button(
@@ -562,7 +562,7 @@ class TooltipManager:
             self._replace_gear_btn.pack(side=LEFT, padx=(0, 4))
 
             # Dictionary button - opens popup for original text
-            self.tooltip_dict_btn = tk.Button(
+            self.popup_dict_btn = tk.Button(
                 self._btn_frame,
                 text="Dictionary",
                 command=self._open_dictionary_popup,
@@ -576,13 +576,13 @@ class TooltipManager:
                 padx=12, pady=4,
                 cursor='hand2'
             )
-            self.tooltip_dict_btn.pack(side=LEFT, padx=4)
+            self.popup_dict_btn.pack(side=LEFT, padx=4)
 
             # Update Dictionary button state based on NLP availability
             self._update_dict_button_state()
 
             # Open Translator button
-            self.tooltip_open_btn = tk.Button(
+            self.popup_open_btn = tk.Button(
                 self._btn_frame,
                 text="Open Translator",
                 command=self._handle_open_translator,
@@ -596,7 +596,7 @@ class TooltipManager:
                 padx=12, pady=4,
                 cursor='hand2'
             )
-            self.tooltip_open_btn.pack(side=LEFT, padx=4)
+            self.popup_open_btn.pack(side=LEFT, padx=4)
         else:
             # For errors, show "API Settings" button (opens Settings → API Key tab)
             settings_btn_kwargs = {"text": "API Settings", "command": self._handle_open_settings, "width": 14}
@@ -628,36 +628,36 @@ class TooltipManager:
         text_height = max(1, (height - VERTICAL_PADDING) // LINE_HEIGHT)
         text_width = max(30, width // avg_char_width)
 
-        self.tooltip_text = tk.Text(main_frame, wrap=tk.WORD,
+        self.popup_text = tk.Text(main_frame, wrap=tk.WORD,
                                     bg='#3d1f1f' if is_error else '#2b2b2b',
                                     fg=text_fg,
                                     font=('Segoe UI', 11), relief='flat',
                                     width=text_width, height=text_height,
                                     borderwidth=0, highlightthickness=0)
-        self.tooltip_text.insert('1.0', translated)
-        self.tooltip_text.config(state='disabled')
-        self.tooltip_text.pack(side=TOP, fill=BOTH, expand=True)
+        self.popup_text.insert('1.0', translated)
+        self.popup_text.config(state='disabled')
+        self.popup_text.pack(side=TOP, fill=BOTH, expand=True)
 
         # Mouse wheel scroll
-        self.tooltip_text.bind('<MouseWheel>',
-                               lambda e: self.tooltip_text.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+        self.popup_text.bind('<MouseWheel>',
+                               lambda e: self.popup_text.yview_scroll(int(-1 * (e.delta / 120)), "units"))
 
         # Position near mouse
         x, y, height = self._calculate_position(width, height)
-        self.tooltip.geometry(f"{width}x{height}+{int(x)}+{int(y)}")
+        self.popup.geometry(f"{width}x{height}+{int(x)}+{int(y)}")
 
         # Bindings
-        self.tooltip.bind('<Escape>', lambda e: on_tooltip_close())
+        self.popup.bind('<Escape>', lambda e: on_popup_close())
 
     def _calculate_position(self, width: int, height: int) -> Tuple[int, int, int]:
-        """Calculate tooltip position and adjust height if needed.
+        """Calculate popup position and adjust height if needed.
 
         Supports multi-monitor setups by detecting which monitor the mouse is on
-        and positioning the tooltip within that monitor's work area.
+        and positioning the popup within that monitor's work area.
 
         Args:
-            width: Tooltip width
-            height: Tooltip height
+            width: Popup width
+            height: Popup height
 
         Returns:
             Tuple of (x, y, adjusted_height)
@@ -723,8 +723,8 @@ class TooltipManager:
         self._drag_y = event.y_root
 
     def _on_drag(self, event):
-        """Handle dragging of the tooltip."""
-        if not self.tooltip:
+        """Handle dragging of the popup."""
+        if not self.popup:
             return
 
         deltax = event.x_root - self._drag_x
@@ -733,9 +733,9 @@ class TooltipManager:
         self._drag_x = event.x_root
         self._drag_y = event.y_root
 
-        x = self.tooltip.winfo_x() + deltax
-        y = self.tooltip.winfo_y() + deltay
-        self.tooltip.geometry(f"+{x}+{y}")
+        x = self.popup.winfo_x() + deltax
+        y = self.popup.winfo_y() + deltay
+        self.popup.geometry(f"+{x}+{y}")
 
     def _handle_copy(self):
         """Handle copy button click."""
@@ -755,34 +755,34 @@ class TooltipManager:
         self._show_replace_preview()
 
     def _show_replace_preview(self):
-        """Transform tooltip to show replace preview with strikethrough original and translated text."""
+        """Transform popup to show replace preview with strikethrough original and translated text."""
         original = self._current_original
         translated = self._current_translation
 
-        if not self.tooltip_text or not self._btn_frame:
+        if not self.popup_text or not self._btn_frame:
             return
 
         # --- Update text content ---
-        self.tooltip_text.config(state='normal')
-        self.tooltip_text.delete('1.0', tk.END)
+        self.popup_text.config(state='normal')
+        self.popup_text.delete('1.0', tk.END)
 
         # Configure tags
-        self.tooltip_text.tag_configure('strikethrough',
+        self.popup_text.tag_configure('strikethrough',
                                          font=('Segoe UI', 11, 'overstrike'),
                                          foreground='#888888')
-        self.tooltip_text.tag_configure('arrow',
+        self.popup_text.tag_configure('arrow',
                                          font=('Segoe UI', 11),
                                          foreground='#666666')
-        self.tooltip_text.tag_configure('translated',
+        self.popup_text.tag_configure('translated',
                                          font=('Segoe UI', 11),
                                          foreground='#4ec9b0')
 
         # Insert: strikethrough original → translated
-        self.tooltip_text.insert('1.0', original, 'strikethrough')
-        self.tooltip_text.insert(tk.END, '\n\n→\n\n', 'arrow')
-        self.tooltip_text.insert(tk.END, translated, 'translated')
+        self.popup_text.insert('1.0', original, 'strikethrough')
+        self.popup_text.insert(tk.END, '\n\n→\n\n', 'arrow')
+        self.popup_text.insert(tk.END, translated, 'translated')
 
-        self.tooltip_text.config(state='disabled')
+        self.popup_text.config(state='disabled')
 
         # --- Replace button bar ---
         for widget in self._btn_frame.winfo_children():
@@ -826,12 +826,12 @@ class TooltipManager:
             close_btn_kwargs["bootstyle"] = "secondary"
         ttk.Button(self._btn_frame, **close_btn_kwargs).pack(side=RIGHT)
 
-        # --- Resize tooltip to fit preview content ---
+        # --- Resize popup to fit preview content ---
         combined_text = original + '\n\n\u2192\n\n' + translated
         new_width, new_height = self.calculate_size(combined_text)
 
-        if self.tooltip:
-            current_geo = self.tooltip.geometry()
+        if self.popup:
+            current_geo = self.popup.geometry()
             parts = current_geo.split('+')
             current_wh = parts[0].split('x')
             final_width = max(int(current_wh[0]), new_width)
@@ -845,11 +845,11 @@ class TooltipManager:
                 line_height = 20
             VERTICAL_PADDING = 100
             new_text_height = max(1, (final_height - VERTICAL_PADDING) // line_height)
-            self.tooltip_text.config(height=new_text_height)
+            self.popup_text.config(height=new_text_height)
 
             # Reposition to stay within screen
             x, y, adjusted_height = self._calculate_position(final_width, final_height)
-            self.tooltip.geometry(f"{final_width}x{adjusted_height}+{int(x)}+{int(y)}")
+            self.popup.geometry(f"{final_width}x{adjusted_height}+{int(x)}+{int(y)}")
 
     def _handle_replace_agree(self):
         """User confirmed replace - execute the actual copy+paste."""
@@ -857,7 +857,7 @@ class TooltipManager:
             self._on_copy_and_replace()
 
     def _handle_replace_cancel(self):
-        """User cancelled replace - close tooltip, original text unchanged."""
+        """User cancelled replace - close popup, original text unchanged."""
         self.close()
 
     def _handle_open_replace_settings(self):
@@ -895,17 +895,17 @@ class TooltipManager:
 
     def set_copy_button_text(self, text: str):
         """Set copy button text (e.g., for 'Copied!' feedback)."""
-        if self.tooltip_copy_btn:
+        if self.popup_copy_btn:
             try:
-                self.tooltip_copy_btn.configure(text=text)
+                self.popup_copy_btn.configure(text=text)
             except tk.TclError:
                 pass
 
     def set_replace_button_text(self, text: str):
         """Set replace button text (e.g., for 'Replaced!' feedback)."""
-        if self.tooltip_replace_btn:
+        if self.popup_replace_btn:
             try:
-                self.tooltip_replace_btn.configure(text=text)
+                self.popup_replace_btn.configure(text=text)
             except tk.TclError:
                 pass
 
@@ -917,26 +917,26 @@ class TooltipManager:
         Note: We don't use state='disabled' because it forces grey color.
         Instead, we track state manually and block clicks in handler.
         """
-        if not self.tooltip_dict_btn:
+        if not self.popup_dict_btn:
             return
 
         self._dict_btn_enabled = nlp_manager.is_any_installed()
 
         try:
             if self._dict_btn_enabled:
-                self.tooltip_dict_btn.configure(cursor='hand2')
+                self.popup_dict_btn.configure(cursor='hand2')
             else:
-                self.tooltip_dict_btn.configure(cursor='arrow')
-            # Unbind any previous tooltips
-            self.tooltip_dict_btn.unbind('<Enter>')
-            self.tooltip_dict_btn.unbind('<Leave>')
+                self.popup_dict_btn.configure(cursor='arrow')
+            # Unbind any previous hover handlers
+            self.popup_dict_btn.unbind('<Enter>')
+            self.popup_dict_btn.unbind('<Leave>')
         except tk.TclError:
             pass  # Widget destroyed
 
     def _open_dictionary_popup(self):
         """Open dictionary popup window with word buttons for original text.
 
-        Opens as ADDITIONAL window - does NOT close the quick translate tooltip.
+        Opens as ADDITIONAL window - does NOT close the quick translate popup.
         """
         # Check if button is enabled (NLP installed)
         if hasattr(self, '_dict_btn_enabled') and not self._dict_btn_enabled:
@@ -1165,7 +1165,7 @@ class TooltipManager:
         """
         from src.ui.dictionary_mode import WordButtonFrame
 
-        # Create popup window (ADDITIONAL - not replacing tooltip)
+        # Create popup window (ADDITIONAL - not replacing quick translate popup)
         dict_popup = tk.Toplevel(self.root)
 
         # Get target language for title
@@ -1184,7 +1184,7 @@ class TooltipManager:
         dict_popup.focus_force()
         dict_popup.after(100, lambda: dict_popup.attributes('-topmost', False) if dict_popup.winfo_exists() else None)
 
-        # Calculate size and position - offset from tooltip
+        # Calculate size and position - offset from popup
         popup_width = 650
         popup_height = 350
 
@@ -1198,13 +1198,13 @@ class TooltipManager:
             work_right = self.root.winfo_screenwidth()
             work_bottom = self.root.winfo_screenheight() - 50
 
-        # Position below or beside the tooltip
-        if self.tooltip and self.tooltip.winfo_exists():
-            tooltip_x = self.tooltip.winfo_x()
-            tooltip_y = self.tooltip.winfo_y()
-            tooltip_height = self.tooltip.winfo_height()
-            x = tooltip_x
-            y = tooltip_y + tooltip_height + 10  # Below tooltip
+        # Position below or beside the popup
+        if self.popup and self.popup.winfo_exists():
+            popup_x = self.popup.winfo_x()
+            popup_y = self.popup.winfo_y()
+            popup_h = self.popup.winfo_height()
+            x = popup_x
+            y = popup_y + popup_h + 10  # Below popup
         else:
             x = self._last_mouse_x + 20
             y = self._last_mouse_y + 100
@@ -1217,9 +1217,9 @@ class TooltipManager:
             x = work_left + margin
 
         if y + popup_height > work_bottom - margin:
-            # Try positioning above tooltip instead
-            if self.tooltip and self.tooltip.winfo_exists():
-                y = self.tooltip.winfo_y() - popup_height - 10
+            # Try positioning above popup instead
+            if self.popup and self.popup.winfo_exists():
+                y = self.popup.winfo_y() - popup_height - 10
             if y < work_top + margin:
                 # Pin to bottom of work area
                 y = work_bottom - popup_height - margin
@@ -1326,7 +1326,7 @@ class TooltipManager:
                 break
 
     def close(self):
-        """Close the tooltip."""
+        """Close the popup."""
         # Stop loading animation
         self._loading_animation_running = False
         self._loading_label = None
@@ -1338,25 +1338,25 @@ class TooltipManager:
             self._dict_frame = None
         self._dict_mode_active = False
 
-        if self.tooltip:
+        if self.popup:
             try:
-                if self.tooltip.winfo_exists():
-                    self.tooltip.destroy()
+                if self.popup.winfo_exists():
+                    self.popup.destroy()
             except tk.TclError:
                 pass
-            self.tooltip = None
-            self.tooltip_text = None
-            self.tooltip_copy_btn = None
-            self.tooltip_replace_btn = None
+            self.popup = None
+            self.popup_text = None
+            self.popup_copy_btn = None
+            self.popup_replace_btn = None
             self._replace_gear_btn = None
-            self.tooltip_dict_btn = None
+            self.popup_dict_btn = None
             self._btn_frame = None
             self._main_frame = None
 
     @property
     def is_open(self) -> bool:
-        """Check if tooltip is currently open."""
-        return self.tooltip is not None
+        """Check if popup is currently open."""
+        return self.popup is not None
 
     def stop_dictionary_animation(self):
         """Stop the dictionary lookup animation if running."""
@@ -1371,7 +1371,7 @@ class TooltipManager:
         """Show dictionary lookup result in a SEPARATE window.
 
         This creates an independent window flagged as 'Dictionary' result,
-        separate from the quick translate tooltip (QuickTranslate).
+        separate from the quick translate popup.
         Both can appear simultaneously.
 
         Args:
@@ -1414,12 +1414,12 @@ class TooltipManager:
             work_right = self.root.winfo_screenwidth()
             work_bottom = self.root.winfo_screenheight() - 50
 
-        # Position offset from existing tooltip or mouse
-        if self.tooltip and self.tooltip.winfo_exists():
-            tooltip_x = self.tooltip.winfo_x()
-            tooltip_y = self.tooltip.winfo_y()
-            x = tooltip_x + 50  # Offset to the right
-            y = tooltip_y + 50  # Offset down
+        # Position offset from existing popup or mouse
+        if self.popup and self.popup.winfo_exists():
+            popup_x = self.popup.winfo_x()
+            popup_y = self.popup.winfo_y()
+            x = popup_x + 50  # Offset to the right
+            y = popup_y + 50  # Offset down
         else:
             x = self._last_mouse_x + 30
             y = self._last_mouse_y + 50

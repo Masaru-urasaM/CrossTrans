@@ -31,7 +31,7 @@ class DictionaryPopup:
     - Dictionary lookup execution
     """
 
-    def __init__(self, root, config, translation_service, toast_manager, tooltip_manager):
+    def __init__(self, root, config, translation_service, toast_manager, quick_translate_manager):
         """Initialize the dictionary popup manager.
 
         Args:
@@ -39,13 +39,13 @@ class DictionaryPopup:
             config: Config object
             translation_service: TranslationService for lookups
             toast_manager: ToastManager for notifications
-            tooltip_manager: TooltipManager for showing results
+            quick_translate_manager: QuickTranslateManager for showing results
         """
         self.root = root
         self.config = config
         self.translation_service = translation_service
         self.toast = toast_manager
-        self.tooltip_manager = tooltip_manager
+        self.quick_translate_manager = quick_translate_manager
 
         # State
         self._dict_btn_enabled = False
@@ -97,7 +97,7 @@ class DictionaryPopup:
                 button.configure(cursor='hand2')
             else:
                 button.configure(cursor='arrow')
-            # Unbind any previous tooltips
+            # Unbind any previous hover handlers
             button.unbind('<Enter>')
             button.unbind('<Leave>')
         except tk.TclError:
@@ -346,7 +346,7 @@ class DictionaryPopup:
             language: Source language for NLP processing
         """
         from src.ui.dictionary_mode import WordButtonFrame
-        from src.ui.tooltip import get_monitor_work_area
+        from src.ui.quick_translate import get_monitor_work_area
 
         # Get current target language from callback
         target_language = self._get_selected_language() if self._get_selected_language else "Vietnamese"
@@ -457,7 +457,7 @@ class DictionaryPopup:
         dict_frame.pack(fill=BOTH, expand=True)
 
         # Store reference for animation control (so stop_dictionary_animation() works)
-        self.tooltip_manager._dict_popup_frame = dict_frame
+        self.quick_translate_manager._dict_popup_frame = dict_frame
 
         # Close on Escape
         dict_popup.bind('<Escape>', lambda e: dict_popup.destroy())
@@ -493,7 +493,7 @@ class DictionaryPopup:
                 result = self.translation_service.dictionary_lookup(words, target_lang)
                 # Get trial info after API call (quota may have changed)
                 trial_info = self.translation_service.get_trial_info()
-                # Show result in tooltip (pass words for highlighting)
+                # Show result in popup (pass words for highlighting)
                 popup = self._get_popup() if self._get_popup else None
                 if popup:
                     popup.after(0, lambda: self._show_result(result, target_lang, trial_info, words))
@@ -518,6 +518,6 @@ class DictionaryPopup:
             trial_info: Trial mode info
             looked_up_words: Words that were looked up
         """
-        # Use tooltip manager to show result in SEPARATE dictionary window
-        self.tooltip_manager.capture_mouse_position()
-        self.tooltip_manager.show_dictionary_result(result, target_lang, trial_info, looked_up_words)
+        # Use quick translate manager to show result in SEPARATE dictionary window
+        self.quick_translate_manager.capture_mouse_position()
+        self.quick_translate_manager.show_dictionary_result(result, target_lang, trial_info, looked_up_words)

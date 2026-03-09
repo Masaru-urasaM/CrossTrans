@@ -5,19 +5,69 @@
 ![License](https://img.shields.io/badge/license-AGPL%20v3-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-informational.svg)
 
-A powerful Windows desktop application for instant text translation using AI. Select any text, press a hotkey, and get translations instantly - no window switching needed!
+Select text anywhere, press a hotkey, get the translation in a popup — no window switching, no copy-paste. CrossTrans is a Windows desktop app powered by 15 AI providers and 180+ models.
 
 ![CrossTrans](CrossTrans.png)
 
+## Table of Contents
+
+- [Highlights](#highlights)
+- [Screenshots](#screenshots)
+- [Features](#features)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [Security & Privacy](#security--privacy)
+- [Troubleshooting](#troubleshooting)
+- [Project Structure](#project-structure)
+- [Contributing](#contributing)
+- [Changelog](#changelog)
+- [License](#license)
+
+---
+
 ## Highlights
 
-- **Instant Translation** - Select text, press hotkey, get translation in tooltip
-- **Screenshot Translation** - Win+Alt+S to capture and translate any screen region
-- **Free Trial Mode** - Daily free translations without API key
-- **15 AI Providers** - Google, OpenAI, Anthropic, DeepSeek, Groq, and more (many offer free tiers)
-- **File Processing** - Translate documents (.docx, .txt, .srt, .pdf) and images
-- **100+ Languages** - Comprehensive language support
-- **Custom Hotkeys** - Configure any key combination for any language
+- **Instant Translation** — Select text, press hotkey, get translation in a popup
+- **Replace in Source** — One-click replace selected text with the translation, right in the source app
+- **Screenshot OCR** — Win+Alt+S to capture and translate any screen region
+- **Dictionary Mode** — Click words for definitions, pronunciation, synonyms, antonyms, examples
+- **Free Trial Mode** — Daily free translations without API key
+- **15 AI Providers** — Google, OpenAI, Anthropic, DeepSeek, Groq, and more (many offer free tiers)
+- **File Processing** — Translate documents (.docx, .txt, .srt, .pdf) and images
+- **100+ Languages** — Comprehensive language support with custom hotkeys
+
+---
+
+## Screenshots
+
+### Quick Translate
+
+Translation appears as a popup near the cursor with action buttons (Copy, Replace, Dictionary, Open Translator).
+
+![Quick Translate](docs/screenshots/quick_translate.png)
+
+### Screenshot OCR
+
+Press `Win+Alt+S` to capture any screen region for instant OCR and translation.
+
+![Screenshot OCR — Drag to select region](docs/screenshots/screenshot_ocr_when_drag.png)
+
+![Screenshot OCR — Translation result](docs/screenshots/screenshot_ocr_result.png)
+
+### Settings — API Key
+
+Configure providers, models, and test connections. Multiple API keys supported for automatic failover.
+
+![Settings — API Key](docs/screenshots/settings_api.png)
+
+### Replace Preview
+
+Preview before replacing: strikethrough original text with translated text below, then Agree or Cancel.
+
+![Replace Preview — Translation popup](docs/screenshots/replace_preview_translated.png)
+
+![Replace Preview — Text replaced in source app](docs/screenshots/replace_preview_replaced.png)
 
 ---
 
@@ -35,23 +85,34 @@ A powerful Windows desktop application for instant text translation using AI. Se
 **+ 4 customizable hotkeys** for any language of your choice.
 
 ### Free Trial Mode
-- **Daily free translations** without any API key (limit set dynamically)
+- **Daily free translations** without any API key — quota refreshes daily at midnight
 - Perfect for trying out the app before getting your own API key
-- Quota resets at midnight
 
 ### Screenshot Translation
-- **Win+Alt+S** - Capture any screen region for instant OCR and translation
-- **Multi-monitor support** - Works across all connected displays
-- **Visual selection** - Semi-transparent overlay with drag selection
-- **Configurable target language** - Set in Settings > Hotkeys tab
-- **Open Translator integration** - Screenshot loads into Attachments for further editing
+- **Win+Alt+S** — Capture any screen region for instant OCR and translation
+- **Multi-monitor support** — Works across all connected displays
+- **Visual selection** — Semi-transparent overlay with drag selection
+- **Configurable target language** — Set in Settings > Hotkeys tab
+- **Open Translator integration** — Screenshot loads into Attachments for further editing
+
+### Replace in Source App
+- **Replace button** in popup — Paste translation directly back into the source app
+- **Manual mode** (default): Preview with strikethrough original → translated text, then Agree/Cancel
+- **Quick mode**: Immediate paste without preview (toggle in Settings → Hotkeys → Replace Mode)
+- **Gear icon (⚙)**: Quick access to replace mode settings
+
+### Dictionary Mode
+- Click **Dictionary** button in popup to enter word selection mode
+- Click any word for detailed lookup: translation, definition, word type, pronunciation, synonyms, antonyms, examples
+- Smart word filtering across all languages (Latin, CJK, Cyrillic, Arabic, Thai, Korean)
+- **Language packs**: Go to Settings → Dictionary tab to install. Python 3.10+ must be on your system PATH for language pack downloads (the EXE itself does not require Python).
 
 ### File Processing
-- **Image Translation** - Drag & drop images for OCR and translation
-- **Document Support** - Process `.docx`, `.txt`, `.srt`, `.pdf` files
-- **Multi-file Batch** - Translate multiple files in a single API request
-- **Drag & Drop** - Simply drop files onto the translator window
-- **Double-click Preview** - Open attached files/images with system default app
+- **Image Translation** — Drag & drop images for OCR and translation
+- **Document Support** — Process `.docx`, `.txt`, `.srt`, `.pdf` files
+- **Multi-file Batch** — Translate multiple files in a single API request
+- **Drag & Drop** — Simply drop files onto the translator window
+- **Double-click Preview** — Open attached files with system default app
 
 ### Multi-Provider Support
 
@@ -67,53 +128,46 @@ A powerful Windows desktop application for instant text translation using AI. Se
 
 Many providers offer free API keys. See Settings → Guide tab for details.
 
-**Smart Routing** - Automatically detects provider from API key or model name.
+**Smart Routing** — Paste any API key and CrossTrans automatically detects the provider. Or select manually.
 
 ### User Interface
-- **Compact Tooltip** - Translation appears near cursor, auto-sizes to content
-- **Full Translator** - Rich window with language selector, custom prompts, attachments
-- **Dark Theme** - Modern UI with ttkbootstrap
-- **System Tray** - Runs quietly in background
-- **Translation History** - Review and reuse past translations (up to 100 entries)
+- **Quick Translate Popup** — Translation appears near cursor, auto-sizes to content
+- **Full Translator** — Rich window with language selector, custom prompts, attachments
+- **Dark Theme** — Modern UI with ttkbootstrap
+- **System Tray** — Runs quietly in background
+- **Translation History** — Review and reuse past translations (up to 100 entries)
 
-### Smart Features
-- **Dictionary Mode** - Click words to select, get definitions, pronunciation, synonyms, antonyms, examples (requires Python installed for language pack download)
-- **Custom Prompts** - Add instructions like "Make it formal" or "Technical terms only"
-- **Clipboard Preservation** - Your files/images in clipboard are preserved
-- **Auto-start** - Optionally start with Windows
-- **Auto-update** - Get notified of new versions
+### Other Features
+- **Custom Prompts** — Add instructions like "Make it formal" or "Technical terms only"
+- **Clipboard Preservation** — Files/images in clipboard are preserved after translation
+- **Auto-start** — Optionally start with Windows
+- **Auto-update** — Get notified of new versions with one-click install
 
 ---
 
 ## Installation
 
-### Prerequisites
-- Windows 10/11
-- Python 3.10+ (if running from source)
-- An API key (optional - free trial mode available!)
-
 ### Option 1: Download EXE (Recommended)
-1. Go to [Releases](https://github.com/Masaru-urasaM/CrossTrans/releases)
-2. Download the newest version of `CrossTrans.exe`
+
+**Prerequisites:** Windows 10/11
+
+1. Go to [Releases](https://github.com/Masaru-urasaM/CrossTrans/releases/latest)
+2. Download `CrossTrans_v{version}.exe`
 3. Run the application
-4. Start translating immediately with trial mode, or enter your API key in Settings
+4. Start translating with trial mode, or enter your API key in Settings
 
 > **Note:** On first run, Windows SmartScreen may show "Windows protected your PC".
 > Click **"More info"** → **"Run anyway"**. This is normal for unsigned applications.
 
 ### Option 2: Run from Source
 
+**Prerequisites:** Windows 10/11, Python 3.10+
+
 ```bash
-# Clone repository
 git clone https://github.com/Masaru-urasaM/CrossTrans.git
 cd CrossTrans
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Run
 python main.py
-
 ```
 
 ### Get an API Key (Optional)
@@ -125,25 +179,25 @@ Many providers offer free API keys. Get one from any supported provider and past
 ## Usage
 
 ### Basic Translation
-1. **Start the app** - Look for "CT" icon in system tray
+1. **Start the app** — Look for "CT" icon in system tray
 2. **Select any text** in any application
 3. **Press hotkey** (e.g., `Win+Alt+V` for Vietnamese)
-4. **Translation appears** in a tooltip near your cursor
+4. **Translation appears** in a popup near your cursor
 
-### Tooltip Actions
-- **Copy** - Copy translation to clipboard
-- **Replace** - Replace selected text in source app with translation
-  - **Manual mode** (default): Shows preview with strikethrough original → translated text, then Agree/Cancel
-  - **Quick mode**: Immediately pastes translation (configurable in Settings → Hotkeys)
-  - **⚙ Gear icon**: Quick access to Replace mode settings
-- **Dictionary** - Open word-by-word lookup mode
-- **Open Translator** - Open full window with more options
-- **X** or `Escape` - Close tooltip
+### Quick Translate Actions
+
+| Button | Action |
+|--------|--------|
+| **Copy** | Copy translation to clipboard |
+| **Replace** | Replace selected text in source app with translation |
+| **⚙** | Quick access to Replace mode settings |
+| **Dictionary** | Open word-by-word lookup mode |
+| **Open Translator** | Open full translator window with more options |
+| **×** / `Escape` | Close popup |
 
 ### Full Translator Window
-Right-click tray icon -> "Open Translator" or click from tooltip
+Right-click CT tray icon → **Open Translator**, or click from popup.
 
-Features:
 - Edit original text
 - Choose from 100+ languages
 - Add custom prompt for translation style
@@ -154,7 +208,7 @@ Features:
 1. Open Full Translator
 2. Click **+** button or drag & drop files
 3. Supported: Images (PNG, JPG, GIF, WebP), Documents (DOCX, TXT, SRT, PDF)
-4. Click Translate - all files processed in single API call
+4. Click Translate — all files processed in single API call
 
 ---
 
@@ -162,106 +216,62 @@ Features:
 
 ### Settings Tabs
 
-**General**
+#### General
 - Auto-start with Windows
-- Check for updates
-- Enable/disable history
+- Check for updates on startup
+- Enable/disable translation history
 - Theme selection
 
-**Hotkeys**
-- View default hotkeys
-- Record custom hotkeys (click "Record" then press keys)
-- Assign any language to any hotkey
-- Replace Mode toggle (Quick Replace vs Manual Replace)
+#### Hotkeys
+- View default hotkeys (Win+Alt+V/E/J/C/S)
+- Record custom hotkeys (click "Record" then press key combination)
+- Assign any language to custom hotkeys
+- Replace Mode toggle (Quick Replace vs Manual Replace with preview)
 
-**API Key**
-- Add multiple API keys
-- Auto-detect provider or select manually
-- Test connection
-- View vision/file capabilities
+#### API Key
+- Add multiple API keys for automatic failover
+- Auto-detect provider from API key, or select manually
+- Test connection and vision/file capabilities
+- Backup keys activate when primary fails
 
-**Guide**
-- Step-by-step instructions for getting started
-- Troubleshooting tips
+#### Dictionary
+- Install NLP language packs for better word tokenization
+- Supports 30+ languages including Japanese, Chinese, Korean
+- Python 3.10+ must be on your system PATH for language pack downloads
+
+#### Guide
+The built-in Guide tab contains comprehensive documentation for every feature:
+- Getting Started, Quick Translate, Replace Mode
+- Hotkeys, Screenshot Translation, Dictionary Mode
+- File Translation, AI Providers, Tips & Tricks
+- Troubleshooting
+
+**Open Settings and click the Guide tab for the complete reference.**
 
 ### Custom Prompts
 In translator window, use "Custom prompt" field:
-- "Make it formal" - Business communication
-- "Use casual tone" - Friendly messages
-- "Technical translation" - Documentation
-- "Explain like I'm 5" - Simple explanations
-- "Preserve formatting" - Keep structure
+- "Make it formal" — Business communication
+- "Use casual tone" — Friendly messages
+- "Technical translation" — Documentation
+- "Explain like I'm 5" — Simple explanations
+- "Preserve formatting" — Keep structure
 
 ---
 
-## Project Structure
+## Security & Privacy
 
-```
-CrossTrans/
-├── main.py                 # Entry point
-├── config.py               # Configuration management
-├── requirements.txt        # Dependencies
-├── src/
-│   ├── app.py              # Main application coordinator
-│   ├── constants.py        # Languages, providers, models
-│   ├── core/
-│   │   ├── remote_config.py    # Dynamic model/provider config (Cloudflare KV)
-│   │   ├── api_manager.py     # AI provider management
-│   │   ├── translation.py     # Translation service
-│   │   ├── hotkey.py          # Global hotkey system
-│   │   ├── clipboard.py       # Clipboard operations
-│   │   ├── multimodal.py      # Vision processing
-│   │   ├── file_processor.py  # Document text extraction
-│   │   ├── pdf_ocr.py         # Scanned PDF OCR
-│   │   ├── screenshot.py      # Screenshot capture for OCR
-│   │   ├── history.py         # Translation history
-│   │   ├── crypto.py          # Secure API key storage (DPAPI)
-│   │   ├── ssl_pinning.py     # SSL certificate pinning
-│   │   ├── auth.py            # Windows Hello authentication
-│   │   ├── drop_handler.py    # Drag-drop handler
-│   │   ├── nlp_manager.py     # NLP language pack management
-│   │   ├── quota_manager.py   # Trial mode quota tracking
-│   │   ├── trial_api.py       # Trial mode API handler
-│   │   ├── trial_manager.py   # Trial mode status & dialogs
-│   │   ├── update_ui_manager.py # Update status checking & UI
-│   │   └── provider_health.py # Smart provider fallback
-│   ├── ui/
-│   │   ├── tooltip.py          # Translation tooltip popup
-│   │   ├── attachments.py      # File attachment widget
-│   │   ├── dictionary_mode.py  # Dictionary word selection
-│   │   ├── dictionary_popup.py # Dictionary popup manager
-│   │   ├── expanded_window.py  # Fullscreen translation view
-│   │   ├── screenshot_handler.py # Screenshot/vision handler
-│   │   ├── history_dialog.py   # History viewer with search
-│   │   ├── progress_dialog.py  # Progress indicator
-│   │   ├── toast.py            # Toast notifications
-│   │   ├── tray.py             # System tray manager
-│   │   ├── dialogs.py          # Error/trial dialogs
-│   │   └── settings/           # Settings window (modular tabs)
-│   │       ├── main.py         # SettingsWindow base
-│   │       ├── api_tab.py      # API Key tab
-│   │       ├── hotkey_tab.py   # Hotkeys tab
-│   │       ├── general_tab.py  # General settings tab
-│   │       ├── dictionary_tab.py # Dictionary/NLP tab
-│   │       ├── guide_tab.py    # User guide tab
-│   │       ├── widgets.py      # Custom widgets (AutocompleteCombobox)
-│   │       └── update_manager.py # Update checking & downloading
-│   ├── assets/             # Icon assets
-│   └── utils/
-│       ├── logging_setup.py    # Logging
-│       ├── single_instance.py  # Prevent duplicates
-│       ├── ui_helpers.py       # Dark title bar, word filtering
-│       └── updates.py          # Auto-update
-├── tests/                  # Unit tests
-└── logs/                   # Application logs
-```
+- **Encrypted API keys** — Stored locally using Windows DPAPI encryption; never sent anywhere except to the AI provider you choose
+- **Windows Hello** — Optional biometric lock for API key access
+- **No telemetry** — CrossTrans collects no usage data, analytics, or crash reports
+- **Direct-to-provider** — Your text goes straight from your machine to the AI provider's API; no intermediary server (except in trial mode)
+- **Single instance lock** — TCP socket on `127.0.0.1:47823` prevents duplicate instances
 
 ---
 
 ## Troubleshooting
 
 ### API Error / Connection Failed
-1. Open Settings -> API Key tab
+1. Open Settings → API Key tab
 2. Verify your API key is correct
 3. Select correct Provider (or use "Auto")
 4. Click "Test" to verify connection
@@ -273,18 +283,18 @@ CrossTrans/
 - Check logs folder for error details
 
 ### Hotkeys Not Working
-- Check Settings -> Hotkeys for configured shortcuts
+- Check Settings → Hotkeys for configured shortcuts
 - Try running as administrator
 - Some apps capture certain key combinations
 - Ensure no hotkey conflicts with other software
 
 ### Vision/File Features Disabled
-- You need a vision-capable model (e.g., Gemini 2.0 Flash, GPT-4o)
-- Go to Settings -> API Key -> Click "Test"
+- You need a vision-capable model — check Settings → API Key tab, click "Test"
 - If test shows "Image OK", vision is enabled
+- Not all models support vision; try a different model if needed
 
 ### Dictionary Mode Not Working
-- Dictionary Language Packs require Python 3.10+ installed on your system
+- Language packs require Python 3.10+ installed on your system and added to PATH
 - The EXE itself doesn't need Python, but downloading language packs uses pip
 - Go to Settings → Dictionary tab to install language packs
 - If Python is not found, install it from [python.org](https://python.org) (check "Add to PATH")
@@ -296,88 +306,24 @@ CrossTrans/
 
 ---
 
-## What's New in v1.9.11
+## Project Structure
 
-### Hardened for Public Release
-- **Cleaned .gitignore** - Ensured no sensitive or dev-only files leak into the repository
-- **Standardized API Settings buttons** - All error dialogs now consistently show "Open API Key Settings" button that navigates directly to Settings > API Key tab
-- **Fixed trial dialogs bug** - "Open Settings" button in Trial Exhausted and Trial Feature dialogs was never rendered due to a callback parameter mismatch
-
-### Previous in v1.9.10
-
-### Replace in Source App
-- **Replace button** - One-click replace selected text with translation directly in the source app
-- **Manual Replace mode** (default) - Preview with strikethrough original → translated text, then Agree/Cancel for safe replacement
-- **Quick Replace mode** - Immediate paste without preview for faster workflow
-- **⚙ Gear icon** - Dropdown menu next to Replace button for quick access to settings
-- **Replace Mode toggle** - Configurable in Settings → Hotkeys → Replace Mode section
-- **WS_EX_NOACTIVATE tooltip** - Tooltip doesn't steal focus from source app, keeping text selection alive
-
-### Dictionary Mode Improvements
-- **Synonyms & Antonyms** - Dictionary now shows synonyms and antonyms with translations (8-field output)
-- **Smart word filtering** - Punctuation, symbols, and pure numbers no longer appear as clickable word buttons
-- **Unicode letter detection** - Filter works across all languages (Latin, CJK, Cyrillic, Arabic, Thai, Korean)
-- **Dedicated mode only** - Dictionary lookup only through the Dictionary button, no auto-detection on short text
-
-### Generic API Guidance
-- Removed provider-specific API key links and pricing from all UI dialogs
-- Guide tab now shows generic instructions for any supported provider
-
-### Previous in v1.9.9
-
-### Dynamic Remote Model Configuration
-- **Models updated without rebuilding EXE** - Provider list, model names, and API URLs are now fetched from Cloudflare KV
-- **3-tier fallback** - Remote → Local cache (24h) → Hardcoded defaults, app never blocks on network
-- **15 AI providers, 180+ models** - Updated dynamically without app update
-
-### Auto-Update System Overhaul
-- **Versioned EXE rename** - New EXE saved as `CrossTrans_v{version}.exe`, old renamed to `.bak`
-- **Registry auto-start sync** - Auto-start path updated automatically after update
-- **First-launch retry** - Handles Windows Defender scanning delay on new EXE
-
-### Performance (v1.9.8.1)
-- **Settings window opens instantly** - Lazy loading for heavy tabs (API, Dictionary, Guide)
-- **NLP pre-warming** - Dictionary tab loads faster on subsequent opens
-
-### Dictionary Mode (v1.9.8.2)
-- **Hyphenated words preserved** - Words like "auto-update" now stay as single tokens
-- **Better sentence detection** - Expanded punctuation detection (55 characters)
-
-### Stability (v1.9.8)
-- **Trial mode auto-recheck** - Automatically re-validates API keys every 24h
-- **Version upgrade detection** - Clears cache when upgrading to new version
-- **Settings refactored** - Split into modular package structure
-
-### Previous in v1.9.7
-- **Screenshot Translation** - Win+Alt+S captures screen region for OCR translation
-- **Multi-monitor support** - Works across all connected displays
-- **Double-click to Preview** - Open attached files with system default app
-- **Auto-check updates** - Non-intrusive toast notification on startup
-
-### Previous in v1.9.6
-- Critical bug fix for Dictionary Language Pack in EXE builds
-- Auto-detects system Python when running from EXE
-
-### Previous in v1.9.5
-- Fixed API Key saving position issue
-- Animated "Installing..." text for Dictionary Language Pack
-- Google provider now uses REST API (EXE 30MB smaller)
-
-### Previous in v1.9.4
-- HuggingFace provider added (14 AI providers total)
-- Test button now saves API key even on test failure
-
-### Previous in v1.9.2-1.9.3
-- Dictionary Mode with interactive word selection
-- Enhanced Trial mode security
-- 180+ models from 14 providers
-
-### Previous in v1.7.0-1.9.0
-- Trial Mode - Free daily translations without API key
-- Windows Hello Authentication for API key protection
-- Smart Provider Fallback - auto-switch to backup API
-- Scanned PDF OCR support
-- Toast notifications and Search History
+```
+CrossTrans/
+├── main.py                  # Entry point
+├── config.py                # Configuration management
+├── requirements.txt         # Dependencies
+├── src/
+│   ├── app.py               # Main application coordinator
+│   ├── constants.py         # Languages, providers, models
+│   ├── core/                # Business logic (API, translation, hotkeys, crypto, etc.)
+│   ├── ui/                  # UI components (quick_translate, tray, dialogs, settings, etc.)
+│   ├── utils/               # Helpers (updates, logging, single instance)
+│   └── assets/              # Icon assets
+├── docs/                    # Documentation and screenshots
+├── tests/                   # Unit tests
+└── logs/                    # Application logs
+```
 
 ---
 
@@ -408,9 +354,15 @@ pytest tests/ --cov=src --cov-report=html
 
 ---
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for version history and release notes.
+
+---
+
 ## License
 
-This project is licensed under the GNU Affero General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the GNU Affero General Public License v3.0 — see the [LICENSE](LICENSE) file for details.
 
 ---
 
@@ -418,7 +370,6 @@ This project is licensed under the GNU Affero General Public License v3.0 - see 
 
 - Powered by 15+ AI providers including Google, OpenAI, Anthropic, and more
 - Built with Python, Tkinter, and ttkbootstrap
-- Icons and UI inspired by modern design principles
 
 ---
 

@@ -47,7 +47,7 @@ from src.ui.settings import SettingsWindow
 from src.ui.dialogs import APIErrorDialog, TrialExhaustedDialog, TrialFeatureDialog
 from src.ui.history_dialog import HistoryDialog
 from src.ui.toast import ToastManager, ToastType
-from src.ui.tooltip import TooltipManager
+from src.ui.quick_translate import QuickTranslateManager
 from src.ui.tray import TrayManager
 from src.utils.updates import (
     AutoUpdater,
@@ -136,15 +136,15 @@ class TranslatorApp:
         # Screenshot capture for vision/OCR translation
         self.screenshot_capture = ScreenshotCapture(self.root)
 
-        # Tooltip manager
-        self.tooltip_manager = TooltipManager(self.root, self.config)
-        self.tooltip_manager.configure_callbacks(
-            on_copy=self._on_tooltip_copy,
-            on_copy_and_replace=self._on_tooltip_copy_and_replace,
-            on_open_translator=self._on_tooltip_open_translator,
+        # Quick Translate manager
+        self.quick_translate_manager = QuickTranslateManager(self.root, self.config)
+        self.quick_translate_manager.configure_callbacks(
+            on_copy=self._on_quick_translate_copy,
+            on_copy_and_replace=self._on_quick_translate_copy_and_replace,
+            on_open_translator=self._on_quick_translate_open_translator,
             on_open_settings=lambda: self._show_settings_tab("API Key"),
             on_open_settings_dictionary_tab=self._show_settings_dictionary_tab,
-            on_dictionary_lookup=self._on_tooltip_dictionary_lookup,
+            on_dictionary_lookup=self._on_quick_translate_dictionary_lookup,
             on_open_settings_hotkeys_tab=self._show_settings_hotkeys_tab
         )
 
@@ -154,8 +154,8 @@ class TranslatorApp:
             self.screenshot_capture, self.toast
         )
         self.screenshot_handler.configure_callbacks(
-            on_show_tooltip=self.show_tooltip,
-            get_tooltip_manager=lambda: self.tooltip_manager,
+            on_show_quick_translate=self.show_quick_translate,
+            get_quick_translate_manager=lambda: self.quick_translate_manager,
             on_show_settings_tab=self._show_settings_tab,
             get_selected_language=lambda: self.selected_language
         )
@@ -163,7 +163,7 @@ class TranslatorApp:
         # Dictionary popup manager
         self.dictionary_popup = DictionaryPopup(
             self.root, self.config, self.translation_service,
-            self.toast, self.tooltip_manager
+            self.toast, self.quick_translate_manager
         )
         self.dictionary_popup.configure_callbacks(
             on_show_settings_tab=self._show_settings_tab,
@@ -276,7 +276,7 @@ class TranslatorApp:
             return
 
         # Capture source window HWND before any UI interaction
-        # This must happen BEFORE showing loading tooltip, while source app is still foreground
+        # This must happen BEFORE showing loading popup, while source app is still foreground
         try:
             self._source_hwnd = ctypes.windll.user32.GetForegroundWindow()
         except Exception:
@@ -284,9 +284,9 @@ class TranslatorApp:
 
         # Normal language translation
         # Capture mouse position immediately when hotkey is pressed
-        self.tooltip_manager.capture_mouse_position()
+        self.quick_translate_manager.capture_mouse_position()
 
-        self.root.after(0, lambda: self.tooltip_manager.show_loading(language))
+        self.root.after(0, lambda: self.quick_translate_manager.show_loading(language))
         self.translation_service.do_translation(language)
 
     def _on_screenshot_hotkey(self):
@@ -297,8 +297,8 @@ class TranslatorApp:
         """Clean up pending screenshot file if exists."""
         self.screenshot_handler.cleanup_pending_screenshot()
 
-    def show_tooltip(self, original: str, translated: str, target_lang: str, trial_info: dict = None):
-        """Show compact tooltip near mouse cursor with translation result.
+    def show_quick_translate(self, original: str, translated: str, target_lang: str, trial_info: dict = None):
+        """Show compact popup near mouse cursor with translation result.
 
         Args:
             original: Original text
@@ -310,30 +310,30 @@ class TranslatorApp:
         self.current_translated = translated
         self.current_target_lang = target_lang
 
-        # Check if trial quota is exhausted - show dialog instead of tooltip
+        # Check if trial quota is exhausted - show dialog instead of popup
         if trial_info and trial_info.get('is_exhausted'):
             self._show_trial_exhausted()
             return
 
-        self.tooltip_manager.show(translated, target_lang, trial_info, original)
+        self.quick_translate_manager.show(translated, target_lang, trial_info, original)
 
-    def close_tooltip(self):
-        """Close the tooltip."""
-        self.tooltip_manager.close()
+    def close_quick_translate(self):
+        """Close the quick translate popup."""
+        self.quick_translate_manager.close()
 
-    def _on_tooltip_copy(self):
-        """Handle copy from tooltip."""
+    def _on_quick_translate_copy(self):
+        """Handle copy from quick translate popup."""
         pyperclip.copy(self.current_translated)
-        self.tooltip_manager.set_copy_button_text("Copied!")
+        self.quick_translate_manager.set_copy_button_text("Copied!")
         self.toast.show_success("Copied to clipboard!")
         # Reset button text after 1 second
-        self.root.after(1000, lambda: self.tooltip_manager.set_copy_button_text("Copy"))
+        self.root.after(1000, lambda: self.quick_translate_manager.set_copy_button_text("Copy"))
 
-    def _on_tooltip_copy_and_replace(self):
+    def _on_quick_translate_copy_and_replace(self):
         """Copy translated text and paste it into the source application.
 
-        With WS_EX_NOACTIVATE on tooltip, source app keeps focus + selection.
-        Just copy to clipboard, close tooltip, and simulate Ctrl+V.
+        With WS_EX_NOACTIVATE on popup, source app keeps focus + selection.
+        Just copy to clipboard, close popup, and simulate Ctrl+V.
         """
         translated_text = self.current_translated
         if not translated_text:
@@ -353,10 +353,10 @@ class TranslatorApp:
         # Always copy to clipboard first (fallback if paste fails)
         pyperclip.copy(translated_text)
 
-        # Close tooltip (source app still has focus due to WS_EX_NOACTIVATE)
-        self.tooltip_manager.close()
+        # Close popup (source app still has focus due to WS_EX_NOACTIVATE)
+        self.quick_translate_manager.close()
 
-        # Paste in background thread (needs small delay for tooltip to fully close)
+        # Paste in background thread (needs small delay for popup to fully close)
         def do_paste():
             try:
                 time.sleep(0.15)
@@ -371,9 +371,9 @@ class TranslatorApp:
 
         threading.Thread(target=do_paste, daemon=True).start()
 
-    def _on_tooltip_open_translator(self):
-        """Handle open translator from tooltip."""
-        self.close_tooltip()
+    def _on_quick_translate_open_translator(self):
+        """Handle open translator from quick translate popup."""
+        self.close_quick_translate()
 
         # Check if there's a pending screenshot to load into attachments
         pending_image = self.screenshot_handler.get_pending_screenshot()
@@ -388,8 +388,8 @@ class TranslatorApp:
         # Clear pending screenshot (will be managed by AttachmentArea now)
         self.screenshot_handler.clear_pending_screenshot()
 
-    def _on_tooltip_dictionary_lookup(self, words: list, target_lang: str):
-        """Handle dictionary lookup from tooltip.
+    def _on_quick_translate_dictionary_lookup(self, words: list, target_lang: str):
+        """Handle dictionary lookup from quick translate popup.
 
         Uses batch lookup (single API call) for efficiency.
         """
@@ -411,22 +411,22 @@ class TranslatorApp:
                 result = self.translation_service.dictionary_lookup(filtered_words, target_lang)
                 # Get trial info after API call (quota may have changed)
                 trial_info = self.translation_service.get_trial_info()
-                # Show result in a new tooltip at mouse position (pass words for highlighting)
-                self.root.after(0, lambda: self._show_tooltip_dictionary_result(result, target_lang, trial_info, filtered_words))
+                # Show result in a new popup at mouse position (pass words for highlighting)
+                self.root.after(0, lambda: self._show_quick_translate_dictionary_result(result, target_lang, trial_info, filtered_words))
             except Exception as e:
                 # Stop animation on error
-                self.root.after(0, lambda: self.tooltip_manager.stop_dictionary_animation())
+                self.root.after(0, lambda: self.quick_translate_manager.stop_dictionary_animation())
                 self.root.after(0, lambda: self.toast.show_error(f"Lookup failed: {str(e)}"))
 
         import threading
         threading.Thread(target=do_lookup, daemon=True).start()
 
-    def _show_tooltip_dictionary_result(self, result: str, target_lang: str, trial_info: dict = None,
-                                        looked_up_words: list = None):
+    def _show_quick_translate_dictionary_result(self, result: str, target_lang: str, trial_info: dict = None,
+                                               looked_up_words: list = None):
         """Show dictionary result in a SEPARATE window (not replacing quick translate)."""
         # Create a new SEPARATE dictionary result window
-        self.tooltip_manager.capture_mouse_position()
-        self.tooltip_manager.show_dictionary_result(result, target_lang, trial_info, looked_up_words)
+        self.quick_translate_manager.capture_mouse_position()
+        self.quick_translate_manager.show_dictionary_result(result, target_lang, trial_info, looked_up_words)
 
     def show_main_window(self, icon=None, item=None):
         """Show main translator window from tray."""
@@ -1162,14 +1162,14 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
     def _show_settings_hotkeys_tab(self):
         """Open settings window at Hotkeys tab.
 
-        Used by tooltip gear icon to quickly access Replace mode toggle.
+        Used by popup gear icon to quickly access Replace mode toggle.
         """
         self._show_settings_tab("Hotkeys")
 
     def _show_settings_dictionary_tab(self):
         """Open settings window and navigate directly to Dictionary tab.
 
-        Used by tooltip "Install now" link to open Dictionary tab directly.
+        Used by popup "Install now" link to open Dictionary tab directly.
         """
         self.show_settings()
         # Use multiple attempts with increasing delays to ensure window is ready
@@ -1361,8 +1361,8 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         except Exception as e:
             logging.warning(f"Error stopping drop handler: {e}")
 
-        # Close tooltip
-        self.close_tooltip()
+        # Close quick translate popup
+        self.close_quick_translate()
 
         # Close popup
         if self.popup:
@@ -1401,7 +1401,7 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
                     original, translated, target_lang = result
                     trial_info = None
                 if self.running:
-                    self.show_tooltip(original, translated, target_lang, trial_info)
+                    self.show_quick_translate(original, translated, target_lang, trial_info)
         except queue.Empty:
             pass
         except Exception as e:
