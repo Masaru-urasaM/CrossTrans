@@ -5,7 +5,7 @@
 ![License](https://img.shields.io/badge/license-AGPL%20v3-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-informational.svg)
 
-Select text anywhere, press a hotkey, get the translation in a popup — no window switching, no copy-paste. CrossTrans is a Windows desktop app powered by 15 AI providers and 180+ models.
+**Translate anything on your screen — instantly.** Select text in any app, press a hotkey, get the translation in a popup. Can't select text? Press `Win+Alt+S` to screenshot and translate. Works across every platform on your desktop: browsers, PDFs, IDEs, games, images, videos — if you can see it, you can translate it. Powered by 15 AI providers and 180+ models.
 
 ![CrossTrans](CrossTrans.png)
 
@@ -28,9 +28,10 @@ Select text anywhere, press a hotkey, get the translation in a popup — no wind
 
 ## Highlights
 
-- **Instant Translation** — Select text, press hotkey, get translation in a popup
+- **Translate Anywhere** — Works in any app: browsers, PDFs, Word, IDEs, Slack, Discord, games — no plugin needed
+- **Two Ways to Translate** — Select text + hotkey for instant translation, or `Win+Alt+S` to screenshot any region (even non-selectable text in images, videos, games)
+- **Zero Context Switching** — Translation popup appears right at your cursor, in-place. No need to open a browser tab, copy-paste, or switch windows
 - **Replace in Source** — One-click replace selected text with the translation, right in the source app
-- **Screenshot OCR** — Win+Alt+S to capture and translate any screen region
 - **Dictionary Mode** — Click words for definitions, pronunciation, synonyms, antonyms, examples
 - **Free Trial Mode** — Daily free translations without API key
 - **15 AI Providers** — Google, OpenAI, Anthropic, DeepSeek, Groq, and more (many offer free tiers)
@@ -72,6 +73,24 @@ Preview before replacing: strikethrough original text with translated text below
 ---
 
 ## Features
+
+### Translate Anywhere — The Core Advantage
+
+CrossTrans is designed for people who work across multiple platforms and need instant translation without leaving their workflow.
+
+**Method 1: Select Text + Hotkey** — Works in any application that supports text selection:
+- Browsers (Chrome, Firefox, Edge), PDF readers, Word, Excel, PowerPoint
+- IDEs (VS Code, IntelliJ, Visual Studio), text editors, terminals
+- Chat apps (Slack, Discord, Teams, Telegram), email clients
+- Any Windows application — no plugin or extension needed
+
+**Method 2: Screenshot OCR (`Win+Alt+S`)** — For text you can't select:
+- Images, videos, games, streaming content
+- Scanned PDFs, embedded text in graphics
+- Foreign-language UI elements, error messages, menus
+- Any text visible on your screen — just capture the region
+
+> **Why this matters:** Traditional translation tools require you to copy text, open a browser, paste into Google Translate, and switch back. CrossTrans eliminates all of that — the translation appears right where you're working, in under a second.
 
 ### Quick Translation Hotkeys
 | Hotkey | Action |
