@@ -64,6 +64,7 @@ class Config:
         "last_run_version": None,  # Track version to detect upgrades
         # Replace mode setting
         "quick_replace": False,  # False = Manual Replace (preview), True = Quick Replace (immediate)
+        "model_rotation": False,  # Try other models before switching keys on failure
     }
 
     def __init__(self):
@@ -317,6 +318,16 @@ class Config:
     def set_quick_replace(self, enabled: bool):
         """Set Quick Replace mode."""
         self._config['quick_replace'] = enabled
+        self.save()
+
+    # Model rotation setting
+    def get_model_rotation(self) -> bool:
+        """Get whether model rotation on quota failure is enabled."""
+        return self._config.get('model_rotation', False)
+
+    def set_model_rotation(self, enabled: bool):
+        """Set model rotation on quota failure."""
+        self._config['model_rotation'] = enabled
         self.save()
 
     def restore_defaults(self):

@@ -4,6 +4,7 @@ Handles communication with various AI providers (Google, OpenAI, Anthropic, Groq
 """
 import json
 import time
+import threading
 import urllib.request
 import urllib.error
 import logging
@@ -63,14 +64,20 @@ class AIAPIManager:
         self.api_configs: List[Dict[str, Any]] = []
         self.notification_callback: Optional[Callable[[str], None]] = None
         self.health_manager: Optional['ProviderHealthManager'] = None
+        self.model_rotation_enabled: bool = False
+        self._failed_models: Dict[tuple, set] = {}        # (key_prefix, provider) -> {failed_model_names}
+        self._rotation_working_cache: Dict[tuple, str] = {} # (key_prefix, provider) -> working_model
+        self._rotation_lock = threading.Lock()
 
     def configure(self, api_configs: List[Dict[str, Any]],
                   notification_callback: Optional[Callable[[str], None]] = None,
-                  health_manager: Optional['ProviderHealthManager'] = None) -> None:
+                  health_manager: Optional['ProviderHealthManager'] = None,
+                  model_rotation_enabled: bool = False) -> None:
         """Configure the API with list of {model_name, api_key, provider}."""
         self.api_configs = api_configs
         self.notification_callback = notification_callback
         self.health_manager = health_manager
+        self.model_rotation_enabled = model_rotation_enabled
 
     def _identify_provider(self, model_name: str, api_key: str = "") -> str:  # noqa: C901
         """
@@ -483,6 +490,45 @@ class AIAPIManager:
         except Exception as e:
             raise e
 
+    def test_vision_connection(self, model_name: str, api_key: str, provider: str = 'Auto') -> bool:
+        """Test if a model supports vision by sending a tiny 1x1 PNG image.
+
+        Returns True if the model can process images, False otherwise.
+        """
+        import os
+        import tempfile
+
+        target_provider = self._identify_provider(model_name, api_key) if provider == 'Auto' else provider
+
+        # 2x2 white PNG (Groq requires at least 2px per dimension)
+        png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAE0lEQVR4nGP8//8/AwMDEwMYAAAkBgMBXaJOiAAAAABJRU5ErkJggg=="
+
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
+                f.write(base64.b64decode(png_b64))
+                tmp_path = f.name
+
+            self._generate_content(target_provider, api_key, model_name,
+                                   "Describe this image in one word.", tmp_path)
+            return True
+        except Exception as e:
+            # Read error response body for debugging
+            error_body = ""
+            if hasattr(e, 'read'):
+                try:
+                    error_body = e.read().decode('utf-8', errors='replace')
+                except Exception:
+                    pass
+            logging.debug(f"[VisionTest] {model_name} ({target_provider}): {type(e).__name__}: {e} | Body: {error_body}")
+            return False
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
     def _get_api_key_prefix(self, api_key: str) -> str:
         """Get a prefix of API key for caching (to avoid storing full key)."""
         return api_key[:12] if len(api_key) > 12 else api_key
@@ -497,6 +543,121 @@ class AIAPIManager:
                 return provider
         # Default to Google if can't detect
         return 'Google'
+
+    # --- Model Rotation helpers ---
+
+    def _record_failed_model(self, api_key: str, provider: str, model_name: str) -> None:
+        """Record a model that failed for a given key+provider."""
+        key_prefix = self._get_api_key_prefix(api_key)
+        cache_key = (key_prefix, provider)
+        with self._rotation_lock:
+            if cache_key not in self._failed_models:
+                self._failed_models[cache_key] = set()
+            self._failed_models[cache_key].add(model_name)
+
+    def _get_failed_models(self, api_key: str, provider: str) -> set:
+        """Get copy of failed models set for a key+provider."""
+        key_prefix = self._get_api_key_prefix(api_key)
+        cache_key = (key_prefix, provider)
+        with self._rotation_lock:
+            return self._failed_models.get(cache_key, set()).copy()
+
+    def _cache_rotation_working_model(self, api_key: str, provider: str, model_name: str) -> None:
+        """Cache a working model found via rotation."""
+        key_prefix = self._get_api_key_prefix(api_key)
+        cache_key = (key_prefix, provider)
+        with self._rotation_lock:
+            self._rotation_working_cache[cache_key] = model_name
+
+    def _get_rotation_cached_model(self, api_key: str, provider: str) -> Optional[str]:
+        """Get cached working model from rotation, if any."""
+        key_prefix = self._get_api_key_prefix(api_key)
+        cache_key = (key_prefix, provider)
+        with self._rotation_lock:
+            return self._rotation_working_cache.get(cache_key)
+
+    def _dispatch_call(self, provider: str, api_key: str, model_name: str, prompt: str,
+                       image_path: Optional[str] = None,
+                       image_paths: Optional[List[str]] = None,
+                       file_contents: Optional[Dict[str, str]] = None) -> str:
+        """Route to the correct generate method based on arguments."""
+        if image_paths is not None or file_contents is not None:
+            return self._generate_content_multimodal(
+                provider, api_key, model_name, prompt,
+                image_paths or [], file_contents or {}
+            )
+        return self._generate_content(provider, api_key, model_name, prompt, image_path)
+
+    def _try_model_rotation(self, api_key: str, provider: str, failed_model: str,
+                            prompt: str, *,
+                            image_path: Optional[str] = None,
+                            image_paths: Optional[List[str]] = None,
+                            file_contents: Optional[Dict[str, str]] = None,
+                            require_vision: bool = False) -> Optional[str]:
+        """Try other models for the same provider+key before falling back to next key.
+
+        Returns translation result if a working model is found, None otherwise.
+        """
+        if not self.model_rotation_enabled:
+            return None
+
+        self._record_failed_model(api_key, provider, failed_model)
+        failed_set = self._get_failed_models(api_key, provider)
+
+        # Try cached working model first (if different from failed)
+        cached = self._get_rotation_cached_model(api_key, provider)
+        if cached and cached != failed_model and cached not in failed_set:
+            logging.info(f"[ModelRotation] Trying cached model: {cached}")
+            try:
+                result = self._dispatch_call(provider, api_key, cached, prompt,
+                                             image_path=image_path,
+                                             image_paths=image_paths,
+                                             file_contents=file_contents)
+                logging.info(f"[ModelRotation] Cached model {cached} succeeded!")
+                return result
+            except Exception as e:
+                logging.warning(f"[ModelRotation] Cached model {cached} failed: {e}")
+                self._record_failed_model(api_key, provider, cached)
+                failed_set.add(cached)
+
+        # Get candidate models from remote config
+        all_models = get_config().default_models_by_provider.get(provider, [])
+        if not all_models:
+            logging.debug(f"[ModelRotation] No models list for provider {provider}")
+            return None
+
+        # Build rotation list: non-failed first, then previously-failed (deprioritized)
+        non_failed = [m for m in all_models if m not in failed_set and m != failed_model]
+        previously_failed = [m for m in all_models if m in failed_set and m != failed_model]
+        rotation_list = non_failed + previously_failed
+
+        # Filter for vision capability if required
+        if require_vision:
+            rotation_list = [m for m in rotation_list
+                             if MultimodalProcessor.is_vision_capable(m, provider)]
+
+        if not rotation_list:
+            logging.debug(f"[ModelRotation] No candidate models left for {provider}")
+            return None
+
+        logging.info(f"[ModelRotation] Trying {len(rotation_list)} alternative models for {provider}: {rotation_list}")
+
+        for candidate in rotation_list:
+            try:
+                result = self._dispatch_call(provider, api_key, candidate, prompt,
+                                             image_path=image_path,
+                                             image_paths=image_paths,
+                                             file_contents=file_contents)
+                logging.info(f"[ModelRotation] Model {candidate} succeeded!")
+                self._cache_rotation_working_model(api_key, provider, candidate)
+                return result
+            except Exception as e:
+                logging.warning(f"[ModelRotation] Model {candidate} failed: {e}")
+                self._record_failed_model(api_key, provider, candidate)
+                continue
+
+        logging.info(f"[ModelRotation] All models exhausted for {provider}, falling through to next key")
+        return None
 
     def _try_auto_detect_model(self, api_key: str, provider: str, prompt: str) -> Optional[str]:
         """Try to auto-detect a working model for the given provider.
@@ -634,6 +795,16 @@ class AIAPIManager:
 
                 logging.warning(f"[API] Failed with {model_name} ({target_provider}): {e}")
                 errors.append(f"{model_name}: {str(e)}")
+
+                # Try model rotation before moving to next key
+                rotation_result = self._try_model_rotation(
+                    api_key, target_provider, model_name, prompt
+                )
+                if rotation_result is not None:
+                    if self.health_manager:
+                        self.health_manager.record_success(target_provider, 0)
+                    return rotation_result
+
                 continue
 
         if not has_valid_key:
@@ -661,8 +832,12 @@ class AIAPIManager:
 
             target_provider = self._identify_provider(model_name, api_key) if provider_setting == 'Auto' else provider_setting
 
-            # Check vision capability
-            if not MultimodalProcessor.is_vision_capable(model_name, target_provider):
+            # Check vision capability: stored flag from Test, heuristic fallback for untested
+            vision_flag = config.get('vision_capable')
+            if vision_flag is not None:
+                if not vision_flag:
+                    continue
+            elif not MultimodalProcessor.is_vision_capable(model_name, target_provider):
                 continue
 
             vision_configs.append({
@@ -706,6 +881,17 @@ class AIAPIManager:
                     self.health_manager.record_failure(target_provider)
 
                 errors.append(f"{model_name}: {str(e)}")
+
+                # Try model rotation before moving to next key
+                rotation_result = self._try_model_rotation(
+                    api_key, target_provider, model_name, prompt,
+                    image_path=image_path, require_vision=True
+                )
+                if rotation_result is not None:
+                    if self.health_manager:
+                        self.health_manager.record_success(target_provider, 0)
+                    return rotation_result
+
                 continue
 
         raise Exception("All vision APIs failed.\n" + "\n".join(errors))
@@ -744,9 +930,14 @@ class AIAPIManager:
 
             target_provider = self._identify_provider(model_name, api_key) if provider_setting == 'Auto' else provider_setting
 
-            # If we have images, check vision capability
-            if needs_vision and not MultimodalProcessor.is_vision_capable(model_name, target_provider):
-                continue
+            # If we have images, check vision capability: stored flag from Test, heuristic fallback
+            if needs_vision:
+                vision_flag = config.get('vision_capable')
+                if vision_flag is not None:
+                    if not vision_flag:
+                        continue
+                elif not MultimodalProcessor.is_vision_capable(model_name, target_provider):
+                    continue
 
             multimodal_configs.append({
                 'config': config,
@@ -793,6 +984,18 @@ class AIAPIManager:
                     self.health_manager.record_failure(target_provider)
 
                 errors.append(f"{model_name}: {str(e)}")
+
+                # Try model rotation before moving to next key
+                rotation_result = self._try_model_rotation(
+                    api_key, target_provider, model_name, prompt,
+                    image_paths=image_paths, file_contents=file_contents,
+                    require_vision=needs_vision
+                )
+                if rotation_result is not None:
+                    if self.health_manager:
+                        self.health_manager.record_success(target_provider, 0)
+                    return rotation_result
+
                 continue
 
         raise Exception("All API calls failed.\n" + "\n".join(errors))

@@ -1491,10 +1491,14 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
                         self.config.api_status_cache[key] = True
                         has_working_api = True
 
-                        # Check vision capability for this working key
-                        target_provider = manager._identify_provider(model, key) if provider == 'Auto' else provider.lower()
-                        if MultimodalProcessor.is_vision_capable(model, target_provider):
+                        # Check vision capability: use stored flag from Test, heuristic fallback
+                        vision_flag = config.get('vision_capable')
+                        if vision_flag is True:
                             has_vision_api = True
+                        elif vision_flag is None:
+                            target_provider = manager._identify_provider(model, key) if provider == 'Auto' else provider.lower()
+                            if MultimodalProcessor.is_vision_capable(model, target_provider):
+                                has_vision_api = True
 
                     except Exception as e:
                         logging.debug(f"API check failed for {model}: {e}")

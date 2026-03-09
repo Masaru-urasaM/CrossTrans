@@ -167,6 +167,31 @@ class APITabMixin:
         ttk.Label(api_container, text="💡 Tip: Click 'Test' on an API to detect its capabilities.",
                   font=('Segoe UI', 8), foreground='#888888').pack(anchor=W, pady=(5, 0))
 
+        # ===== MODEL ROTATION TOGGLE =====
+        ttk.Separator(api_container).pack(fill=X, pady=15)
+        ttk.Label(api_container, text="Failover Strategy:",
+                  font=('Segoe UI', 10, 'bold')).pack(anchor=W)
+        ttk.Label(api_container, text="When a model fails, try other models with the same key before switching keys.",
+                  font=('Segoe UI', 9), foreground='#888888').pack(anchor=W, pady=(2, 5))
+
+        rotation_frame = ttk.Frame(api_container)
+        rotation_frame.pack(fill=X, pady=5)
+
+        self.model_rotation_var = tk.BooleanVar(value=self.config.get_model_rotation())
+
+        if HAS_TTKBOOTSTRAP:
+            ttk.Checkbutton(rotation_frame, text="Model Rotation on Failure",
+                            variable=self.model_rotation_var,
+                            command=self._toggle_model_rotation,
+                            bootstyle="success-round-toggle").pack(side=LEFT)
+        else:
+            ttk.Checkbutton(rotation_frame, text="Model Rotation on Failure",
+                            variable=self.model_rotation_var,
+                            command=self._toggle_model_rotation).pack(side=LEFT)
+
+        ttk.Label(rotation_frame, text="(Maximizes API key value across model quotas)",
+                  font=('Segoe UI', 8), foreground='#888888').pack(side=LEFT, padx=(5, 0))
+
         # ===== TRIAL MODE TOGGLE =====
         ttk.Separator(api_container).pack(fill=X, pady=15)
         ttk.Label(api_container, text="Trial Mode:",
@@ -715,8 +740,14 @@ class APITabMixin:
                 # SUCCESS! This combination works
                 display_name = api_manager.get_display_name(try_provider)
 
-                # Check Vision Capability
-                is_vision = MultimodalProcessor.is_vision_capable(try_model, try_provider)
+                # Real API vision test: send 1x1 PNG to determine vision capability
+                if HAS_TTKBOOTSTRAP:
+                    result_label.config(text="OK! Testing vision...", bootstyle="warning")
+                else:
+                    result_label.config(text="OK! Testing vision...", foreground="orange")
+                self.window.update()
+
+                is_vision = api_manager.test_vision_connection(try_model, api_key, try_provider)
                 is_file_capable = True
 
                 # Build capability status
@@ -894,6 +925,11 @@ class APITabMixin:
         logging.info(f"Auto-saved API key for {provider}/{model} (total {len(api_keys_list)} keys)")
 
     # ===== TRIAL MODE METHODS =====
+
+    def _toggle_model_rotation(self):
+        """Toggle model rotation on failure."""
+        enabled = self.model_rotation_var.get()
+        self.config.set_model_rotation(enabled)
 
     def _toggle_trial_mode(self):
         """Toggle trial mode - tests all API keys first when enabling."""

@@ -65,7 +65,9 @@ class TranslationService:
             bool: True if valid API key exists or trial mode is available.
         """
         api_keys = self.config.get_api_keys()
-        self.api_manager.configure(api_keys, self.notification_callback, self.health_manager)
+        model_rotation = self.config.get_model_rotation()
+        self.api_manager.configure(api_keys, self.notification_callback, self.health_manager,
+                                   model_rotation_enabled=model_rotation)
 
         # Check if there's at least one valid (non-empty) API key
         has_valid_key = False
