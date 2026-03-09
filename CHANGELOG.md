@@ -2,6 +2,24 @@
 
 All notable changes to CrossTrans are documented here.
 
+## [1.9.12] - Rename & Documentation Overhaul
+
+### Codebase Rename: Tooltip → Quick Translate
+- **Renamed `tooltip.py` → `quick_translate.py`** — Feature now consistently called "Quick Translate" everywhere
+- **`TooltipManager` → `QuickTranslateManager`** — Class, variables, methods, callbacks all renamed
+- **User-facing text** — All UI strings now say "popup" instead of "tooltip"
+- **Documentation updated** — README, CHANGELOG, CLAUDE.md, copilot instructions all consistent
+
+### README Overhaul
+- **"Translate Anywhere" highlighted as core advantage** — Works in any app, no plugin needed
+- **Two translation methods explained** — Text selection + hotkey, or screenshot OCR for non-selectable text
+- **Cross-platform workflow focus** — Browsers, IDEs, chat apps, games, images, videos
+- **All screenshots added** — 10 screenshots now included in the repository
+
+### Guide Tab Improvements
+- **Hotkeys section moved to top** — First thing users see after Getting Started
+- **Hotkey intro line added** — Explains that hotkeys activate Quick Translate
+
 ## [1.9.11] - Public Release Hardening
 
 - **Cleaned .gitignore** — Ensured no sensitive or dev-only files leak into the repository
