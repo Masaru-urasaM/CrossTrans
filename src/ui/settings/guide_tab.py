@@ -138,7 +138,26 @@ class GuideTabMixin:
             "Want unlimited translations? Get a free API key (see AI Providers below).",
         ])
 
-        # === Section 2: Quick Translate ===
+        # === Section 2: Hotkeys ===
+        self._create_guide_section(guide_container, "Hotkeys", [
+            "Hotkeys activate Quick Translate \u2014 select text, press a hotkey, and the translation popup appears instantly.",
+            "",
+            "Default Translation Hotkeys:",
+            "  \u2022 Win + Alt + V  \u2192  Translate to Vietnamese",
+            "  \u2022 Win + Alt + E  \u2192  Translate to English",
+            "  \u2022 Win + Alt + J  \u2192  Translate to Japanese",
+            "  \u2022 Win + Alt + C  \u2192  Translate to Chinese (Simplified)",
+            "",
+            "Screenshot:",
+            "  \u2022 Win + Alt + S  \u2192  Capture screen region for OCR translation",
+            "",
+            "Custom Hotkeys:",
+            "  \u2022 Add up to 4 additional language hotkeys",
+            f"  \u2022 Choose from {lang_count} languages with any key combination",
+            "  \u2022 All hotkeys are fully customizable in Settings \u2192 Hotkeys",
+        ])
+
+        # === Section 3: Quick Translate ===
         self._create_guide_section(guide_container, "Quick Translate", [
             "When a translation appears, the popup provides these controls:",
             "",
@@ -157,7 +176,7 @@ class GuideTabMixin:
         self._add_guide_image(guide_container, "quick_translate.png",
                               "Quick Translate with Copy, Replace, Dictionary, Open Translator buttons")
 
-        # === Section 3: Replace Mode ===
+        # === Section 4: Replace Mode ===
         self._create_guide_section(guide_container, "Replace Mode", [
             "Replace selected text in the source app with the translation.",
             "",
@@ -181,23 +200,6 @@ class GuideTabMixin:
                               "Translation preview")
         self._add_guide_image(guide_container, "replace_preview_replaced.png",
                               "Replace preview with Agree/Cancel")
-
-        # === Section 4: Hotkeys ===
-        self._create_guide_section(guide_container, "Hotkeys", [
-            "Default Translation Hotkeys:",
-            "  \u2022 Win + Alt + V  \u2192  Translate to Vietnamese",
-            "  \u2022 Win + Alt + E  \u2192  Translate to English",
-            "  \u2022 Win + Alt + J  \u2192  Translate to Japanese",
-            "  \u2022 Win + Alt + C  \u2192  Translate to Chinese (Simplified)",
-            "",
-            "Screenshot:",
-            "  \u2022 Win + Alt + S  \u2192  Capture screen region for OCR translation",
-            "",
-            "Custom Hotkeys:",
-            "  \u2022 Add up to 4 additional language hotkeys",
-            f"  \u2022 Choose from {lang_count} languages with any key combination",
-            "  \u2022 All hotkeys are fully customizable in Settings \u2192 Hotkeys",
-        ])
 
         # === Section 5: Screenshot Translation ===
         self._create_guide_section(guide_container, "Screenshot Translation", [
