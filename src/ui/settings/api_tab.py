@@ -59,7 +59,7 @@ class APITabMixin:
         def _on_mousewheel(event):
             if canvas.winfo_exists() and canvas.winfo_ismapped():
                 try:
-                    canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+                    canvas.yview_scroll(int(-3*(event.delta/120)), "units")
                 except tk.TclError:
                     pass  # Canvas may have been destroyed
         canvas.bind("<MouseWheel>", _on_mousewheel)

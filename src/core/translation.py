@@ -167,6 +167,59 @@ class TranslationService:
         words = text.split()
         return 1 <= len(words) <= 4
 
+    @staticmethod
+    def _is_japanese_text(text: str) -> bool:
+        """Check if text contains Japanese characters (hiragana, katakana, or kanji)."""
+        return bool(re.search(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]', text))
+
+    @staticmethod
+    def generate_furigana(text: str) -> Optional[str]:
+        """Generate furigana annotations for Japanese text using pykakasi (offline).
+
+        Returns:
+            String with {kanji|reading} notation, or None if pykakasi unavailable.
+        """
+        try:
+            from pykakasi import kakasi
+        except ImportError:
+            logging.warning("pykakasi not installed, furigana unavailable")
+            return None
+
+        try:
+            kks = kakasi()
+            result = kks.convert(text)
+            output = []
+
+            for item in result:
+                orig = item['orig']
+                hira = item['hira']
+                has_kanji = bool(re.search(r'[\u4E00-\u9FFF\u3400-\u4DBF]', orig))
+
+                if has_kanji and orig != hira:
+                    # Split kanji prefix from trailing hiragana suffix
+                    # e.g., "選択さ" -> kanji="選択", suffix="さ"
+                    i = len(orig)
+                    while i > 0 and not re.match(r'[\u4E00-\u9FFF\u3400-\u4DBF]', orig[i - 1]):
+                        i -= 1
+                    kanji_part = orig[:i]
+                    plain_suffix = orig[i:]
+
+                    if plain_suffix and hira.endswith(plain_suffix):
+                        kanji_reading = hira[:-len(plain_suffix)]
+                    else:
+                        kanji_reading = hira
+
+                    output.append(f'{{{kanji_part}|{kanji_reading}}}')
+                    if plain_suffix:
+                        output.append(plain_suffix)
+                else:
+                    output.append(orig)
+
+            return ''.join(output)
+        except Exception as e:
+            logging.error(f"Furigana generation failed: {e}")
+            return None
+
     def _strip_thinking_tags(self, text: str) -> str:
         """Remove AI thinking/reasoning tags from response.
 
@@ -366,8 +419,9 @@ Rules (DO NOT include these in your response):
                         custom_prompt: str = "") -> None:
         """Perform translation and put result in queue.
 
-        Queue item format: (original_text, translated_text, target_language, trial_info)
+        Queue item format: (original_text, translated_text, target_language, trial_info, furigana_text)
         trial_info is a dict if in trial mode, None otherwise.
+        furigana_text is a string with {kanji|reading} notation if furigana enabled, None otherwise.
         """
         current_time = time.time()
         if current_time - self.last_translation_time < COOLDOWN:
@@ -389,12 +443,22 @@ Rules (DO NOT include these in your response):
 
             if selected_text:
                 logging.info(f"Selected text: {selected_text[:50]}...")
+
+                # Normal translation (always)
                 translated = self.translate_text(selected_text, target_language, custom_prompt)
+
+                # Generate furigana offline if enabled and source is Japanese
+                furigana_text = None
+                if (not custom_prompt and self.config.get_furigana_enabled()
+                        and self._is_japanese_text(selected_text)):
+                    logging.info("Japanese text detected, generating furigana offline")
+                    furigana_text = self.generate_furigana(selected_text)
+
                 logging.info("Translation complete!")
 
                 # Include trial info if in trial mode
                 trial_info = self.get_trial_info()
-                self.translation_queue.put((selected_text, translated, target_language, trial_info))
+                self.translation_queue.put((selected_text, translated, target_language, trial_info, furigana_text))
             else:
                 error_msg = "No text selected. Please select text and try again."
                 logging.warning(error_msg)

@@ -1,6 +1,6 @@
 # CrossTrans Copilot Instructions
 
-**CrossTrans v1.9.11** — Windows desktop translation app with 15 AI API providers, instant hotkey translation, screenshot OCR, and trial mode.
+**CrossTrans v1.9.13** — Windows desktop translation app with 15 AI API providers, instant hotkey translation, screenshot OCR, furigana reading guides, and trial mode.
 
 **See [CLAUDE.md](../CLAUDE.md) for comprehensive technical documentation.**
 
@@ -28,6 +28,7 @@ pytest tests/ --cov=src
 | Add new UI component | `src/ui/` + callback injection via `configure_callbacks()` |
 | Add settings tab | `src/ui/settings/` then register in `main.py` |
 | Translation logic | `src/core/translation.py` |
+| Furigana rendering | `src/ui/quick_translate.py` (`_render_furigana`) + `src/core/translation.py` (`generate_furigana`) |
 | Hotkey mappings | `src/core/hotkey.py` |
 | Update system | `src/utils/updates.py` |
 
@@ -306,4 +307,4 @@ See [CLAUDE.md](../CLAUDE.md) line 4—this is a hard requirement.
 
 ---
 
-**Last Updated**: March 2026 | **Version**: 1.9.11
+**Last Updated**: March 2026 | **Version**: 1.9.13

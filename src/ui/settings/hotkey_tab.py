@@ -50,7 +50,7 @@ class HotkeyTabMixin:
                     cx, cy = canvas.winfo_rootx(), canvas.winfo_rooty()
                     cw, ch = canvas.winfo_width(), canvas.winfo_height()
                     if cx <= x <= cx+cw and cy <= y <= cy+ch:
-                        canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+                        canvas.yview_scroll(int(-3*(event.delta/120)), "units")
                 except tk.TclError:
                     pass  # Canvas may have been destroyed
 
@@ -104,6 +104,11 @@ class HotkeyTabMixin:
         ttk.Separator(hotkey_container).pack(fill=X, pady=20)
         ttk.Label(hotkey_container, text="Replace Mode", font=('Segoe UI', 10, 'bold')).pack(anchor=W, pady=(0, 10))
         self._create_replace_mode_section(hotkey_container)
+
+        # 5. Furigana Mode section
+        ttk.Separator(hotkey_container).pack(fill=X, pady=20)
+        ttk.Label(hotkey_container, text="Furigana Mode", font=('Segoe UI', 10, 'bold')).pack(anchor=W, pady=(0, 10))
+        self._create_furigana_section(hotkey_container)
 
         # Update scroll
         hotkey_container.update_idletasks()
@@ -211,6 +216,45 @@ class HotkeyTabMixin:
         enabled = self.quick_replace_var.get()
         self.config.set_quick_replace(enabled)
         logging.info(f"Replace mode changed: quick_replace={enabled}")
+
+    def _create_furigana_section(self, parent):
+        """Create the Furigana Mode configuration section."""
+        desc = ttk.Frame(parent)
+        desc.pack(fill=X, pady=(0, 10), padx=5)
+        ttk.Label(desc, text="Show hiragana reading guides above kanji when translating Japanese text.",
+                  font=('Segoe UI', 9), foreground='#888888').pack(anchor=W)
+
+        toggle_row = ttk.Frame(parent)
+        toggle_row.pack(fill=X, pady=5, padx=5)
+
+        self.furigana_var = tk.BooleanVar(value=self.config.get_furigana_enabled())
+
+        if HAS_TTKBOOTSTRAP:
+            ttk.Checkbutton(toggle_row,
+                            text="Enable Furigana (reading guides for Japanese kanji)",
+                            variable=self.furigana_var,
+                            command=self._on_furigana_toggle,
+                            bootstyle="round-toggle-success").pack(anchor=W)
+        else:
+            ttk.Checkbutton(toggle_row,
+                            text="Enable Furigana (reading guides for Japanese kanji)",
+                            variable=self.furigana_var,
+                            command=self._on_furigana_toggle).pack(anchor=W)
+
+        info = ttk.Frame(parent)
+        info.pack(fill=X, pady=(0, 5), padx=5)
+        ttk.Label(info,
+                  text="OFF = Normal translation only",
+                  font=('Segoe UI', 8), foreground='#888888').pack(anchor=W)
+        ttk.Label(info,
+                  text="ON = Shows original Japanese text with furigana readings + translation",
+                  font=('Segoe UI', 8), foreground='#888888').pack(anchor=W)
+
+    def _on_furigana_toggle(self):
+        """Handle Furigana Mode toggle - auto-save immediately."""
+        enabled = self.furigana_var.get()
+        self.config.set_furigana_enabled(enabled)
+        logging.info(f"Furigana mode changed: furigana_enabled={enabled}")
 
     def _add_default_hotkey_row(self, parent, language, hotkey):
         """Add a row for default languages with Restore button."""

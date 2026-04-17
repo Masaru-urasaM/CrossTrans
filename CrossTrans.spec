@@ -9,6 +9,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('src/assets', 'src/assets'),  # Icons and images
+        ('docs/screenshots', 'docs/screenshots'),  # Guide tab screenshots
     ],
     hiddenimports=[
         # GUI framework

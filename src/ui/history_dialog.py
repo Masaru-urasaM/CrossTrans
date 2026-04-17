@@ -123,7 +123,7 @@ class HistoryDialog:
 
         # Mousewheel scrolling only
         def _on_mousewheel(event):
-            self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            self.canvas.yview_scroll(int(-3*(event.delta/120)), "units")
 
         self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
         self.window.bind("<Destroy>", lambda e: self.canvas.unbind_all("<MouseWheel>"))

@@ -412,7 +412,8 @@ class QuickTranslateManager:
 
         return int(width), int(max(MIN_HEIGHT, min(height, MAX_HEIGHT)))
 
-    def show(self, translated: str, target_lang: str, trial_info: dict = None, original: str = ""):
+    def show(self, translated: str, target_lang: str, trial_info: dict = None, original: str = "",
+             furigana_text: str = None):
         """Show popup with translation result.
 
         Args:
@@ -420,6 +421,7 @@ class QuickTranslateManager:
             target_lang: The target language
             trial_info: Optional dict with trial mode info (from TranslationService.get_trial_info())
             original: The original text (for dictionary lookup)
+            furigana_text: Optional furigana-annotated text with {kanji|reading} notation
         """
         self.close()
 
@@ -432,6 +434,11 @@ class QuickTranslateManager:
         # Add extra height for trial mode header
         if trial_info and trial_info.get('is_trial') and not is_error:
             height += 35  # Extra space for trial header row
+
+        # Add extra height for furigana section (2 lines per paragraph: reading + text)
+        if furigana_text and not is_error:
+            furigana_paragraphs = furigana_text.count('\n') + 1
+            height += furigana_paragraphs * 38 + 30  # 38px per pair (reading + text) + separator
 
         # Create popup window
         self.popup = tk.Toplevel(self.root)
@@ -610,6 +617,13 @@ class QuickTranslateManager:
             close_btn_kwargs["bootstyle"] = "secondary"
         ttk.Button(self._btn_frame, **close_btn_kwargs).pack(side=RIGHT)
 
+        # Furigana section (if available)
+        if furigana_text and not is_error:
+            self._render_furigana(main_frame, furigana_text)
+            # Separator between furigana and translation
+            sep_frame = tk.Frame(main_frame, bg='#555555', height=1)
+            sep_frame.pack(fill=X, pady=(8, 8))
+
         # Translation text - USE FONT METRICS for correct sizing on all machines
         text_fg = '#ff6b6b' if is_error else '#ffffff'
 
@@ -640,7 +654,7 @@ class QuickTranslateManager:
 
         # Mouse wheel scroll
         self.popup_text.bind('<MouseWheel>',
-                               lambda e: self.popup_text.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+                               lambda e: self.popup_text.yview_scroll(int(-3 * (e.delta / 120)), "units"))
 
         # Position near mouse
         x, y, height = self._calculate_position(width, height)
@@ -648,6 +662,78 @@ class QuickTranslateManager:
 
         # Bindings
         self.popup.bind('<Escape>', lambda e: on_popup_close())
+
+    def _render_furigana(self, parent, furigana_text: str):
+        """Render furigana using embedded frames for perfect alignment.
+
+        Each kanji+reading pair becomes a small inline frame:
+        - Top: hiragana reading (small, blue)
+        - Bottom: kanji text (normal, white)
+        Plain text is inserted inline. align='baseline' keeps kanji
+        level with surrounding text regardless of font size differences.
+
+        Args:
+            parent: Parent frame to pack into
+            furigana_text: Text with {kanji|reading} notation
+        """
+        bg_color = '#2b2b2b'
+        ruby_bg = '#363636'
+        cjk_font = 'Yu Gothic'
+        text_font = (cjk_font, 11)
+        reading_font = (cjk_font, 7)
+
+        furigana_widget = tk.Text(parent, wrap=tk.CHAR, bg=bg_color,
+                                  relief='flat', borderwidth=0, highlightthickness=0,
+                                  cursor='arrow', spacing1=4, spacing3=4)
+
+        furigana_widget.tag_configure('text', font=text_font, foreground='#cccccc')
+
+        pattern = re.compile(r'\{([^|]+)\|([^}]+)\}')
+
+        lines = furigana_text.split('\n')
+        for line_idx, line in enumerate(lines):
+            last_end = 0
+
+            for match in pattern.finditer(line):
+                plain = line[last_end:match.start()]
+                if plain:
+                    furigana_widget.insert(tk.END, plain, 'text')
+
+                kanji = match.group(1)
+                reading = match.group(2)
+
+                # Embedded frame: reading on top, kanji on bottom, subtle bg
+                frame = tk.Frame(furigana_widget, bg=ruby_bg, bd=0,
+                                 highlightthickness=0, padx=0, pady=0)
+                tk.Label(frame, text=reading, font=reading_font,
+                         fg='#80b8ff', bg=ruby_bg, bd=0,
+                         padx=2, pady=0, anchor='center').pack(side='top', fill='x', pady=(1, 0))
+                tk.Label(frame, text=kanji, font=text_font,
+                         fg='#ffffff', bg=ruby_bg, bd=0,
+                         padx=2, pady=0, anchor='center').pack(side='top', fill='x', pady=(0, 1))
+
+                furigana_widget.window_create(tk.END, window=frame, align='baseline')
+                last_end = match.end()
+
+            remaining = line[last_end:]
+            if remaining:
+                furigana_widget.insert(tk.END, remaining, 'text')
+
+            if line_idx < len(lines) - 1:
+                furigana_widget.insert(tk.END, '\n', 'text')
+
+        # Each line with ruby pairs is taller; use enough height
+        total_lines = len(lines) + 1
+        furigana_widget.config(height=min(total_lines, 12))
+
+        furigana_widget.config(state='disabled')
+        furigana_widget.pack(side=TOP, fill=BOTH, expand=True, pady=(0, 0))
+
+        # Horizontal + vertical scroll
+        furigana_widget.bind('<MouseWheel>',
+                             lambda e: furigana_widget.yview_scroll(int(-3 * (e.delta / 120)), "units"))
+        furigana_widget.bind('<Shift-MouseWheel>',
+                             lambda e: furigana_widget.xview_scroll(int(-3 * (e.delta / 120)), "units"))
 
     def _calculate_position(self, width: int, height: int) -> Tuple[int, int, int]:
         """Calculate popup position and adjust height if needed.
@@ -1527,7 +1613,7 @@ class QuickTranslateManager:
 
         # Mouse wheel scroll
         result_text.bind('<MouseWheel>',
-                        lambda e: result_text.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+                        lambda e: result_text.yview_scroll(int(-3 * (e.delta / 120)), "units"))
 
         # Close on Escape
         dict_result.bind('<Escape>', lambda e: dict_result.destroy())

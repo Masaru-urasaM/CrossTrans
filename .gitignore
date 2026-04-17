@@ -66,6 +66,9 @@ cloudflare_worker.js
 wrangler.toml
 .wrangler/
 
+# Ops documentation (contains secrets, endpoints, internal architecture)
+OPS_GUIDE.md
+
 # Local development scripts (not needed for users)
 BYPASS.bat
 restart.bat

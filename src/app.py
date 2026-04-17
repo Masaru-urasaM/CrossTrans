@@ -297,7 +297,8 @@ class TranslatorApp:
         """Clean up pending screenshot file if exists."""
         self.screenshot_handler.cleanup_pending_screenshot()
 
-    def show_quick_translate(self, original: str, translated: str, target_lang: str, trial_info: dict = None):
+    def show_quick_translate(self, original: str, translated: str, target_lang: str,
+                             trial_info: dict = None, furigana_text: str = None):
         """Show compact popup near mouse cursor with translation result.
 
         Args:
@@ -305,6 +306,7 @@ class TranslatorApp:
             translated: Translated text
             target_lang: Target language
             trial_info: Optional trial mode info dict
+            furigana_text: Optional furigana-annotated text with {kanji|reading} notation
         """
         self.current_original = original
         self.current_translated = translated
@@ -315,7 +317,8 @@ class TranslatorApp:
             self._show_trial_exhausted()
             return
 
-        self.quick_translate_manager.show(translated, target_lang, trial_info, original)
+        self.quick_translate_manager.show(translated, target_lang, trial_info, original,
+                                          furigana_text=furigana_text)
 
     def close_quick_translate(self):
         """Close the quick translate popup."""
@@ -691,7 +694,7 @@ class TranslatorApp:
         self.original_text.insert('1.0', original)
         self.original_text.pack(fill=X, pady=(5, 15))
         self.original_text.bind('<MouseWheel>',
-            lambda e: self.original_text.yview_scroll(int(-1*(e.delta/120)), "units"))
+            lambda e: self.original_text.yview_scroll(int(-3*(e.delta/120)), "units"))
 
         # Undo/Redo bindings
         self.original_text.bind('<Control-z>', lambda e: self.original_text.edit_undo() or "break")
@@ -723,7 +726,7 @@ class TranslatorApp:
                                        borderwidth=0)
         self.lang_listbox.pack(fill=X)
         self.lang_listbox.bind('<MouseWheel>',
-            lambda e: self.lang_listbox.yview_scroll(int(-1*(e.delta/120)), "units"))
+            lambda e: self.lang_listbox.yview_scroll(int(-3*(e.delta/120)), "units"))
 
         self._populate_language_list()
         self.lang_listbox.bind('<<ListboxSelect>>', self._on_language_select)
@@ -740,7 +743,7 @@ class TranslatorApp:
                                           undo=True, maxundo=-1)
         self.custom_prompt_text.pack(fill=X, pady=(5, 15))
         self.custom_prompt_text.bind('<MouseWheel>',
-            lambda e: self.custom_prompt_text.yview_scroll(int(-1*(e.delta/120)), "units"))
+            lambda e: self.custom_prompt_text.yview_scroll(int(-3*(e.delta/120)), "units"))
 
         # Undo/Redo bindings for custom prompt
         self.custom_prompt_text.bind('<Control-z>', lambda e: self.custom_prompt_text.edit_undo() or "break")
@@ -787,7 +790,7 @@ class TranslatorApp:
         self.trans_text.config(state='disabled')  # Make read-only
         self.trans_text.pack(fill=BOTH, expand=True, pady=(5, 0))
         self.trans_text.bind('<MouseWheel>',
-            lambda e: self.trans_text.yview_scroll(int(-1*(e.delta/120)), "units"))
+            lambda e: self.trans_text.yview_scroll(int(-3*(e.delta/120)), "units"))
 
         # Enable DnD for popup window - delay to ensure window is fully realized
         self.popup.after(300, lambda: self._setup_drop_handling(self.popup))
@@ -1392,16 +1395,19 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         """Check translation queue for results with error handling."""
         try:
             while True:
-                # Queue item format: (original, translated, target_lang, trial_info)
+                # Queue item format: (original, translated, target_lang, trial_info, furigana_text)
                 result = self.translation_service.translation_queue.get_nowait()
-                if len(result) == 4:
+                furigana_text = None
+                if len(result) == 5:
+                    original, translated, target_lang, trial_info, furigana_text = result
+                elif len(result) == 4:
                     original, translated, target_lang, trial_info = result
                 else:
                     # Backward compatibility
                     original, translated, target_lang = result
                     trial_info = None
                 if self.running:
-                    self.show_quick_translate(original, translated, target_lang, trial_info)
+                    self.show_quick_translate(original, translated, target_lang, trial_info, furigana_text)
         except queue.Empty:
             pass
         except Exception as e:

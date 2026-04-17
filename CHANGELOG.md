@@ -2,6 +2,20 @@
 
 All notable changes to CrossTrans are documented here.
 
+## [1.9.13] - Furigana Reading Guides for Japanese
+
+### Furigana Feature
+- **Japanese reading guides** — When translating Japanese text, original text is displayed with furigana (hiragana readings above kanji) to help learn pronunciation
+- **Offline generation** — Uses pykakasi library for local kanji-to-hiragana conversion (no extra API call)
+- **Embedded frame rendering** — Each kanji+reading pair is an inline frame with `align='baseline'` for perfect vertical alignment with surrounding text
+- **Word wrap support** — Long furigana lines wrap naturally using `wrap=tk.CHAR` (CJK-friendly)
+- **Toggle in Settings** — Enable/disable in Settings → Hotkeys → "Enable Furigana" checkbox
+- **Config key**: `furigana_enabled` (boolean, default `True`)
+
+### Dev Runner
+- **`dev_run.bat`** — Development script that kills running CrossTrans instance and restarts with console output for debugging
+- Uses PowerShell `Get-CimInstance` to find and kill python processes by command line match
+
 ## [1.9.12] - Rename & Documentation Overhaul
 
 ### Codebase Rename: Tooltip → Quick Translate

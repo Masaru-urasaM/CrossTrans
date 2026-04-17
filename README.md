@@ -1,6 +1,6 @@
 # CrossTrans
 
-![Version](https://img.shields.io/badge/version-1.9.12-blue.svg)
+![Version](https://img.shields.io/badge/version-1.9.13-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-yellow.svg)
 ![License](https://img.shields.io/badge/license-AGPL%20v3-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-informational.svg)
@@ -33,6 +33,7 @@
 - **Zero Context Switching** — Translation popup appears right at your cursor, in-place. No need to open a browser tab, copy-paste, or switch windows
 - **Replace in Source** — One-click replace selected text with the translation, right in the source app
 - **Dictionary Mode** — Click words for definitions, pronunciation, synonyms, antonyms, examples
+- **Furigana** — Japanese reading guides: hiragana displayed above kanji to help learn pronunciation
 - **Free Trial Mode** — Daily free translations without API key
 - **15 AI Providers** — Google, OpenAI, Anthropic, DeepSeek, Groq, and more (many offer free tiers)
 - **File Processing** — Translate documents (.docx, .txt, .srt, .pdf) and images
@@ -119,6 +120,12 @@ CrossTrans is designed for people who work across multiple platforms and need in
 - **Manual mode** (default): Preview with strikethrough original → translated text, then Agree/Cancel
 - **Quick mode**: Immediate paste without preview (toggle in Settings → Hotkeys → Replace Mode)
 - **Gear icon (⚙)**: Quick access to replace mode settings
+
+### Furigana (Japanese Reading Guides)
+- **Hiragana above kanji** — When translating Japanese text, the original text is displayed with furigana readings above each kanji
+- **Offline processing** — Uses pykakasi for local kanji-to-hiragana conversion (no extra API call)
+- **Toggle on/off** — Settings → Hotkeys → "Enable Furigana" checkbox
+- Helps you learn to read Japanese while translating
 
 ### Dictionary Mode
 - Click **Dictionary** button in popup to enter word selection mode

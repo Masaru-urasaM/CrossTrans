@@ -65,6 +65,7 @@ class Config:
         # Replace mode setting
         "quick_replace": False,  # False = Manual Replace (preview), True = Quick Replace (immediate)
         "model_rotation": False,  # Try other models before switching keys on failure
+        "furigana_enabled": True,  # Show furigana (reading guides) for Japanese source text
     }
 
     def __init__(self):
@@ -328,6 +329,16 @@ class Config:
     def set_model_rotation(self, enabled: bool):
         """Set model rotation on quota failure."""
         self._config['model_rotation'] = enabled
+        self.save()
+
+    # Furigana setting
+    def get_furigana_enabled(self) -> bool:
+        """Get whether furigana (reading guides) is enabled for Japanese text."""
+        return self._config.get('furigana_enabled', False)
+
+    def set_furigana_enabled(self, enabled: bool):
+        """Set furigana mode for Japanese text."""
+        self._config['furigana_enabled'] = enabled
         self.save()
 
     def restore_defaults(self):

@@ -145,7 +145,7 @@ class ExpandedTranslationWindow:
 
         # Mouse wheel scroll only
         expanded_text.bind('<MouseWheel>',
-            lambda e: expanded_text.yview_scroll(int(-1*(e.delta/120)), "units"))
+            lambda e: expanded_text.yview_scroll(int(-3*(e.delta/120)), "units"))
 
         # Keyboard shortcuts
         expanded.bind('<Escape>', lambda e: expanded.destroy())

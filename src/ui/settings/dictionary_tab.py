@@ -141,7 +141,7 @@ class DictionaryTabMixin:
 
             # Mouse wheel scrolling
             def _on_installed_mousewheel(event):
-                installed_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+                installed_canvas.yview_scroll(int(-3 * (event.delta / 120)), "units")
             installed_canvas.bind("<MouseWheel>", _on_installed_mousewheel)
             installed_inner_frame.bind("<MouseWheel>", _on_installed_mousewheel)
 
@@ -276,7 +276,7 @@ class DictionaryTabMixin:
         # Mouse wheel scrolling (only when canvas has focus)
         def on_mousewheel(event):
             if self.nlp_canvas.winfo_exists():
-                self.nlp_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+                self.nlp_canvas.yview_scroll(int(-3*(event.delta/120)), "units")
 
         self.nlp_canvas.bind("<MouseWheel>", on_mousewheel)
         self.nlp_scrollable_frame.bind("<MouseWheel>", on_mousewheel)
