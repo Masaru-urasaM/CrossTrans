@@ -563,8 +563,7 @@ class DictionaryTabMixin:
         from src.core.nlp_manager import nlp_manager
 
         if success:
-            # Update config
-            self.config.add_nlp_installed(language)
+            # Config already updated by nlp_manager.install() after verification
 
             # Show success animation in progress bar (reset color to green)
             self.nlp_progress_label.config(text=f"✓ {language} installed successfully!", foreground='#28a745')

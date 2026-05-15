@@ -564,6 +564,7 @@ class NLPManager:
         self._tokenizers: Dict[str, any] = {}
         self._installed_cache: Dict[str, bool] = {}
         self._udpipe_cache: Dict[str, any] = {}  # Cache loaded UDPipe models
+        self._subprocess_languages: set = set()  # Languages that need subprocess tokenization
 
     def set_config(self, config):
         """Set config reference."""
@@ -592,10 +593,17 @@ class NLPManager:
             # Invalidate Python's import cache to detect newly installed packages
             importlib.invalidate_caches()
 
-            # Remove module from sys.modules if previously imported (allows re-detection)
+            # Remove module and parent modules from sys.modules if previously imported.
+            # For dotted names like "ufal.udpipe", a stale cached "ufal" parent module
+            # can prevent Python from finding newly installed "ufal.udpipe".
             module_name = pack.module_check
-            if module_name in sys.modules:
-                del sys.modules[module_name]
+            modules_to_clear = [module_name]
+            parts = module_name.split('.')
+            for i in range(len(parts) - 1):
+                modules_to_clear.append('.'.join(parts[:i + 1]))
+            for mod_name in modules_to_clear:
+                if mod_name in sys.modules:
+                    del sys.modules[mod_name]
 
             # For EXE builds, also check if package exists in custom directory
             if is_frozen():
@@ -606,29 +614,57 @@ class NLPManager:
                 pkg_init = os.path.join(custom_dir, pkg_name, "__init__.py")
                 pkg_file = os.path.join(custom_dir, f"{pkg_name}.py")
 
-                if not (os.path.isdir(pkg_path) or os.path.exists(pkg_init) or os.path.exists(pkg_file)):
-                    # Package not found in custom dir
-                    logging.debug(f"Package {module_name} not found in custom dir: {custom_dir}")
+                # Also check for C extension files (.pyd on Windows, .so on Linux)
+                # e.g., ufal/udpipe.cp311-win_amd64.pyd
+                has_extension = False
+                if '.' in module_name:
+                    parent_dir = os.path.join(custom_dir, os.sep.join(parts[:-1]))
+                    ext_name = parts[-1]
+                    if os.path.isdir(parent_dir):
+                        import glob as glob_module
+                        pyd_matches = glob_module.glob(os.path.join(parent_dir, f"{ext_name}*.pyd"))
+                        so_matches = glob_module.glob(os.path.join(parent_dir, f"{ext_name}*.so"))
+                        has_extension = bool(pyd_matches or so_matches)
+
+                if not (os.path.isdir(pkg_path) or os.path.exists(pkg_init)
+                        or os.path.exists(pkg_file) or has_extension):
+                    logging.info(f"[IS_INSTALLED] {module_name} not found in custom dir: {custom_dir} "
+                                 f"(dir={os.path.isdir(pkg_path)}, init={os.path.exists(pkg_init)}, "
+                                 f"py={os.path.exists(pkg_file)}, ext={has_extension})")
                     self._installed_cache[language] = False
                     return False
 
-            importlib.import_module(pack.module_check)
+            direct_import_ok = False
+            try:
+                importlib.import_module(pack.module_check)
+                direct_import_ok = True
+            except (ImportError, Exception) as e:
+                logging.info(f"[IS_INSTALLED] Direct import failed for {language} "
+                             f"({pack.module_check}): {e}")
+
+            if not direct_import_ok:
+                # In EXE mode, system Python may have a different version than the
+                # bundled Python. C extensions installed by system pip won't load here,
+                # but they work fine via subprocess. Fall back to subprocess check.
+                if is_frozen() and self._check_import_subprocess(pack.module_check):
+                    logging.info(f"[IS_INSTALLED] {language} importable via subprocess (EXE mode)")
+                    self._subprocess_languages.add(language)
+                else:
+                    self._installed_cache[language] = False
+                    return False
 
             # For UDPipe languages, check if model file exists
             if pack.udpipe_model:
                 model_path = get_udpipe_model_path(pack.udpipe_model)
                 if not os.path.exists(model_path):
+                    logging.info(f"[IS_INSTALLED] UDPipe model missing: {model_path}")
                     self._installed_cache[language] = False
                     return False
 
             self._installed_cache[language] = True
             return True
-        except ImportError:
-            self._installed_cache[language] = False
-            return False
         except Exception as e:
-            # Catch any other exception (permission errors, etc.)
-            logging.warning(f"Error checking {language} installation: {e}")
+            logging.warning(f"[IS_INSTALLED] Error checking {language}: {e}")
             self._installed_cache[language] = False
             return False
 
@@ -814,6 +850,25 @@ class NLPManager:
             # Clear cache and update config
             self._installed_cache.pop(language, None)
             self._tokenizers.pop(language, None)
+            self._subprocess_languages.discard(language)
+
+            # Verify the installation actually works before reporting success.
+            # pip may exit 0 but the package could be unimportable (wrong Python
+            # version for C extensions, missing DLLs, EXE file path issues, etc.)
+            if progress_callback:
+                progress_callback("Verifying installation...", 90)
+
+            if not self.is_installed(language):
+                logging.error(f"Post-install verification failed for {language}: "
+                              f"pip succeeded but is_installed() returned False")
+                return False, (
+                    f"{language} package was downloaded but cannot be loaded.\n\n"
+                    "Possible causes:\n"
+                    "- Python version mismatch between the app and system Python\n"
+                    "- Missing system libraries (Visual C++ Redistributable)\n"
+                    "- Package binary incompatibility\n\n"
+                    "Try installing the matching Python version or check the log for details."
+                )
 
             if self.config:
                 installed = self.config.get('nlp_installed', [])
@@ -926,6 +981,7 @@ class NLPManager:
             #    This MUST happen BEFORE pip uninstall or files may be locked
             self._installed_cache.pop(language, None)
             self._tokenizers.pop(language, None)
+            self._subprocess_languages.discard(language)
 
             # Remove module from sys.modules to release file handles
             module_name = pack.module_check
@@ -1192,6 +1248,165 @@ class NLPManager:
             List of tokens
         """
         return re.findall(r'\S+', text)
+
+    def _check_import_subprocess(self, module_name: str) -> bool:
+        """Check if a module is importable via system Python subprocess.
+
+        Used in EXE mode when direct import fails (Python version mismatch).
+        The system Python that pip used may have a different version than the
+        bundled Python in the EXE, so C extensions work there but not here.
+
+        Args:
+            module_name: Module to check (e.g., "ufal.udpipe", "fugashi")
+
+        Returns:
+            True if system Python can import the module
+        """
+        python_exe = get_python_executable()
+        if not python_exe:
+            return False
+
+        try:
+            env = None
+            if is_frozen():
+                custom_dir = get_custom_packages_dir()
+                env = os.environ.copy()
+                pythonpath = env.get('PYTHONPATH', '')
+                env['PYTHONPATH'] = f"{custom_dir};{pythonpath}" if pythonpath else custom_dir
+
+            result = subprocess.run(
+                [python_exe, "-c", f"import {module_name}; print('OK')"],
+                capture_output=True, text=True, timeout=15,
+                stdin=subprocess.DEVNULL, env=env,
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+            )
+            return result.returncode == 0 and 'OK' in result.stdout
+        except Exception as e:
+            logging.debug(f"Subprocess import check failed for {module_name}: {e}")
+            return False
+
+    def _safe_tokenize_subprocess(self, text: str, language: str) -> List[str]:
+        """Tokenize text via system Python subprocess.
+
+        Fallback for EXE mode when the bundled Python can't import C extensions
+        but the system Python (used for pip install) can.
+
+        Args:
+            text: Text to tokenize
+            language: Language name
+
+        Returns:
+            List of tokens, or simple whitespace tokens if subprocess fails
+        """
+        import json
+
+        pack = LANGUAGE_PACKS.get(language)
+        if not pack:
+            return self._simple_tokenize(text)
+
+        script = self._build_subprocess_tokenize_script(language)
+        if not script:
+            return self._simple_tokenize(text)
+
+        try:
+            python_exe = get_python_executable()
+            if not python_exe:
+                return self._simple_tokenize(text)
+
+            env = None
+            if is_frozen():
+                custom_dir = get_custom_packages_dir()
+                env = os.environ.copy()
+                pythonpath = env.get('PYTHONPATH', '')
+                env['PYTHONPATH'] = f"{custom_dir};{pythonpath}" if pythonpath else custom_dir
+
+            result = subprocess.run(
+                [python_exe, "-c", script],
+                input=text,
+                capture_output=True, text=True, timeout=15,
+                env=env, encoding='utf-8',
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                output = json.loads(result.stdout.strip())
+                if isinstance(output, list):
+                    return output
+                elif isinstance(output, dict) and "error" in output:
+                    logging.warning(f"Subprocess tokenize error for {language}: {output['error']}")
+            else:
+                logging.warning(f"Subprocess tokenize failed for {language} (code {result.returncode})")
+
+        except subprocess.TimeoutExpired:
+            logging.warning(f"Subprocess tokenize timed out for {language}")
+        except Exception as e:
+            logging.warning(f"Subprocess tokenize exception for {language}: {e}")
+
+        return self._simple_tokenize(text)
+
+    def _build_subprocess_tokenize_script(self, language: str) -> Optional[str]:
+        """Build a Python script string for subprocess tokenization.
+
+        Args:
+            language: Language name
+
+        Returns:
+            Python script string, or None if language not supported
+        """
+        pack = LANGUAGE_PACKS.get(language)
+        if not pack:
+            return None
+
+        header = (
+            "import sys, json\n"
+            "sys.stdout.reconfigure(encoding='utf-8')\n"
+            "text = sys.stdin.read()\n"
+            "try:\n"
+        )
+        footer = (
+            "    print(json.dumps(result, ensure_ascii=False))\n"
+            "except Exception as e:\n"
+            '    print(json.dumps({"error": str(e)}))\n'
+        )
+
+        if language == "Japanese":
+            body = (
+                "    import fugashi\n"
+                "    tagger = fugashi.Tagger()\n"
+                "    result = [word.surface for word in tagger(text)]\n"
+            )
+        elif language in ("Chinese (Simplified)", "Chinese (Traditional)"):
+            body = (
+                "    import jieba\n"
+                "    result = list(jieba.cut(text))\n"
+            )
+        elif language == "Korean":
+            body = (
+                "    from kiwipiepy import Kiwi\n"
+                "    kiwi = Kiwi()\n"
+                "    result = [token.form for token in kiwi.tokenize(text)]\n"
+            )
+        elif language == "Thai":
+            body = (
+                "    from pythainlp.tokenize import word_tokenize\n"
+                "    result = word_tokenize(text)\n"
+            )
+        elif pack.udpipe_model:
+            model_path = get_udpipe_model_path(pack.udpipe_model).replace('\\', '\\\\')
+            body = (
+                "    from ufal.udpipe import Model, Pipeline, ProcessingError\n"
+                f"    model = Model.load(r'{model_path}')\n"
+                "    if not model:\n"
+                '        raise RuntimeError("Failed to load UDPipe model")\n'
+                '    pipeline = Pipeline(model, "tokenize", Pipeline.DEFAULT, Pipeline.NONE, "horizontal")\n'
+                "    error = ProcessingError()\n"
+                "    processed = pipeline.process(text, error)\n"
+                "    result = processed.split()\n"
+            )
+        else:
+            return None
+
+        return header + body + footer
 
     def _safe_tokenize_vietnamese(self, text: str) -> List[str]:
         """Tokenize Vietnamese using subprocess to isolate potential native code crashes.
@@ -1535,12 +1750,22 @@ except Exception as e:
     def _load_tokenizer(self, language: str):
         """Load tokenizer for a language.
 
+        If the language needs subprocess mode (EXE Python version mismatch),
+        uses subprocess-based tokenization via system Python automatically.
+
         Args:
             language: Language name
         """
         pack = LANGUAGE_PACKS.get(language)
         if not pack:
             self._tokenizers[language] = None
+            return
+
+        # If this language was marked as subprocess-only (EXE mode, direct
+        # import failed but system Python can import it), use subprocess
+        if language in self._subprocess_languages:
+            logging.info(f"[LOAD_TOKENIZER] {language}: using subprocess mode (EXE compatibility)")
+            self._tokenizers[language] = lambda t, lang=language: self._safe_tokenize_subprocess(t, lang)
             return
 
         try:
@@ -1603,7 +1828,13 @@ except Exception as e:
 
         except Exception as e:
             logging.error(f"Failed to load tokenizer for {language}: {e}")
-            self._tokenizers[language] = None
+            # Last resort: if direct import failed but subprocess works, use that
+            if is_frozen() and self._check_import_subprocess(pack.module_check):
+                logging.info(f"[LOAD_TOKENIZER] {language}: falling back to subprocess mode")
+                self._subprocess_languages.add(language)
+                self._tokenizers[language] = lambda t, lang=language: self._safe_tokenize_subprocess(t, lang)
+            else:
+                self._tokenizers[language] = None
 
     def verify_installation(self, language: str) -> bool:
         """Verify that a language pack is properly installed and working.
