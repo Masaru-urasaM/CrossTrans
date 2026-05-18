@@ -5,7 +5,7 @@ Handles dictionary mode UI including NLP language detection,
 language selection dialogs, and word button popup.
 """
 import tkinter as tk
-from tkinter import BOTH, X, LEFT, RIGHT
+from tkinter import BOTH, X, LEFT, RIGHT, BOTTOM
 import threading
 import logging
 from typing import Optional, Callable
@@ -439,10 +439,17 @@ class DictionaryPopup:
 
         # Word button frame with language for NLP tokenization
         def on_lookup(selected_words):
-            self._do_lookup(selected_words, target_language)
+            all_words = list(selected_words)
+            all_words.extend(custom_boxes.get_all_phrases())
+            if all_words:
+                self._do_lookup(all_words, target_language)
 
         def on_no_selection():
-            self.toast.show_warning_with_shake("Please select a word first")
+            box_phrases = custom_boxes.get_all_phrases()
+            if box_phrases:
+                self._do_lookup(box_phrases, target_language)
+            else:
+                self.toast.show_warning_with_shake("Please select a word or enter a custom phrase")
 
         dict_frame = WordButtonFrame(
             main_frame,
@@ -455,6 +462,12 @@ class DictionaryPopup:
         )
         dict_frame.set_exit_callback(dict_popup.destroy)
         dict_frame.pack(fill=BOTH, expand=True)
+
+        # Custom word boxes (between text area and action buttons)
+        from src.ui.custom_word_boxes import CustomWordBoxesFrame
+        custom_boxes = CustomWordBoxesFrame(dict_frame.frame)
+        dict_frame.insert_custom_widget(custom_boxes.frame)
+        dict_frame.set_drop_target(custom_boxes)
 
         # Store reference for animation control (so stop_dictionary_animation() works)
         self.quick_translate_manager._dict_popup_frame = dict_frame

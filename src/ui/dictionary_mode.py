@@ -27,7 +27,8 @@ class WordLabel:
     """Individual clickable word label that flows in text."""
 
     def __init__(self, parent_text: tk.Text, word: str, index: int,
-                 on_click: Callable, on_drag_enter: Callable):
+                 on_click: Callable, on_drag_enter: Callable,
+                 on_right_click: Optional[Callable] = None):
         """Initialize word label.
 
         Args:
@@ -36,12 +37,14 @@ class WordLabel:
             index: Index of this word in the sentence
             on_click: Callback when clicked (index, event)
             on_drag_enter: Callback when mouse drags over (index)
+            on_right_click: Callback when right-clicked for drag-to-box (word, event)
         """
         self.word = word
         self.index = index
         self.selected = False
         self.on_click = on_click
         self.on_drag_enter = on_drag_enter
+        self.on_right_click = on_right_click
         self.parent_text = parent_text
 
         # Create label (will be embedded in Text widget)
@@ -54,12 +57,18 @@ class WordLabel:
 
         # Bind events
         self.label.bind('<Button-1>', self._handle_click)
+        self.label.bind('<Button-3>', self._handle_right_click)
         self.label.bind('<Enter>', self._handle_enter)
         self.label.bind('<Leave>', self._handle_leave)
 
     def _handle_click(self, event):
         """Handle mouse click on word."""
         self.on_click(self.index, event)
+
+    def _handle_right_click(self, event):
+        """Handle right-click to initiate drag-to-box."""
+        if self.on_right_click:
+            self.on_right_click(self.word, event)
 
     def _handle_enter(self, event):
         """Handle mouse entering word area."""
@@ -123,6 +132,12 @@ class WordButtonFrame:
         self.selected_indices: set[int] = set()
         self.anchor_index: Optional[int] = None
         self.drag_start_index: Optional[int] = None
+
+        # Drag-to-box state
+        self._drop_target = None
+        self._drag_ghost = None
+        self._dragging_word = None
+        self._drag_moved = False
 
         # Main container frame
         self.frame = ttk.Frame(parent)
@@ -248,7 +263,8 @@ class WordButtonFrame:
                     label = WordLabel(
                         self.text_widget, word, len(self.word_labels),
                         on_click=self._on_word_click,
-                        on_drag_enter=self._on_word_drag_enter
+                        on_drag_enter=self._on_word_drag_enter,
+                        on_right_click=self._start_drag_to_box
                     )
                     self.word_labels.append(label)
                     self.text_widget.window_create(tk.END, window=label.label)
@@ -504,6 +520,78 @@ class WordButtonFrame:
     def set_exit_callback(self, callback: Callable):
         """Set the exit button callback."""
         self._on_exit = callback
+
+    def set_drop_target(self, custom_boxes_frame):
+        """Set the CustomWordBoxesFrame as drop target for right-click drag."""
+        self._drop_target = custom_boxes_frame
+
+    def insert_custom_widget(self, widget):
+        """Insert a widget between text area and action buttons.
+
+        Repacks text_widget so the custom widget sits below it but above action_frame.
+        """
+        self.text_widget.pack_forget()
+        widget.pack(in_=self.frame, side=BOTTOM, fill=X, padx=5, pady=(5, 0))
+        self.text_widget.pack(side=TOP, fill=BOTH, expand=True, padx=5, pady=5)
+
+    def _start_drag_to_box(self, word: str, event):
+        """Start dragging a word to a custom box (right-click initiated)."""
+        if not self._drop_target:
+            return
+
+        self._dragging_word = word
+        self._drag_moved = False
+
+        self._drag_ghost = tk.Toplevel(self.frame)
+        self._drag_ghost.overrideredirect(True)
+        self._drag_ghost.attributes('-topmost', True)
+        ghost_label = tk.Label(
+            self._drag_ghost, text=word,
+            font=('Segoe UI', 11, 'bold'),
+            bg='#fd7e14', fg='#ffffff',
+            padx=4, pady=2
+        )
+        ghost_label.pack()
+        self._drag_ghost.geometry(f"+{event.x_root + 12}+{event.y_root + 8}")
+
+        self.frame.bind_all('<B3-Motion>', self._drag_motion)
+        self.frame.bind_all('<ButtonRelease-3>', self._end_drag)
+
+    def _drag_motion(self, event):
+        """Move ghost label and highlight target box."""
+        self._drag_moved = True
+        if self._drag_ghost:
+            self._drag_ghost.geometry(f"+{event.x_root + 12}+{event.y_root + 8}")
+
+        if self._drop_target:
+            self._drop_target.clear_all_highlights()
+            box = self._drop_target.get_box_at_position(event.x_root, event.y_root)
+            if box:
+                box.set_highlight(True)
+
+    def _end_drag(self, event):
+        """End drag - drop word into target box or cancel."""
+        try:
+            self.frame.unbind_all('<B3-Motion>')
+            self.frame.unbind_all('<ButtonRelease-3>')
+        except tk.TclError:
+            pass
+
+        if self._drag_ghost:
+            try:
+                self._drag_ghost.destroy()
+            except tk.TclError:
+                pass
+            self._drag_ghost = None
+
+        if self._drop_target and self._dragging_word and self._drag_moved:
+            self._drop_target.clear_all_highlights()
+            box = self._drop_target.get_box_at_position(event.x_root, event.y_root)
+            if box:
+                box.add_word_tag(self._dragging_word)
+
+        self._dragging_word = None
+        self._drag_moved = False
 
     def pack(self, **kwargs):
         """Pack the main frame."""

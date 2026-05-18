@@ -1128,8 +1128,9 @@ class QuickTranslateManager:
         dialog.title("Select Source Language")
         dialog.configure(bg='#2b2b2b')
         dialog.attributes('-topmost', True)
-        dialog.transient(self.root)  # Make child of root window
-        dialog.grab_set()            # Modal: block parent interaction
+        dialog.lift()
+        dialog.focus_force()
+        dialog.after(100, lambda: dialog.attributes('-topmost', False) if dialog.winfo_exists() else None)
 
         # Center on mouse position - taller if showing install prompt
         w = 400
@@ -1143,10 +1144,9 @@ class QuickTranslateManager:
         frame.pack(fill=BOTH, expand=True)
 
         def open_settings_dict():
-            dialog.grab_release()  # Release grab before destroying
             dialog.destroy()
             if self._on_open_settings_dictionary_tab:
-                self.root.after(50, self._on_open_settings_dictionary_tab)  # Delay for focus settle
+                self.root.after(50, self._on_open_settings_dictionary_tab)
 
         if detected_but_not_installed and suggested_lang:
             # Case: Language detected but not installed - show prominent install option
@@ -1217,14 +1217,11 @@ class QuickTranslateManager:
         def confirm():
             selected = lang_var.get()
             if selected:
-                dialog.grab_release()  # Release grab before destroying
                 dialog.destroy()
-                # Delay for focus settle before opening dictionary popup
                 self.root.after(50, lambda: self._open_dictionary_with_language(
                     text_to_analyze, selected, self._current_trial_info))
 
         def cancel():
-            dialog.grab_release()
             dialog.destroy()
 
         confirm_kwargs = {"text": "Confirm", "command": confirm, "width": 10}
@@ -1365,13 +1362,19 @@ class QuickTranslateManager:
 
         # Word button frame with language for NLP tokenization
         def on_lookup(selected_words):
-            """Lookup callback receives list of individual words."""
-            if self._on_dictionary_lookup:
-                self._on_dictionary_lookup(selected_words, self._current_target_lang)
+            """Lookup callback receives list of individual words + custom box phrases."""
+            all_words = list(selected_words)
+            all_words.extend(custom_boxes.get_all_phrases())
+            if all_words and self._on_dictionary_lookup:
+                self._on_dictionary_lookup(all_words, self._current_target_lang)
 
         def on_no_selection():
-            """Show shake toast when no word selected."""
-            self.toast.show_warning_with_shake("Please select a word first")
+            """Check custom boxes before showing warning."""
+            box_phrases = custom_boxes.get_all_phrases()
+            if box_phrases and self._on_dictionary_lookup:
+                self._on_dictionary_lookup(box_phrases, self._current_target_lang)
+            else:
+                self.toast.show_warning_with_shake("Please select a word or enter a custom phrase")
 
         dict_frame = WordButtonFrame(
             main_frame,
@@ -1384,6 +1387,12 @@ class QuickTranslateManager:
         )
         dict_frame.set_exit_callback(dict_popup.destroy)
         dict_frame.pack(fill=BOTH, expand=True)
+
+        # Custom word boxes (between text area and action buttons)
+        from src.ui.custom_word_boxes import CustomWordBoxesFrame
+        custom_boxes = CustomWordBoxesFrame(dict_frame.frame)
+        dict_frame.insert_custom_widget(custom_boxes.frame)
+        dict_frame.set_drop_target(custom_boxes)
 
         # Store reference for animation control
         self._dict_popup_frame = dict_frame

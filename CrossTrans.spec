@@ -1,7 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-# CrossTrans v1.9.11 - PyInstaller Build Configuration
+# CrossTrans v1.9.13 - PyInstaller Build Configuration
 # Build command: pyinstaller CrossTrans.spec --clean --noconfirm
+
+from PyInstaller.utils.hooks import collect_data_files
 
 a = Analysis(
     ['main.py'],
@@ -10,6 +12,7 @@ a = Analysis(
     datas=[
         ('src/assets', 'src/assets'),  # Icons and images
         ('docs/screenshots', 'docs/screenshots'),  # Guide tab screenshots
+        *collect_data_files('pykakasi'),  # Furigana dictionary data files
     ],
     hiddenimports=[
         # GUI framework

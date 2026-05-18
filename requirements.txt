@@ -13,6 +13,7 @@ tkinterdnd2>=0.3.0
 windnd>=1.0.7
 PyPDF2>=3.0.0
 PyMuPDF>=1.23.0  # For scanned PDF OCR support
+pykakasi>=2.2.1  # Furigana: offline kanji-to-hiragana conversion
 
 # Windows Hello authentication (OPTIONAL - requires Visual Studio Build Tools to compile)
 # Skip if you don't need fingerprint/face recognition - app will use password fallback
