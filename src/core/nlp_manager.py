@@ -74,19 +74,35 @@ def get_python_executable() -> Optional[str]:
         Path to Python executable, or None if not found
     """
     if not is_frozen():
-        # Running as normal Python script - sys.executable is correct
         return sys.executable
 
-    # Running as EXE - need to find system Python
     logging.info("Running as frozen EXE, searching for system Python...")
 
-    # Try common Python executable names
+    # Check cached working Python first (set by auto-retry on previous install)
+    try:
+        from config import Config
+        cfg = Config()
+        cached = cfg.get_nlp_working_python()
+        if cached and os.path.isfile(cached):
+            try:
+                result = subprocess.run(
+                    [cached, '--version'],
+                    capture_output=True, text=True, timeout=10,
+                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+                )
+                if result.returncode == 0 and 'Python' in result.stdout:
+                    logging.info(f"Using cached working Python: {cached}")
+                    return cached
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     python_names = ['python', 'python3', 'py']
 
     for name in python_names:
         python_path = shutil.which(name)
         if python_path:
-            # Verify it's actually Python by checking version
             try:
                 result = subprocess.run(
                     [python_path, '--version'],
@@ -101,15 +117,12 @@ def get_python_executable() -> Optional[str]:
             except Exception:
                 continue
 
-    # Try Windows-specific paths
     if sys.platform == 'win32':
-        # Check Python Launcher
         py_launcher = shutil.which('py')
         if py_launcher:
             logging.info(f"Found Python Launcher: {py_launcher}")
             return py_launcher
 
-        # Check common install locations
         common_paths = [
             os.path.expandvars(r'%LOCALAPPDATA%\Programs\Python\Python3*\python.exe'),
             os.path.expandvars(r'%PROGRAMFILES%\Python3*\python.exe'),
@@ -120,13 +133,69 @@ def get_python_executable() -> Optional[str]:
         for pattern in common_paths:
             matches = glob.glob(pattern)
             if matches:
-                # Sort to get latest version
                 matches.sort(reverse=True)
                 logging.info(f"Found Python at: {matches[0]}")
                 return matches[0]
 
     logging.error("Could not find system Python executable")
     return None
+
+
+def get_all_python_executables() -> List[str]:
+    """Discover all available Python interpreters on the system.
+
+    Uses the Windows Python Launcher (py -0p) and common install paths.
+    Returns a deduplicated list of verified Python executable paths.
+    """
+    found: Dict[str, str] = {}  # path -> version
+
+    if sys.platform == 'win32':
+        py_launcher = shutil.which('py')
+        if py_launcher:
+            try:
+                result = subprocess.run(
+                    [py_launcher, '-0p'],
+                    capture_output=True, text=True, timeout=10,
+                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.strip().splitlines():
+                        line = line.strip()
+                        if not line:
+                            continue
+                        parts = line.split(None, 1)
+                        if len(parts) == 2:
+                            ver_tag, path = parts
+                            path = path.strip().rstrip('*').strip()
+                            if os.path.isfile(path):
+                                found[os.path.normcase(path)] = ver_tag
+            except Exception as e:
+                logging.debug(f"py -0p failed: {e}")
+
+        import glob as glob_module
+        common_patterns = [
+            os.path.expandvars(r'%LOCALAPPDATA%\Programs\Python\Python3*\python.exe'),
+            os.path.expandvars(r'%PROGRAMFILES%\Python3*\python.exe'),
+        ]
+        for pattern in common_patterns:
+            for path in glob_module.glob(pattern):
+                found.setdefault(os.path.normcase(path), "")
+
+    verified = []
+    for path in found:
+        try:
+            result = subprocess.run(
+                [path, '--version'],
+                capture_output=True, text=True, timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+            )
+            if result.returncode == 0 and 'Python' in result.stdout:
+                verified.append(path)
+        except Exception:
+            continue
+
+    logging.info(f"Discovered {len(verified)} Python interpreters: {verified}")
+    return verified
 
 
 # Initialize custom packages path at module load time
@@ -873,21 +942,26 @@ class NLPManager:
                 logging.warning(f"Post-install verification failed for {language}: "
                                 f"pip succeeded but is_installed() returned False")
 
-                # Log available Python versions for diagnostics
-                if sys.platform == 'win32':
-                    try:
-                        diag = subprocess.run(
-                            ['py', '-0p'], capture_output=True, text=True, timeout=5,
-                            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
-                        )
-                        if diag.returncode == 0:
-                            logging.info(f"Available Python versions:\n{diag.stdout}")
-                    except Exception:
-                        pass
+                # Auto-retry with other Python versions (EXE mode only)
+                if is_frozen() and sys.platform == 'win32':
+                    if progress_callback:
+                        progress_callback("Trying other Python versions...", 92)
+                    retry_ok = self._retry_install_with_other_pythons(
+                        language, pack, python_exe, progress_callback)
+                    if retry_ok:
+                        if self.config:
+                            self.config.remove_nlp_basic_mode(language)
+                            installed = self.config.get('nlp_installed', [])
+                            if language not in installed:
+                                installed.append(language)
+                                self.config.set('nlp_installed', installed)
+                        if progress_callback:
+                            progress_callback(f"{language} installed successfully!", 100)
+                        logging.info(f"Auto-retry succeeded for {language}")
+                        return True, ""
 
+                # Auto-retry failed or not applicable — graceful degradation
                 if pack.whitespace_separated:
-                    # Whitespace-separated languages (Vietnamese, European) work
-                    # with basic tokenization -- no need to fail
                     files_exist = False
                     if is_frozen():
                         custom_dir = get_custom_packages_dir()
@@ -899,8 +973,7 @@ class NLPManager:
                         files_exist = True
 
                     if files_exist:
-                        logging.info(f"Falling back to basic tokenization for {language} "
-                                     f"(pip succeeded, import failed, whitespace-separated=True)")
+                        logging.info(f"Falling back to basic tokenization for {language}")
                         self._basic_mode_languages = getattr(self, '_basic_mode_languages', set())
                         self._basic_mode_languages.add(language)
 
@@ -916,7 +989,6 @@ class NLPManager:
 
                         return True, "BASIC_MODE"
 
-                # Non-whitespace languages or files not found -- real failure
                 logging.error(f"Post-install verification failed for {language}: "
                               f"no fallback available (whitespace_separated={pack.whitespace_separated})")
                 return False, (
@@ -947,6 +1019,99 @@ class NLPManager:
         except Exception as e:
             logging.error(f"Install error for {language}: {e}")
             return False, str(e)
+
+    def _retry_install_with_other_pythons(
+        self, language: str, pack, original_python: str,
+        progress_callback: Optional[Callable] = None
+    ) -> bool:
+        """Try reinstalling with other Python versions when initial verification fails.
+
+        Discovers all available Python interpreters, cleans the custom packages
+        directory, and retries pip install + verification with each one.
+
+        Returns True if any Python version produces a working installation.
+        """
+        all_pythons = get_all_python_executables()
+        original_norm = os.path.normcase(original_python) if original_python else ""
+        candidates = [p for p in all_pythons if os.path.normcase(p) != original_norm]
+
+        if not candidates:
+            logging.info("No alternative Python versions found for retry")
+            return False
+
+        logging.info(f"Retrying {language} install with {len(candidates)} "
+                     f"alternative Python(s): {candidates}")
+
+        custom_dir = get_custom_packages_dir()
+
+        for i, alt_python in enumerate(candidates):
+            try:
+                ver_result = subprocess.run(
+                    [alt_python, '--version'],
+                    capture_output=True, text=True, timeout=10,
+                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+                )
+                ver_str = ver_result.stdout.strip() if ver_result.returncode == 0 else "unknown"
+            except Exception:
+                ver_str = "unknown"
+
+            logging.info(f"[RETRY {i+1}/{len(candidates)}] Trying {alt_python} ({ver_str})")
+            if progress_callback:
+                progress_callback(f"Trying {ver_str}...", 92 + i)
+
+            # Clean custom packages directory
+            if os.path.isdir(custom_dir):
+                try:
+                    shutil.rmtree(custom_dir)
+                    os.makedirs(custom_dir, exist_ok=True)
+                    logging.info(f"Cleaned custom packages dir: {custom_dir}")
+                except Exception as e:
+                    logging.warning(f"Failed to clean {custom_dir}: {e}")
+                    continue
+
+            # Reinstall all packages with this Python
+            install_ok = True
+            for package in pack.packages:
+                pip_cmd = [alt_python, "-m", "pip", "install", package,
+                           "--quiet", "--disable-pip-version-check",
+                           "--target", custom_dir]
+                if package == "underthesea":
+                    pip_cmd.append("--no-deps")
+
+                try:
+                    result = subprocess.run(
+                        pip_cmd, capture_output=True, text=True,
+                        timeout=300, stdin=subprocess.DEVNULL,
+                        creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+                    )
+                    if result.returncode != 0:
+                        logging.warning(f"[RETRY] pip install {package} failed with "
+                                        f"{alt_python}: {result.stderr[:200]}")
+                        install_ok = False
+                        break
+                except Exception as e:
+                    logging.warning(f"[RETRY] pip install {package} error: {e}")
+                    install_ok = False
+                    break
+
+            if not install_ok:
+                continue
+
+            # Clear caches and verify
+            self._installed_cache.pop(language, None)
+            self._tokenizers.pop(language, None)
+            self._subprocess_languages.discard(language)
+
+            if self.is_installed(language):
+                logging.info(f"[RETRY] SUCCESS with {alt_python} ({ver_str})")
+                if self.config:
+                    self.config.set_nlp_working_python(alt_python)
+                return True
+
+            logging.info(f"[RETRY] Verification still failed with {alt_python}")
+
+        logging.warning(f"All {len(candidates)} alternative Python versions failed for {language}")
+        return False
 
     def _download_udpipe_model(self, model_name: str) -> Tuple[bool, str]:
         """Download UDPipe model from LINDAT repository.

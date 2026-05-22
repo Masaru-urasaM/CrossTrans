@@ -559,6 +559,15 @@ class Config:
         """Check if a language is in basic tokenization mode."""
         return language in self.get_nlp_basic_mode()
 
+    def get_nlp_working_python(self) -> Optional[str]:
+        """Get the cached working Python path for NLP packages."""
+        return self._config.get('nlp_working_python', None)
+
+    def set_nlp_working_python(self, path: str):
+        """Cache a verified working Python path for NLP packages."""
+        self._config['nlp_working_python'] = path
+        self.save()
+
     # Update check telemetry (local only)
     def record_update_check(self, success: bool, error_type: Optional[str] = None) -> None:
         """Record update check attempt for diagnostics (local only - no data sent externally).
