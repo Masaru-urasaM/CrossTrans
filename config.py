@@ -57,6 +57,7 @@ class Config:
         "provider_health": {},
         # NLP language packs for Dictionary mode
         "nlp_installed": [],  # List of installed language names (e.g., ["Vietnamese", "English"])
+        "nlp_basic_mode": [],  # Languages using basic (whitespace) tokenization as fallback
         # Trial mode settings
         "trial_mode_forced": False,  # User manually enabled trial mode
         "trial_last_api_check": "",  # ISO datetime of last API check
@@ -533,6 +534,30 @@ class Config:
     def has_any_nlp_installed(self) -> bool:
         """Check if any NLP language pack is installed."""
         return len(self.get_nlp_installed()) > 0
+
+    def get_nlp_basic_mode(self) -> List[str]:
+        """Get languages installed in basic tokenization mode."""
+        return self._config.get('nlp_basic_mode', [])
+
+    def add_nlp_basic_mode(self, language: str):
+        """Mark a language as using basic tokenization mode."""
+        basic = self.get_nlp_basic_mode()
+        if language not in basic:
+            basic.append(language)
+            self._config['nlp_basic_mode'] = basic
+            self.save()
+
+    def remove_nlp_basic_mode(self, language: str):
+        """Remove a language from basic tokenization mode."""
+        basic = self.get_nlp_basic_mode()
+        if language in basic:
+            basic.remove(language)
+            self._config['nlp_basic_mode'] = basic
+            self.save()
+
+    def is_nlp_basic_mode(self, language: str) -> bool:
+        """Check if a language is in basic tokenization mode."""
+        return language in self.get_nlp_basic_mode()
 
     # Update check telemetry (local only)
     def record_update_check(self, success: bool, error_type: Optional[str] = None) -> None:

@@ -558,7 +558,7 @@ class WordButtonFrame:
         self.frame.bind_all('<ButtonRelease-3>', self._end_drag)
 
     def _drag_motion(self, event):
-        """Move ghost label and highlight target box."""
+        """Move ghost label, highlight target box, and show drop line."""
         self._drag_moved = True
         if self._drag_ghost:
             self._drag_ghost.geometry(f"+{event.x_root + 12}+{event.y_root + 8}")
@@ -568,9 +568,12 @@ class WordButtonFrame:
             box = self._drop_target.get_box_at_position(event.x_root, event.y_root)
             if box:
                 box.set_highlight(True)
+                self._drop_target._show_drop_line(box, event.x_root, event.y_root)
+            else:
+                self._drop_target._hide_drop_line()
 
     def _end_drag(self, event):
-        """End drag - drop word into target box or cancel."""
+        """End drag - drop word into target box at cursor position or cancel."""
         try:
             self.frame.unbind_all('<B3-Motion>')
             self.frame.unbind_all('<ButtonRelease-3>')
@@ -586,9 +589,14 @@ class WordButtonFrame:
 
         if self._drop_target and self._dragging_word and self._drag_moved:
             self._drop_target.clear_all_highlights()
+            self._drop_target._hide_drop_line()
             box = self._drop_target.get_box_at_position(event.x_root, event.y_root)
             if box:
-                box.add_word_tag(self._dragging_word)
+                target_index = box.get_insert_index_at_coords(event.x_root, event.y_root)
+                box.insert_tag_at_position(self._dragging_word, target_index)
+        elif self._drop_target:
+            self._drop_target.clear_all_highlights()
+            self._drop_target._hide_drop_line()
 
         self._dragging_word = None
         self._drag_moved = False

@@ -146,6 +146,7 @@ class LanguagePack:
     module_check: str = ""  # module to import to check if installed
     udpipe_model: str = ""  # UDPipe model name if using UDPipe
     category: str = "Other"  # Category for grouping in UI
+    whitespace_separated: bool = True  # False for CJK/Thai where _simple_tokenize is useless
 
 
 @dataclass
@@ -257,7 +258,8 @@ LANGUAGE_PACKS: Dict[str, LanguagePack] = {
         packages=["fugashi", "unidic-lite"],
         size_mb=200,
         module_check="fugashi",
-        category="Asian"
+        category="Asian",
+        whitespace_separated=False
     ),
     "Chinese (Simplified)": LanguagePack(
         name="Chinese (Simplified)",
@@ -265,7 +267,8 @@ LANGUAGE_PACKS: Dict[str, LanguagePack] = {
         packages=["jieba"],
         size_mb=15,
         module_check="jieba",
-        category="Asian"
+        category="Asian",
+        whitespace_separated=False
     ),
     "Chinese (Traditional)": LanguagePack(
         name="Chinese (Traditional)",
@@ -273,7 +276,8 @@ LANGUAGE_PACKS: Dict[str, LanguagePack] = {
         packages=["jieba"],
         size_mb=15,
         module_check="jieba",
-        category="Asian"
+        category="Asian",
+        whitespace_separated=False
     ),
     "Korean": LanguagePack(
         name="Korean",
@@ -281,7 +285,8 @@ LANGUAGE_PACKS: Dict[str, LanguagePack] = {
         packages=["kiwipiepy"],
         size_mb=90,
         module_check="kiwipiepy",
-        category="Asian"
+        category="Asian",
+        whitespace_separated=False
     ),
     "Thai": LanguagePack(
         name="Thai",
@@ -289,7 +294,8 @@ LANGUAGE_PACKS: Dict[str, LanguagePack] = {
         packages=["pythainlp"],
         size_mb=50,
         module_check="pythainlp",
-        category="Asian"
+        category="Asian",
+        whitespace_separated=False
     ),
 
     # === EUROPEAN LANGUAGES (UDPipe models - Python 3.14 compatible) ===
@@ -577,8 +583,13 @@ class NLPManager:
             language: Language name (e.g., "Vietnamese", "English")
 
         Returns:
-            True if the language pack is installed
+            True if the language pack is installed (including basic mode)
         """
+        # Basic mode languages are considered installed (using simple tokenization)
+        if self.config and self.config.is_nlp_basic_mode(language):
+            self._installed_cache[language] = True
+            return True
+
         if language in self._installed_cache:
             return self._installed_cache[language]
 
@@ -859,8 +870,55 @@ class NLPManager:
                 progress_callback("Verifying installation...", 90)
 
             if not self.is_installed(language):
+                logging.warning(f"Post-install verification failed for {language}: "
+                                f"pip succeeded but is_installed() returned False")
+
+                # Log available Python versions for diagnostics
+                if sys.platform == 'win32':
+                    try:
+                        diag = subprocess.run(
+                            ['py', '-0p'], capture_output=True, text=True, timeout=5,
+                            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+                        )
+                        if diag.returncode == 0:
+                            logging.info(f"Available Python versions:\n{diag.stdout}")
+                    except Exception:
+                        pass
+
+                if pack.whitespace_separated:
+                    # Whitespace-separated languages (Vietnamese, European) work
+                    # with basic tokenization -- no need to fail
+                    files_exist = False
+                    if is_frozen():
+                        custom_dir = get_custom_packages_dir()
+                        pkg_name = pack.module_check.replace('.', os.sep)
+                        pkg_path = os.path.join(custom_dir, pkg_name)
+                        pkg_init = os.path.join(custom_dir, pkg_name, "__init__.py")
+                        files_exist = os.path.isdir(pkg_path) or os.path.exists(pkg_init)
+                    else:
+                        files_exist = True
+
+                    if files_exist:
+                        logging.info(f"Falling back to basic tokenization for {language} "
+                                     f"(pip succeeded, import failed, whitespace-separated=True)")
+                        self._basic_mode_languages = getattr(self, '_basic_mode_languages', set())
+                        self._basic_mode_languages.add(language)
+
+                        if self.config:
+                            installed = self.config.get('nlp_installed', [])
+                            if language not in installed:
+                                installed.append(language)
+                                self.config.set('nlp_installed', installed)
+                            self.config.add_nlp_basic_mode(language)
+
+                        if progress_callback:
+                            progress_callback(f"{language} installed with basic tokenization", 100)
+
+                        return True, "BASIC_MODE"
+
+                # Non-whitespace languages or files not found -- real failure
                 logging.error(f"Post-install verification failed for {language}: "
-                              f"pip succeeded but is_installed() returned False")
+                              f"no fallback available (whitespace_separated={pack.whitespace_separated})")
                 return False, (
                     f"{language} package was downloaded but cannot be loaded.\n\n"
                     "Possible causes:\n"
@@ -870,7 +928,9 @@ class NLPManager:
                     "Try installing the matching Python version or check the log for details."
                 )
 
+            # Full installation verified successfully -- clear basic mode if previously set
             if self.config:
+                self.config.remove_nlp_basic_mode(language)
                 installed = self.config.get('nlp_installed', [])
                 if language not in installed:
                     installed.append(language)
@@ -1759,6 +1819,20 @@ except Exception as e:
         pack = LANGUAGE_PACKS.get(language)
         if not pack:
             self._tokenizers[language] = None
+            return
+
+        # If this language is in basic mode (install succeeded but import failed,
+        # falls back to whitespace tokenization)
+        basic_mode_langs = getattr(self, '_basic_mode_languages', set())
+        if language in basic_mode_langs:
+            logging.info(f"[LOAD_TOKENIZER] {language}: using basic mode (simple tokenize)")
+            self._tokenizers[language] = self._simple_tokenize
+            return
+        if self.config and self.config.is_nlp_basic_mode(language):
+            logging.info(f"[LOAD_TOKENIZER] {language}: using basic mode from config")
+            self._basic_mode_languages = getattr(self, '_basic_mode_languages', set())
+            self._basic_mode_languages.add(language)
+            self._tokenizers[language] = self._simple_tokenize
             return
 
         # If this language was marked as subprocess-only (EXE mode, direct

@@ -563,15 +563,20 @@ class DictionaryTabMixin:
         from src.core.nlp_manager import nlp_manager
 
         if success:
-            # Config already updated by nlp_manager.install() after verification
+            is_basic_mode = (error == "BASIC_MODE")
 
-            # Show success animation in progress bar (reset color to green)
-            self.nlp_progress_label.config(text=f"✓ {language} installed successfully!", foreground='#28a745')
+            if is_basic_mode:
+                self.nlp_progress_label.config(
+                    text=f"ℹ {language} installed with basic tokenization",
+                    foreground='#17a2b8')
+            else:
+                self.nlp_progress_label.config(
+                    text=f"✓ {language} installed successfully!",
+                    foreground='#28a745')
             self.nlp_progress_bar['value'] = 100
 
-            # Flash green color effect
             if HAS_TTKBOOTSTRAP:
-                self.nlp_progress_bar.configure(bootstyle="success")
+                self.nlp_progress_bar.configure(bootstyle="info" if is_basic_mode else "success")
 
             # Delay before hiding progress and refreshing
             def finish_install():
