@@ -145,7 +145,9 @@ class TranslatorApp:
             on_open_settings=lambda: self._show_settings_tab("API Key"),
             on_open_settings_dictionary_tab=self._show_settings_dictionary_tab,
             on_dictionary_lookup=self._on_quick_translate_dictionary_lookup,
-            on_open_settings_hotkeys_tab=self._show_settings_hotkeys_tab
+            on_open_settings_hotkeys_tab=self._show_settings_hotkeys_tab,
+            on_re_translate=self._on_quick_translate_retranslate,
+            on_custom_prompt_send=self._on_quick_translate_custom_prompt_send
         )
 
         # Screenshot handler
@@ -331,6 +333,48 @@ class TranslatorApp:
         self.toast.show_success("Copied to clipboard!")
         # Reset button text after 1 second
         self.root.after(1000, lambda: self.quick_translate_manager.set_copy_button_text("Copy"))
+
+    def _on_quick_translate_retranslate(self):
+        """Force a fresh API translation of the current text (bypass cache).
+
+        Triggered by the popup "Re-translate" button. Runs off the UI thread so the
+        blocking API call doesn't freeze Tkinter; the result flows back through the
+        translation queue and re-renders the popup via _check_queue().
+        """
+        text = self.current_original
+        target_lang = self.current_target_lang
+        if not text:
+            self.toast.show_warning("Nothing to re-translate")
+            return
+
+        # Show the loading animation in place of the current popup.
+        self.quick_translate_manager.show_loading(target_lang)
+
+        def worker():
+            self.translation_service.redo_translation(text, target_lang)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_quick_translate_custom_prompt_send(self, raw_prompt: str):
+        """Send a freeform custom prompt from the popup edit box to the AI.
+
+        The entire box content is sent verbatim (no translate wrapper). Runs off the UI
+        thread; the result flows back through the translation queue and replaces the
+        popup content via _check_queue(). Freeform asks are not cached.
+        """
+        if not raw_prompt or not raw_prompt.strip():
+            self.toast.show_warning("Empty prompt")
+            return
+
+        target_lang = self.current_target_lang
+
+        # Show the loading animation in place of the edit popup.
+        self.quick_translate_manager.show_loading(target_lang)
+
+        def worker():
+            self.translation_service.ask_freeform(raw_prompt, target_lang)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _on_quick_translate_copy_and_replace(self):
         """Copy translated text and paste it into the source application.

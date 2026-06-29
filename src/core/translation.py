@@ -241,13 +241,40 @@ class TranslationService:
         return cleaned.strip()
 
     def translate_text(self, text: str, target_language: str,
-                       custom_prompt: Optional[str] = None) -> str:
-        """Translate text to target language using AI API."""
+                       custom_prompt: Optional[str] = None,
+                       skip_cache: bool = False) -> str:
+        """Translate text to target language using AI API.
+
+        Args:
+            text: Source text to translate.
+            target_language: Target language name.
+            custom_prompt: Optional extra instructions (disables caching for this call).
+            skip_cache: When True, bypass the history-backed cache and always call the
+                API (used by the popup "Re-translate" button to force a fresh result).
+        """
         has_custom_prompt = custom_prompt and custom_prompt.strip()
 
+        # Cache lookup: plain translations only (no custom prompt) and only when not
+        # explicitly skipped. Reuses the translation history as an exact-match cache so
+        # identical input is not re-sent to the API. On a hit we return early WITHOUT
+        # re-adding to history (avoids duplicate entries). See redo_translation() for the
+        # forced-refresh path.
+        if not has_custom_prompt and not skip_cache:
+            cached = self.history_manager.find_cached(text, target_language)
+            if cached is not None:
+                logging.info("Cache hit - returning stored translation, skipping API call")
+                return cached
+
         if has_custom_prompt:
-            # Has custom prompt → follow custom prompt, more flexible
-            base_prompt = f"""Translate the following text to {target_language}.
+            # Has custom prompt → follow custom prompt, more flexible.
+            # The source text MUST be embedded so the model has something to act on
+            # (this was previously omitted — see R2-bug fix).
+            base_prompt = f"""Translate the text below to {target_language}.
+
+===TEXT TO TRANSLATE===
+{text}
+===END OF TEXT===
+
 Only return the translation, no explanations or additional text.
 If the text is already in {target_language}, still provide a natural rephrasing.
 
@@ -278,8 +305,12 @@ Rules (DO NOT include these in your response):
             # Clean up AI thinking tags from result
             result = self._strip_thinking_tags(result)
 
-            # Save to history on success
-            self.history_manager.add_entry(text, result, target_language)
+            # Save to history on success. Custom-prompt results are tagged 'custom' so the
+            # R1 cache (find_cached) never serves them in place of a plain translation,
+            # while still keeping them visible in the history viewer.
+            self.history_manager.add_entry(
+                text, result, target_language,
+                source_type='custom' if has_custom_prompt else 'text')
             return result
         except TrialAPIError as e:
             return f"Error: {str(e)}"
@@ -470,6 +501,111 @@ Rules (DO NOT include these in your response):
             trial_info = self.get_trial_info()
             if trial_info:
                 # Mark as exhausted if this is a quota error
+                if "exhausted" in str(e).lower() or "quota" in str(e).lower():
+                    trial_info['is_exhausted'] = True
+            self.translation_queue.put(("", error_msg, target_language, trial_info))
+        except Exception as e:
+            error_msg = f"Error: {str(e)}"
+            logging.error(error_msg)
+            self.translation_queue.put(("", error_msg, target_language, None))
+
+    def redo_translation(self, text: str, target_language: str) -> None:
+        """Force a fresh API translation of already-known text (bypass cache).
+
+        Used by the Quick Translate popup "Re-translate" button when a cached or
+        previous result is bad, so the user is never stuck with it. Unlike
+        do_translation(), this does NOT capture the selection again and does NOT apply
+        COOLDOWN — it operates on text already obtained. The result is pushed to
+        translation_queue in the same 5-tuple format as do_translation().
+        """
+        logging.info(f"Re-translating to {target_language} (forced, skip cache)...")
+
+        try:
+            if not self._configure_api():
+                error_msg = "Error: No API key configured.\n\nPlease add your AI API key in Settings.\n\nGo to Settings > Guide tab for instructions on getting a free API key."
+                logging.warning(error_msg)
+                self.translation_queue.put(("", error_msg, target_language, None))
+                return
+
+            if not text:
+                error_msg = "No text to re-translate."
+                logging.warning(error_msg)
+                self.translation_queue.put(("", error_msg, target_language, None))
+                return
+
+            # Force a real API call, bypassing the history-backed cache.
+            translated = self.translate_text(text, target_language, skip_cache=True)
+
+            # Generate furigana offline if enabled and source is Japanese (plain path).
+            furigana_text = None
+            if self.config.get_furigana_enabled() and self._is_japanese_text(text):
+                logging.info("Japanese text detected, generating furigana offline")
+                furigana_text = self.generate_furigana(text)
+
+            logging.info("Re-translation complete!")
+
+            trial_info = self.get_trial_info()
+            self.translation_queue.put((text, translated, target_language, trial_info, furigana_text))
+        except TrialAPIError as e:
+            error_msg = f"Error: {str(e)}"
+            logging.error(error_msg)
+            trial_info = self.get_trial_info()
+            if trial_info:
+                if "exhausted" in str(e).lower() or "quota" in str(e).lower():
+                    trial_info['is_exhausted'] = True
+            self.translation_queue.put(("", error_msg, target_language, trial_info))
+        except Exception as e:
+            error_msg = f"Error: {str(e)}"
+            logging.error(error_msg)
+            self.translation_queue.put(("", error_msg, target_language, None))
+
+    def ask_freeform(self, raw_prompt: str, target_language: str) -> None:
+        """Send a raw user-authored prompt to the AI verbatim (freeform ask).
+
+        Used by the Quick Translate popup "Custom Prompt" mode: the entire editable-box
+        content IS the prompt — there is NO translate wrapper, so this does not depend on
+        the custom_prompt branch of translate_text(). Freeform asks are one-offs: the
+        result is NOT written to history and is never served from / written to the R1
+        cache. The result is pushed to translation_queue in the same 5-tuple format as
+        do_translation() (furigana off for freeform).
+
+        Args:
+            raw_prompt: The exact prompt text to send to the model.
+            target_language: Target language (used only for trial info / display context).
+        """
+        logging.info("Freeform custom-prompt request...")
+
+        try:
+            if not self._configure_api():
+                error_msg = "Error: No API key configured.\n\nPlease add your AI API key in Settings.\n\nGo to Settings > Guide tab for instructions on getting a free API key."
+                logging.warning(error_msg)
+                self.translation_queue.put(("", error_msg, target_language, None))
+                return
+
+            if not raw_prompt or not raw_prompt.strip():
+                error_msg = "No prompt provided."
+                logging.warning(error_msg)
+                self.translation_queue.put(("", error_msg, target_language, None))
+                return
+
+            # Raw path: send the prompt verbatim, bypassing the translate wrapper.
+            if self._is_trial_mode and self.trial_client:
+                result = self._translate_trial(raw_prompt)
+            else:
+                result = self.api_manager.translate(raw_prompt)
+
+            result = self._strip_thinking_tags(result)
+
+            logging.info("Freeform custom-prompt complete!")
+
+            # Intentionally NOT saved to history (one-off ask, not a reusable translation).
+            trial_info = self.get_trial_info()
+            self.translation_queue.put((raw_prompt, result, target_language, trial_info, None))
+        except TrialAPIError as e:
+            error_msg = f"Error: {str(e)}"
+            logging.error(error_msg)
+            trial_info = self.get_trial_info()
+            if trial_info:
                 if "exhausted" in str(e).lower() or "quota" in str(e).lower():
                     trial_info['is_exhausted'] = True
             self.translation_queue.put(("", error_msg, target_language, trial_info))

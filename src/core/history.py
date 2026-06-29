@@ -4,7 +4,7 @@ Handles saving, retrieving, and managing translation history.
 """
 import time
 import uuid
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 
 class HistoryManager:
@@ -53,6 +53,35 @@ class HistoryManager:
     def get_history(self) -> List[Dict[str, Any]]:
         """Get full history list."""
         return self.config.get('history', [])
+
+    def find_cached(self, original: str, target_lang: str) -> Optional[str]:
+        """Return a stored translation for an exact (original, target_lang) match.
+
+        Reuses the translation history as a lookup cache so identical input is not
+        re-sent to the API. Scans most-recent first (history is insert-at-front), so a
+        freshly re-translated entry wins over older ones. Error results are never
+        returned as cache hits.
+
+        Args:
+            original: Source text to match exactly.
+            target_lang: Target language to match exactly.
+
+        Returns:
+            The cached translation string, or None if no usable match exists.
+        """
+        if not original or not target_lang:
+            return None
+
+        for entry in self.config.get('history', []):
+            # Only plain text translations are cacheable. Custom-prompt, screenshot and
+            # multimodal entries must never be served as a plain-translation cache hit.
+            if entry.get('source_type', 'text') != 'text':
+                continue
+            if entry.get('original') == original and entry.get('target_lang') == target_lang:
+                translated = entry.get('translated', '')
+                if translated and not translated.startswith('Error:'):
+                    return translated
+        return None
 
     def clear_history(self):
         """Clear all history."""

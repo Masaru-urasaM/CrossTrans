@@ -197,6 +197,7 @@ class QuickTranslateManager:
         self._current_translation = ""
         self._current_target_lang = ""
         self._current_trial_info = None  # Store trial info for title bar
+        self._current_furigana = None  # Store furigana for restoring after custom-prompt cancel
         self._main_frame = None  # Reference to main frame for dictionary mode
         self._dict_popup_frame = None  # Reference to dict popup's WordButtonFrame for animation
 
@@ -210,11 +211,15 @@ class QuickTranslateManager:
         # Callbacks
         self._on_copy: Optional[Callable[[], None]] = None
         self._on_copy_and_replace: Optional[Callable[[], None]] = None
+        self._on_re_translate: Optional[Callable[[], None]] = None
+        self._on_custom_prompt_send: Optional[Callable[[str], None]] = None
         self._on_open_translator: Optional[Callable[[], None]] = None
         self._on_open_settings: Optional[Callable[[], None]] = None
         self._on_open_settings_dictionary_tab: Optional[Callable[[], None]] = None
         self._on_dictionary_lookup: Optional[Callable[[list, str], None]] = None
         self.popup_replace_btn: Optional[tk.Button] = None
+        self.popup_retranslate_btn: Optional[tk.Button] = None
+        self.popup_custom_prompt_btn: Optional[tk.Button] = None
         self._replace_gear_btn: Optional[tk.Button] = None
         self._btn_frame: Optional[ttk.Frame] = None
         self._on_open_settings_hotkeys_tab: Optional[Callable[[], None]] = None
@@ -226,7 +231,9 @@ class QuickTranslateManager:
                             on_open_settings: Optional[Callable[[], None]] = None,
                             on_open_settings_dictionary_tab: Optional[Callable[[], None]] = None,
                             on_dictionary_lookup: Optional[Callable[[list, str], None]] = None,
-                            on_open_settings_hotkeys_tab: Optional[Callable[[], None]] = None):
+                            on_open_settings_hotkeys_tab: Optional[Callable[[], None]] = None,
+                            on_re_translate: Optional[Callable[[], None]] = None,
+                            on_custom_prompt_send: Optional[Callable[[str], None]] = None):
         """Configure callback functions for quick translate actions.
 
         Args:
@@ -237,6 +244,8 @@ class QuickTranslateManager:
             on_open_settings_dictionary_tab: Called to open Settings directly to Dictionary tab
             on_dictionary_lookup: Called when user performs dictionary lookup (words_list, target_lang)
             on_open_settings_hotkeys_tab: Called to open Settings directly to Hotkeys tab
+            on_re_translate: Called when user clicks Re-translate button (force fresh API call)
+            on_custom_prompt_send: Called with the edit-box content when user clicks Send in custom-prompt mode
         """
         self._on_copy = on_copy
         self._on_copy_and_replace = on_copy_and_replace
@@ -245,6 +254,8 @@ class QuickTranslateManager:
         self._on_open_settings_dictionary_tab = on_open_settings_dictionary_tab
         self._on_dictionary_lookup = on_dictionary_lookup
         self._on_open_settings_hotkeys_tab = on_open_settings_hotkeys_tab
+        self._on_re_translate = on_re_translate
+        self._on_custom_prompt_send = on_custom_prompt_send
 
     def _apply_noactivate(self):
         """Apply WS_EX_NOACTIVATE to popup window so it doesn't steal focus from source app."""
@@ -361,7 +372,7 @@ class QuickTranslateManager:
             Tuple of (width, height) in pixels
         """
         MAX_WIDTH = 800
-        MIN_WIDTH = 500  # Ensure all 5 buttons + close fit in button bar
+        MIN_WIDTH = 670  # Ensure all action buttons + close fit in one row (incl. Custom Prompt)
         MIN_HEIGHT = 130  # Unified minimum height
 
         # Get max height from current monitor's work area
@@ -470,6 +481,7 @@ class QuickTranslateManager:
         self._current_translation = translated
         self._current_target_lang = target_lang
         self._current_trial_info = trial_info  # Store for dictionary title bar
+        self._current_furigana = furigana_text  # Store for restoring after custom-prompt cancel
 
         # Bind dragging events
         main_frame.bind("<Button-1>", self._start_move)
@@ -568,6 +580,23 @@ class QuickTranslateManager:
             )
             self._replace_gear_btn.pack(side=LEFT, padx=(0, 4))
 
+            # Re-translate button - force a fresh API call, bypassing the cache
+            self.popup_retranslate_btn = tk.Button(
+                self._btn_frame,
+                text="Re-translate",
+                command=self._handle_re_translate,
+                autostyle=False,
+                bg='#fd7e14',  # Bootstrap orange (signals redo/refresh)
+                fg='#ffffff',
+                activebackground='#e8590c',
+                activeforeground='#ffffff',
+                font=('Segoe UI', 10),
+                relief='flat',
+                padx=12, pady=4,
+                cursor='hand2'
+            )
+            self.popup_retranslate_btn.pack(side=LEFT, padx=4)
+
             # Dictionary button - opens popup for original text
             self.popup_dict_btn = tk.Button(
                 self._btn_frame,
@@ -604,6 +633,23 @@ class QuickTranslateManager:
                 cursor='hand2'
             )
             self.popup_open_btn.pack(side=LEFT, padx=4)
+
+            # Custom Prompt button - make the box editable and ask the AI a freeform question
+            self.popup_custom_prompt_btn = tk.Button(
+                self._btn_frame,
+                text="Custom Prompt",
+                command=self._handle_custom_prompt,
+                autostyle=False,
+                bg='#20c997',  # Bootstrap teal
+                fg='#ffffff',
+                activebackground='#1aa179',
+                activeforeground='#ffffff',
+                font=('Segoe UI', 10),
+                relief='flat',
+                padx=12, pady=4,
+                cursor='hand2'
+            )
+            self.popup_custom_prompt_btn.pack(side=LEFT, padx=4)
         else:
             # For errors, show "API Settings" button (opens Settings → API Key tab)
             settings_btn_kwargs = {"text": "API Settings", "command": self._handle_open_settings, "width": 14}
@@ -839,6 +885,112 @@ class QuickTranslateManager:
             return
 
         self._show_replace_preview()
+
+    def _handle_re_translate(self):
+        """Handle Re-translate button - force a fresh API call, bypassing the cache."""
+        if self._on_re_translate:
+            self._on_re_translate()
+
+    def _clear_noactivate(self):
+        """Remove WS_EX_NOACTIVATE so the popup can receive keyboard focus (edit mode)."""
+        if not self.popup:
+            return
+        try:
+            hwnd = ctypes.windll.user32.GetParent(self.popup.winfo_id())
+            if not hwnd:
+                hwnd = self.popup.winfo_id()
+            GWL_EXSTYLE = -20
+            WS_EX_NOACTIVATE = 0x08000000
+            ex_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style & ~WS_EX_NOACTIVATE)
+        except Exception:
+            pass  # Non-critical - editing still works in most cases
+
+    def _handle_custom_prompt(self):
+        """Handle Custom Prompt button - switch the box to editable freeform-ask mode."""
+        self._enter_custom_prompt_mode()
+
+    def _enter_custom_prompt_mode(self):
+        """Make the translation box editable and swap the button bar to [Send][Cancel].
+
+        Keeps the current translation as the starting prompt so the user can append or
+        edit freely. The entire box content is sent verbatim on Send (no translate
+        wrapper). Furigana, if shown, stays as a read-only guide above the box.
+        """
+        if not self.popup_text or not self._btn_frame:
+            return
+
+        # Make the box editable and visually mark edit mode (teal border).
+        self.popup_text.config(state='normal',
+                               highlightthickness=1,
+                               highlightbackground='#20c997',
+                               highlightcolor='#20c997')
+
+        # The popup was created WS_EX_NOACTIVATE (so it won't steal focus from the source
+        # app). Editing needs keyboard focus, so drop that bit and force focus now.
+        self._clear_noactivate()
+        try:
+            self.popup.attributes('-topmost', True)
+            self.popup.lift()
+            self.popup.focus_force()
+        except Exception:
+            pass
+        self.popup_text.focus_set()
+        self.popup_text.mark_set('insert', 'end')
+        self.popup_text.see('end')
+
+        # Swap button bar to [Send] [Cancel] + close.
+        for widget in self._btn_frame.winfo_children():
+            widget.destroy()
+
+        tk.Button(
+            self._btn_frame,
+            text="Send",
+            command=self._handle_custom_prompt_send,
+            autostyle=False,
+            bg='#20c997',
+            fg='#ffffff',
+            activebackground='#1aa179',
+            activeforeground='#ffffff',
+            font=('Segoe UI', 10, 'bold'),
+            relief='flat',
+            padx=16, pady=4,
+            cursor='hand2'
+        ).pack(side=LEFT)
+
+        tk.Button(
+            self._btn_frame,
+            text="Cancel",
+            command=self._handle_custom_prompt_cancel,
+            autostyle=False,
+            bg='#6c757d',
+            fg='#ffffff',
+            activebackground='#5a6268',
+            activeforeground='#ffffff',
+            font=('Segoe UI', 10),
+            relief='flat',
+            padx=16, pady=4,
+            cursor='hand2'
+        ).pack(side=LEFT, padx=4)
+
+        close_btn_kwargs = {"text": "✕", "command": self.close, "width": 3}
+        if HAS_TTKBOOTSTRAP:
+            close_btn_kwargs["bootstyle"] = "secondary"
+        ttk.Button(self._btn_frame, **close_btn_kwargs).pack(side=RIGHT)
+
+    def _handle_custom_prompt_send(self):
+        """Read the entire edit-box content and dispatch it as a freeform prompt."""
+        if not self.popup_text:
+            return
+        content = self.popup_text.get('1.0', 'end-1c')
+        if self._on_custom_prompt_send:
+            self._on_custom_prompt_send(content)
+
+    def _handle_custom_prompt_cancel(self):
+        """Cancel custom-prompt mode - restore the normal result popup."""
+        self.show(self._current_translation, self._current_target_lang,
+                  self._current_trial_info, self._current_original,
+                  furigana_text=self._current_furigana)
 
     def _show_replace_preview(self):
         """Transform popup to show replace preview with strikethrough original and translated text."""
