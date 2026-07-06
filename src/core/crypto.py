@@ -27,8 +27,8 @@ class SecureStorage:
     """
 
     # Application-specific entropy adds extra layer of protection
-    ENTROPY: bytes = b"AITranslator_v1.6_SecureKey"
-    DESCRIPTION: str = "AITranslator API Key"
+    ENTROPY: bytes = b"CrossTrans_v1.6_SecureKey"
+    DESCRIPTION: str = "CrossTrans API Key"
 
     @classmethod
     def encrypt(cls, plaintext: str) -> Optional[str]:

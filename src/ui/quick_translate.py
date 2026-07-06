@@ -190,6 +190,9 @@ class QuickTranslateManager:
         self._drag_x = 0
         self._drag_y = 0
 
+        # Grammar-fix result flag (hides translation-only buttons in the popup)
+        self._is_grammar = False
+
         # Dictionary mode state
         self._dict_mode_active = False
         self._dict_frame = None  # WordButtonFrame instance
@@ -206,6 +209,7 @@ class QuickTranslateManager:
         self._loading_animation_step = 0
         self._loading_label = None
         self._loading_target_lang = ""
+        self._loading_base_text = ""  # Base phrase for loading animation (e.g. "Translating to X")
         self._loading_start_time = 0
 
         # Callbacks
@@ -277,15 +281,18 @@ class QuickTranslateManager:
         self._last_mouse_x = self.root.winfo_pointerx()
         self._last_mouse_y = self.root.winfo_pointery()
 
-    def show_loading(self, target_lang: str):
+    def show_loading(self, target_lang: str, loading_text: str = None):
         """Show loading indicator popup with animation.
 
         Args:
             target_lang: The target language for translation
+            loading_text: Optional base phrase to show instead of "Translating to <lang>"
+                (e.g. "Fixing grammar" for the Fix Grammar action)
         """
         self.close()
 
         self._loading_target_lang = target_lang
+        self._loading_base_text = loading_text if loading_text else f"Translating to {target_lang}"
 
         self.popup = tk.Toplevel(self.root)
         self.popup.overrideredirect(True)
@@ -299,7 +306,7 @@ class QuickTranslateManager:
         # Create loading label with initial text
         self._loading_label = tk.Label(
             frame,
-            text=f"⏳ Translating to {target_lang}   ",
+            text=f"⏳ {self._loading_base_text}   ",
             font=('Segoe UI', 10),
             fg='#ffffff',
             bg='#2b2b2b',
@@ -335,11 +342,12 @@ class QuickTranslateManager:
 
         try:
             # Dots animation pattern (fixed width to prevent shifting)
+            base = self._loading_base_text or f"Translating to {self._loading_target_lang}"
             dots_patterns = [
-                f"⏳ Translating to {self._loading_target_lang}   ",  # 0 dots + 3 spaces
-                f"⏳ Translating to {self._loading_target_lang}.  ",  # 1 dot + 2 spaces
-                f"⏳ Translating to {self._loading_target_lang}.. ",  # 2 dots + 1 space
-                f"⏳ Translating to {self._loading_target_lang}...",  # 3 dots + 0 spaces
+                f"⏳ {base}   ",  # 0 dots + 3 spaces
+                f"⏳ {base}.  ",  # 1 dot + 2 spaces
+                f"⏳ {base}.. ",  # 2 dots + 1 space
+                f"⏳ {base}...",  # 3 dots + 0 spaces
             ]
             text = dots_patterns[self._loading_animation_step % 4]
             self._loading_label.configure(text=text)
@@ -424,7 +432,7 @@ class QuickTranslateManager:
         return int(width), int(max(MIN_HEIGHT, min(height, MAX_HEIGHT)))
 
     def show(self, translated: str, target_lang: str, trial_info: dict = None, original: str = "",
-             furigana_text: str = None):
+             furigana_text: str = None, is_grammar: bool = False):
         """Show popup with translation result.
 
         Args:
@@ -433,6 +441,9 @@ class QuickTranslateManager:
             trial_info: Optional dict with trial mode info (from TranslationService.get_trial_info())
             original: The original text (for dictionary lookup)
             furigana_text: Optional furigana-annotated text with {kanji|reading} notation
+            is_grammar: True when showing a Fix Grammar result. Hides the translation-only
+                buttons (Re-translate, Dictionary, Custom Prompt) since they assume a real
+                target language; keeps Copy / Replace / Open Translator for fixing in place.
         """
         self.close()
 
@@ -482,6 +493,7 @@ class QuickTranslateManager:
         self._current_target_lang = target_lang
         self._current_trial_info = trial_info  # Store for dictionary title bar
         self._current_furigana = furigana_text  # Store for restoring after custom-prompt cancel
+        self._is_grammar = is_grammar  # Grammar-fix result: hide translation-only buttons
 
         # Bind dragging events
         main_frame.bind("<Button-1>", self._start_move)
@@ -580,42 +592,45 @@ class QuickTranslateManager:
             )
             self._replace_gear_btn.pack(side=LEFT, padx=(0, 4))
 
-            # Re-translate button - force a fresh API call, bypassing the cache
-            self.popup_retranslate_btn = tk.Button(
-                self._btn_frame,
-                text="Re-translate",
-                command=self._handle_re_translate,
-                autostyle=False,
-                bg='#fd7e14',  # Bootstrap orange (signals redo/refresh)
-                fg='#ffffff',
-                activebackground='#e8590c',
-                activeforeground='#ffffff',
-                font=('Segoe UI', 10),
-                relief='flat',
-                padx=12, pady=4,
-                cursor='hand2'
-            )
-            self.popup_retranslate_btn.pack(side=LEFT, padx=4)
+            # Re-translate + Dictionary are translation-only — skip them for grammar results
+            # (Re-translate would "translate to Grammar"; Dictionary expects a target language).
+            if not is_grammar:
+                # Re-translate button - force a fresh API call, bypassing the cache
+                self.popup_retranslate_btn = tk.Button(
+                    self._btn_frame,
+                    text="Re-translate",
+                    command=self._handle_re_translate,
+                    autostyle=False,
+                    bg='#fd7e14',  # Bootstrap orange (signals redo/refresh)
+                    fg='#ffffff',
+                    activebackground='#e8590c',
+                    activeforeground='#ffffff',
+                    font=('Segoe UI', 10),
+                    relief='flat',
+                    padx=12, pady=4,
+                    cursor='hand2'
+                )
+                self.popup_retranslate_btn.pack(side=LEFT, padx=4)
 
-            # Dictionary button - opens popup for original text
-            self.popup_dict_btn = tk.Button(
-                self._btn_frame,
-                text="Dictionary",
-                command=self._open_dictionary_popup,
-                autostyle=False,
-                bg=DICT_BUTTON_COLOR,
-                fg='#ffffff',
-                activebackground=DICT_BUTTON_ACTIVE,
-                activeforeground='#ffffff',
-                font=('Segoe UI', 10),
-                relief='flat',
-                padx=12, pady=4,
-                cursor='hand2'
-            )
-            self.popup_dict_btn.pack(side=LEFT, padx=4)
+                # Dictionary button - opens popup for original text
+                self.popup_dict_btn = tk.Button(
+                    self._btn_frame,
+                    text="Dictionary",
+                    command=self._open_dictionary_popup,
+                    autostyle=False,
+                    bg=DICT_BUTTON_COLOR,
+                    fg='#ffffff',
+                    activebackground=DICT_BUTTON_ACTIVE,
+                    activeforeground='#ffffff',
+                    font=('Segoe UI', 10),
+                    relief='flat',
+                    padx=12, pady=4,
+                    cursor='hand2'
+                )
+                self.popup_dict_btn.pack(side=LEFT, padx=4)
 
-            # Update Dictionary button state based on NLP availability
-            self._update_dict_button_state()
+                # Update Dictionary button state based on NLP availability
+                self._update_dict_button_state()
 
             # Open Translator button
             self.popup_open_btn = tk.Button(
@@ -635,21 +650,23 @@ class QuickTranslateManager:
             self.popup_open_btn.pack(side=LEFT, padx=4)
 
             # Custom Prompt button - make the box editable and ask the AI a freeform question
-            self.popup_custom_prompt_btn = tk.Button(
-                self._btn_frame,
-                text="Custom Prompt",
-                command=self._handle_custom_prompt,
-                autostyle=False,
-                bg='#20c997',  # Bootstrap teal
-                fg='#ffffff',
-                activebackground='#1aa179',
-                activeforeground='#ffffff',
-                font=('Segoe UI', 10),
-                relief='flat',
-                padx=12, pady=4,
-                cursor='hand2'
-            )
-            self.popup_custom_prompt_btn.pack(side=LEFT, padx=4)
+            # (translation-only; skipped for grammar results)
+            if not is_grammar:
+                self.popup_custom_prompt_btn = tk.Button(
+                    self._btn_frame,
+                    text="Custom Prompt",
+                    command=self._handle_custom_prompt,
+                    autostyle=False,
+                    bg='#20c997',  # Bootstrap teal
+                    fg='#ffffff',
+                    activebackground='#1aa179',
+                    activeforeground='#ffffff',
+                    font=('Segoe UI', 10),
+                    relief='flat',
+                    padx=12, pady=4,
+                    cursor='hand2'
+                )
+                self.popup_custom_prompt_btn.pack(side=LEFT, padx=4)
         else:
             # For errors, show "API Settings" button (opens Settings → API Key tab)
             settings_btn_kwargs = {"text": "API Settings", "command": self._handle_open_settings, "width": 14}

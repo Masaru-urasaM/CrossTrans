@@ -52,3 +52,17 @@ def test_popup_has_edit_mode_methods():
                  '_handle_custom_prompt_send', '_handle_custom_prompt_cancel',
                  '_handle_re_translate'):
         assert callable(getattr(QuickTranslateManager, name, None)), name
+
+
+def test_translation_service_has_merged_methods():
+    """Merged translate-or-fix entry points must exist on the service."""
+    assert callable(getattr(TranslationService, 'translate_or_fix', None))
+    assert callable(getattr(TranslationService, 'do_translate_or_fix', None))
+
+
+def test_hotkey_normal_branch_uses_merged_path():
+    """The language-hotkey branch must route through do_translate_or_fix (not the plain
+    do_translation), so text already in the target language is grammar-fixed in place."""
+    src = inspect.getsource(TranslatorApp._on_hotkey_translate)
+    assert 'do_translate_or_fix(language)' in src
+    assert 'do_translation(language)' not in src

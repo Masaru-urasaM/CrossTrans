@@ -149,6 +149,29 @@ class HotkeyManager(threading.Thread):
                     else:
                         logging.warning(f"Failed to register screenshot hotkey: error {error_code}")
 
+        hotkey_id += 1
+
+        # Register Fix Grammar hotkey (special - uses "__fix_grammar__" marker)
+        # Gated by fix_grammar_hotkey_enabled (OFF by default - Win+Alt+G collides with
+        # Xbox Game Bar). The main-window button and the language hotkeys' merged
+        # translate-or-fix work regardless of this flag.
+        if self.config.get_fix_grammar_hotkey_enabled():
+            fix_grammar_combo = self.config.get_fix_grammar_hotkey()
+            if fix_grammar_combo:
+                modifiers, vk_code = self._parse_hotkey(fix_grammar_combo)
+                if modifiers is not None and vk_code is not None:
+                    result = self.user32.RegisterHotKey(None, hotkey_id, modifiers, vk_code)
+                    if result:
+                        self._registered_ids.append(hotkey_id)
+                        self._hotkey_map[hotkey_id] = "__fix_grammar__"  # Special marker
+                        logging.info(f"Registered Fix Grammar hotkey: {fix_grammar_combo} (ID: {hotkey_id})")
+                    else:
+                        error_code = self.kernel32.GetLastError()
+                        if error_code == 1409:
+                            logging.warning(f"Fix Grammar hotkey '{fix_grammar_combo}' already registered by another app")
+                        else:
+                            logging.warning(f"Failed to register Fix Grammar hotkey: error {error_code}")
+
     def _unregister_all_internal(self):
         """Unregister all hotkeys (internal use)."""
         for hk_id in self._registered_ids:

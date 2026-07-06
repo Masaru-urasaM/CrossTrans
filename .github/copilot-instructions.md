@@ -227,9 +227,9 @@ CrossTrans/
 ## Configuration & Environment
 
 ### Config Storage
-- Location: `%APPDATA%/AITranslator/config.json`
+- Location: `%APPDATA%/CrossTrans/config.json`
 - API keys: DPAPI encrypted (Windows secret store)
-- Auto-start: Registry entry `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\AITranslator`
+- Auto-start: Registry entry `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\CrossTrans`
 
 ### Environment
 - **Python**: ≥3.10

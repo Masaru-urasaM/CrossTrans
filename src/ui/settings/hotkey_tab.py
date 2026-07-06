@@ -110,6 +110,11 @@ class HotkeyTabMixin:
         ttk.Label(hotkey_container, text="Furigana Mode", font=('Segoe UI', 10, 'bold')).pack(anchor=W, pady=(0, 10))
         self._create_furigana_section(hotkey_container)
 
+        # 6. Fix Grammar section
+        ttk.Separator(hotkey_container).pack(fill=X, pady=20)
+        ttk.Label(hotkey_container, text="Fix Grammar", font=('Segoe UI', 10, 'bold')).pack(anchor=W, pady=(0, 10))
+        self._create_fix_grammar_section(hotkey_container)
+
         # Update scroll
         hotkey_container.update_idletasks()
         canvas.config(scrollregion=canvas.bbox("all"))
@@ -255,6 +260,117 @@ class HotkeyTabMixin:
         enabled = self.furigana_var.get()
         self.config.set_furigana_enabled(enabled)
         logging.info(f"Furigana mode changed: furigana_enabled={enabled}")
+
+    def _create_fix_grammar_section(self, parent):
+        """Create the Fix Grammar configuration section (toggle + rebindable hotkey)."""
+        desc = ttk.Frame(parent)
+        desc.pack(fill=X, pady=(0, 10), padx=5)
+        ttk.Label(desc, text="Select text and press the hotkey to correct its grammar in place (no translation).",
+                  font=('Segoe UI', 9), foreground='#888888').pack(anchor=W)
+
+        # Show/hide the main-window Fix Grammar button
+        toggle_row = ttk.Frame(parent)
+        toggle_row.pack(fill=X, pady=5, padx=5)
+
+        self.fix_grammar_var = tk.BooleanVar(value=self.config.get_fix_grammar_enabled())
+
+        if HAS_TTKBOOTSTRAP:
+            ttk.Checkbutton(toggle_row,
+                            text="Show Fix Grammar button (main window)",
+                            variable=self.fix_grammar_var,
+                            command=self._on_fix_grammar_toggle,
+                            bootstyle="round-toggle-success").pack(anchor=W)
+        else:
+            ttk.Checkbutton(toggle_row,
+                            text="Show Fix Grammar button (main window)",
+                            variable=self.fix_grammar_var,
+                            command=self._on_fix_grammar_toggle).pack(anchor=W)
+
+        # Global Win+Alt+G hotkey - OFF by default (collides with Xbox Game Bar)
+        hotkey_toggle_row = ttk.Frame(parent)
+        hotkey_toggle_row.pack(fill=X, pady=(0, 5), padx=5)
+
+        self.fix_grammar_hotkey_enabled_var = tk.BooleanVar(
+            value=self.config.get_fix_grammar_hotkey_enabled())
+
+        _hk_text = "Enable global Win+Alt+G hotkey (off by default - collides with Xbox Game Bar)"
+        if HAS_TTKBOOTSTRAP:
+            ttk.Checkbutton(hotkey_toggle_row,
+                            text=_hk_text,
+                            variable=self.fix_grammar_hotkey_enabled_var,
+                            command=self._on_fix_grammar_hotkey_toggle,
+                            bootstyle="round-toggle-success").pack(anchor=W)
+        else:
+            ttk.Checkbutton(hotkey_toggle_row,
+                            text=_hk_text,
+                            variable=self.fix_grammar_hotkey_enabled_var,
+                            command=self._on_fix_grammar_hotkey_toggle).pack(anchor=W)
+
+        # Hotkey row
+        row = ttk.Frame(parent)
+        row.pack(fill=X, pady=5, padx=5)
+
+        ttk.Label(row, text="Fix Grammar:", width=22, anchor=W).pack(side=LEFT)
+
+        self.fix_grammar_hotkey_var = tk.StringVar(value=self.config.get_fix_grammar_hotkey())
+        fix_grammar_entry = ttk.Entry(row, textvariable=self.fix_grammar_hotkey_var, width=22, state='readonly')
+        fix_grammar_entry.pack(side=LEFT, padx=5)
+        self._fix_grammar_entry = fix_grammar_entry  # Save reference for recording
+
+        if HAS_TTKBOOTSTRAP:
+            ttk.Button(row, text="Edit",
+                       command=lambda: self._start_record(fix_grammar_entry, self.fix_grammar_hotkey_var, "__fix_grammar__"),
+                       bootstyle="info-outline", width=8).pack(side=LEFT, padx=2)
+            ttk.Button(row, text="Restore",
+                       command=self._restore_fix_grammar_hotkey,
+                       bootstyle="secondary-outline", width=8).pack(side=LEFT, padx=2)
+        else:
+            ttk.Button(row, text="Edit",
+                       command=lambda: self._start_record(fix_grammar_entry, self.fix_grammar_hotkey_var, "__fix_grammar__"),
+                       width=8).pack(side=LEFT, padx=2)
+            ttk.Button(row, text="Restore",
+                       command=self._restore_fix_grammar_hotkey,
+                       width=8).pack(side=LEFT, padx=2)
+
+        # Info text
+        info = ttk.Frame(parent)
+        info.pack(fill=X, pady=(0, 5), padx=5)
+        ttk.Label(info,
+                  text="Corrects grammar, spelling, and punctuation only - keeps the same language, meaning, and wording.",
+                  font=('Segoe UI', 8), foreground='#888888').pack(anchor=W)
+        ttk.Label(info,
+                  text="Tip: pressing a language hotkey (e.g. Win+Alt+E) on text already in that language auto-fixes its grammar - no separate hotkey needed.",
+                  font=('Segoe UI', 8), foreground='#888888').pack(anchor=W)
+        ttk.Label(info,
+                  text="The Win+Alt+G hotkey is optional and off by default (collides with Xbox Game Bar). Enable it above to use or rebind it.",
+                  font=('Segoe UI', 8), foreground='#888888').pack(anchor=W)
+
+    def _on_fix_grammar_toggle(self):
+        """Handle Fix Grammar button toggle - auto-save immediately."""
+        enabled = self.fix_grammar_var.get()
+        self.config.set_fix_grammar_enabled(enabled)
+        logging.info(f"Fix Grammar button changed: fix_grammar_enabled={enabled}")
+
+    def _on_fix_grammar_hotkey_toggle(self):
+        """Handle global Win+Alt+G hotkey toggle - auto-save immediately.
+
+        Registration/unregistration takes effect when Settings is saved (on_settings_save
+        re-registers hotkeys), matching how other hotkey changes propagate.
+        """
+        enabled = self.fix_grammar_hotkey_enabled_var.get()
+        self.config.set_fix_grammar_hotkey_enabled(enabled)
+        logging.info(f"Fix Grammar hotkey changed: fix_grammar_hotkey_enabled={enabled}")
+
+    def _restore_fix_grammar_hotkey(self):
+        """Restore Fix Grammar hotkey to default."""
+        self.fix_grammar_hotkey_var.set(self.config.FIX_GRAMMAR_HOTKEY_DEFAULT)
+        self._save_fix_grammar_hotkey()
+
+    def _save_fix_grammar_hotkey(self):
+        """Save the Fix Grammar hotkey to config (auto-save after recording)."""
+        if hasattr(self, 'fix_grammar_hotkey_var'):
+            self.config.set_fix_grammar_hotkey(self.fix_grammar_hotkey_var.get())
+        logging.info("Auto-saved Fix Grammar hotkey")
 
     def _add_default_hotkey_row(self, parent, language, hotkey):
         """Add a row for default languages with Restore button."""
@@ -406,6 +522,13 @@ class HotkeyTabMixin:
                 if screenshot_key and screenshot_key.lower() == hotkey.lower():
                     return False, f"'{hotkey}' is already used for Screenshot OCR"
 
+        # Check Fix Grammar hotkey for duplicates
+        if current_language != "__fix_grammar__":
+            if hasattr(self, 'fix_grammar_hotkey_var'):
+                fix_grammar_key = self.fix_grammar_hotkey_var.get().strip()
+                if fix_grammar_key and fix_grammar_key.lower() == hotkey.lower():
+                    return False, f"'{hotkey}' is already used for Fix Grammar"
+
         return True, ""
 
     def _on_key_record(self, event, entry_var, entry=None):
@@ -444,6 +567,8 @@ class HotkeyTabMixin:
                     # Valid hotkey - auto-save immediately
                     if current_lang == "__screenshot__":
                         self._save_screenshot_settings()
+                    elif current_lang == "__fix_grammar__":
+                        self._save_fix_grammar_hotkey()
                     else:
                         self._save_all_hotkeys()
 

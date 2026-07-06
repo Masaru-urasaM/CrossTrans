@@ -54,7 +54,8 @@ class HistoryManager:
         """Get full history list."""
         return self.config.get('history', [])
 
-    def find_cached(self, original: str, target_lang: str) -> Optional[str]:
+    def find_cached(self, original: str, target_lang: str,
+                    source_type: str = 'text') -> Optional[str]:
         """Return a stored translation for an exact (original, target_lang) match.
 
         Reuses the translation history as a lookup cache so identical input is not
@@ -65,6 +66,10 @@ class HistoryManager:
         Args:
             original: Source text to match exactly.
             target_lang: Target language to match exactly.
+            source_type: Only entries tagged with this exact source_type are eligible.
+                Defaults to 'text' (plain translations). The merged translate-or-fix
+                path passes 'merged' so its minimal-change grammar fixes are never
+                cross-served as a plain 'rephrase' translation (and vice versa).
 
         Returns:
             The cached translation string, or None if no usable match exists.
@@ -73,9 +78,10 @@ class HistoryManager:
             return None
 
         for entry in self.config.get('history', []):
-            # Only plain text translations are cacheable. Custom-prompt, screenshot and
-            # multimodal entries must never be served as a plain-translation cache hit.
-            if entry.get('source_type', 'text') != 'text':
+            # Only entries of the requested source_type are cacheable. This keeps plain
+            # translations, custom-prompt, screenshot, multimodal and merged results in
+            # separate namespaces so they are never served in place of one another.
+            if entry.get('source_type', 'text') != source_type:
                 continue
             if entry.get('original') == original and entry.get('target_lang') == target_lang:
                 translated = entry.get('translated', '')

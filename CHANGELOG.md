@@ -2,6 +2,71 @@
 
 All notable changes to CrossTrans are documented here.
 
+## [Unreleased] — Storage identity renamed to CrossTrans (2026-07-01)
+
+The app's internal **storage identity** — the `%APPDATA%` config folder, the model-config cache folder, the Windows auto-start registry value, and the DPAPI encryption entropy/description — was renamed from the legacy product name to **`CrossTrans`**, matching the user-facing name already in `src/constants.py`. A fresh install now uses `%APPDATA%\CrossTrans\` throughout.
+
+### ⚠️ Breaking change (existing installs)
+- **Saved API keys must be re-entered.** Keys are DPAPI-encrypted with an app-specific entropy that changed as part of the rename, so keys stored by an older build can no longer be decrypted and are cleared on load.
+- **Settings/history do not carry over.** The new build reads `%APPDATA%\CrossTrans\config.json`; the old build's folder is no longer consulted.
+- The old `%APPDATA%` config folder is a harmless leftover — delete it manually if you want the disk space back.
+- **Auto-start needs a one-time manual cleanup for anyone who had it enabled.** The old auto-start registry entry (under the previous name) still launches the app, but the Settings toggle now manages the `CrossTrans` entry only — so the toggle reads **OFF** and cannot remove the old entry. To actually stop auto-start, disable it via **Task Manager → Startup apps**, or delete the stale value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` once. (On a manual reinstall the stale entry may still point at the *old* exe, so the previous version could keep launching — masked by the single-instance lock — until removed.)
+- **No automatic migration was implemented — deliberately**, to keep the rename total (no trace of the old name remains in the project) per explicit request. A migration (old-folder copy + key re-encryption) is a clean future option, but cannot coexist with a "no old-name anywhere" requirement.
+
+### Changed
+- `config.py` — `APP_NAME` is now `"CrossTrans"` (drives the config dir and the auto-start registry value name); docstring updated.
+- `src/core/crypto.py` — `SecureStorage.ENTROPY` (the DPAPI salt) and `DESCRIPTION` (cosmetic) now use the `CrossTrans` identity.
+- `src/core/remote_config.py` — model-config `CACHE_DIR` is now `%APPDATA%\CrossTrans\`.
+- `src/utils/updates.py` — the auto-updater batch script now reads/writes the `CrossTrans` auto-start registry value.
+- Docs — `CLAUDE.md`, `.github/copilot-instructions.md`, and `OPS_GUIDE.md` path/registry references updated; removed a stale deprecated `.spec` entry from `.gitignore` (the real, tracked build spec is `CrossTrans.spec`).
+
+**Tests**: 124 passed / 0 failed — no regressions. Verified a full-repo case-insensitive search for the old name returns **zero** matches (excluding `.git`).
+
+## [1.9.18] - Merged Translate-or-Fix on the language hotkeys (2026-07-01)
+
+Pressing a **language hotkey** (Win+Alt+V/E/J/C — and any custom language hotkey) on text that is **already in that hotkey's target language** now **fixes its grammar in place** instead of pointlessly "translating" it. One merged AI prompt lets the model auto-decide translate-vs-fix. This makes grammar-fixing reachable without a dedicated hotkey — sidestepping the Xbox Game Bar (`Win+Alt+G`) and Feedback Hub (`Win+Alt+F`) collisions entirely.
+
+### Added
+- **`TranslationService.translate_or_fix(text, target_language, skip_cache=False)`** — Sends ONE merged prompt: if the text is already in `target_language` the model corrects only grammar/spelling/punctuation (minimal changes, same language); otherwise it translates. BOTH branches are uncensored and meaning-preserving (offensive words survive — faithful equivalent when translating, verbatim when fixing). Cached/stored under `source_type='merged'`.
+- **`TranslationService.do_translate_or_fix(target_language)`** — Language-hotkey orchestrator (mirrors `do_translation`): captures the selection, shares the `last_translation_time` cooldown, generates furigana for Japanese source, queues the same 5-tuple as a translation (`is_grammar=False` — the output is a real language in both branches).
+- **Merged cache namespace** — `HistoryManager.find_cached(original, target_lang, source_type='text')` gained a `source_type` param; the merged path reads/writes under `'merged'` so a minimal-change fix is never cross-served as a plain 'rephrase' translation (and vice versa).
+- **Config**: `fix_grammar_hotkey_enabled` (default **False**) with `get/set_fix_grammar_hotkey_enabled` — a separate flag registering the global `Win+Alt+G` hotkey.
+
+### Changed
+- **`app._on_hotkey_translate()`** — The normal language branch now calls `do_translate_or_fix(language)` instead of `do_translation(language)`. Covers every language hotkey (defaults + custom) since this branch handles all non-special `language` values.
+- **No-censor everywhere** — The no-censor rule was added to the plain `translate_text` prompts (both variants) and the screenshot/OCR vision prompt, per user request, so offensive words survive all translations (not just the merged path).
+- **`Win+Alt+G` hotkey now OFF by default** — split from the button: `fix_grammar_enabled` (default True) controls only the main-window **button**; the new `fix_grammar_hotkey_enabled` (default **False**) gates the global hotkey registration + tray hint. `hotkey.py`, `tray.py`, `app.py` guard, and the Settings → Hotkeys section (new "Enable global Win+Alt+G hotkey" checkbox) updated accordingly. The button and the merged language-hotkey behavior always work.
+
+### Notes
+- **Uncensored output is best-effort and model-dependent** — the prompt can only *request* it; some of the 15 providers/180+ models and the trial proxy enforce hard content filters that may still refuse/mask. Additionally, adding an explicit no-censor instruction to *all* translations can itself increase refusals on some models for otherwise-benign text (accepted tradeoff). Confirm behavior against the configured model.
+- **LEAN display consequences** (documented, not blockers): the popup shows the language (not "Grammar") for a same-language fix, and the popup **Re-translate** button re-runs the plain `translate_text` (rephrase), not the merged prompt.
+
+**Tests**: +24 (`tests/test_translate_or_fix.py`) covering the merged prompt content (tie-break + both-branch no-censor + verbatim token via a neutral placeholder, never a real slur), `'merged'` cache namespace isolation (no cross-serve), `do_translate_or_fix` routing/tuple/cooldown/trial/no-selection/history, and no-censor presence in the plain prompts; +2 wiring guards (`tests/test_callback_wiring.py`); updated `tests/test_fix_grammar.py` for the split hotkey flag. Suite: **100 → 124 passed / 0 failed** (0 regressions).
+
+## [1.9.17] - Fix Grammar (2026-06-30)
+
+A new **Fix Grammar** action that corrects the grammar of selected text *in place* — no translation, no rephrasing, no censoring. The output is always the same text in the same language with only grammar/spelling/punctuation fixed.
+
+### Added
+- **Fix Grammar hotkey** (default **Win+Alt+G**) — Select text anywhere, press the hotkey, and a popup shows the grammar-corrected text with **Copy** / **Replace** to apply it back into the source app. ⚠️ `Win+Alt+G` is also Xbox Game Bar's "Record that" default; registration fails gracefully (error 1409) if Game Bar holds it, the hotkey is fully rebindable, and the button always works. `Win+Alt+F` is the recommended conflict-free alternative.
+- **"Fix Grammar" button** in the main translate window (next to Translate) — Corrects the input box text and writes the result into the output box.
+- **Settings → Hotkeys → Fix Grammar section** — "Enable Fix Grammar" toggle (default **ON**) + rebindable hotkey row (mirrors the Screenshot hotkey row), with duplicate-hotkey validation.
+- **Tray menu entry** — `Win+Alt+G → Fix Grammar` listed with the other hotkeys (shown only when the feature is enabled).
+- **`TranslationService.fix_grammar(text)`** — Builds a strict correction prompt (fix grammar/spelling/punctuation only; never translate, paraphrase, change meaning/tone, or censor — including offensive words; return unchanged if already correct), calls the API, strips thinking tags. Not written to history.
+- **`TranslationService.do_grammar_fix()`** — Hotkey entry point: captures the live selection (Ctrl+C), honors a dedicated cooldown (`last_grammar_fix_time`), surfaces trial info, and queues a 6-tuple `(original, corrected, "Grammar", trial_info, None, True)`.
+- **Config**: `FIX_GRAMMAR_HOTKEY_DEFAULT="win+alt+g"`, `fix_grammar_hotkey` + `fix_grammar_enabled` (default `True`) in `DEFAULT_CONFIG`, with `get/set_fix_grammar_hotkey` and `get/set_fix_grammar_enabled`.
+
+### Changed
+- **`HotkeyManager.register_hotkeys()`** — Registers a `__fix_grammar__` hotkey (gated by `fix_grammar_enabled`, so disabling frees the combo); fails gracefully on conflict like the other hotkeys.
+- **`app._on_hotkey_translate()`** — Added a guarded `__fix_grammar__` dispatch branch (additive; the translation path is untouched). Source-window HWND is captured first so Replace works.
+- **Quick Translate popup** — `show(..., is_grammar=False)` hides the translation-only buttons (Re-translate, Dictionary, Custom Prompt) for grammar results, keeping Copy / Replace / Open Translator. `show_loading(..., loading_text=...)` shows "Fixing grammar…" instead of "Translating to …".
+- **`_check_queue()`** — Now also handles the 6-tuple grammar result and routes it with `is_grammar=True` (4- and 5-tuple translation paths unchanged).
+
+### Notes
+- **No prompt fully guarantees uncensored output across all 15 providers/180+ models** — some have hard content filters that may refuse or soften sensitive input (the trial proxy may too). The prompt is engineered to preserve text verbatim; behavior should be confirmed against the actually-configured model.
+
+**Tests**: +13 (`tests/test_fix_grammar.py`) — `fix_grammar` prompt content (never-translate / no-censor / same-language / verbatim token preservation) + empty guard + thinking-tag strip; `do_grammar_fix` 6-tuple/`is_grammar` flag + cooldown + error path + no-history; config defaults/fallbacks; hotkey registration wiring. Suite: **87 → 100 passed / 0 failed** (0 regressions).
+
 ## [1.9.16] - Translation Cache, Re-translate & Custom Prompt
 
 ### R1 — Translation Cache + Re-translate Button

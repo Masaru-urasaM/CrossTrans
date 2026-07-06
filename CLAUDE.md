@@ -1,4 +1,4 @@
-# CrossTrans v1.9.15 - AI Context
+# CrossTrans v1.9.18 - AI Context
 
 ## Project Overview
 CrossTrans is a Windows desktop translation app using AI APIs (15 providers, 180+ models).
@@ -59,6 +59,7 @@ self.screenshot_handler.configure_callbacks(
 | Add/remove AI models | Cloudflare KV (`MODELS_KV` -> `models_config`) - no code change needed |
 | Add AI provider | Cloudflare KV + `src/core/api_manager.py` (if new API format) |
 | Modify hotkeys | `src/core/hotkey.py` |
+| Fix Grammar feature | `src/core/translation.py` (`fix_grammar`, `do_grammar_fix`) + `src/app.py` (`_on_hotkey_translate` `__fix_grammar__` branch, `_do_fix_grammar`) + `src/ui/settings/hotkey_tab.py` (`_create_fix_grammar_section`) |
 | Update quick translate popup | `src/ui/quick_translate.py` |
 | Add settings tab | `src/ui/settings/*.py` |
 | Translation logic | `src/core/translation.py` |
@@ -81,7 +82,7 @@ Key points:
 - **Batch script parenthesis**: Never use `(` or `)` inside echo strings within `if` blocks. cmd.exe interprets `)` as closing the if block.
 - **Batch script redirect**: Always put a space before `>` in echo commands. `echo 1.9.8>file` interprets `8>` as file descriptor 8 redirect.
 - **EXE rename**: After update, new EXE is named `CrossTrans_v{version}.exe`. Old EXE renamed to `.bak`.
-- **Registry auto-start**: Batch script updates `HKCU\...\Run\AITranslator` to point to new EXE path.
+- **Registry auto-start**: Batch script updates `HKCU\...\Run\CrossTrans` to point to new EXE path.
 - **First-launch retry**: New EXE may fail first launch (Windows Defender scan). Batch script has 2s delay + retry mechanism.
 
 ### Testing updates without releasing:
@@ -116,7 +117,7 @@ Hardcoded values in `constants.py` serve as fallback defaults.
 
 ### Architecture (3-tier fallback):
 1. **Remote**: Cloudflare Worker `GET /v1/config` -> KV namespace `MODELS_KV`
-2. **Local cache**: `%APPDATA%/AITranslator/models_config.json` (24h TTL)
+2. **Local cache**: `%APPDATA%/CrossTrans/models_config.json` (24h TTL)
 3. **Hardcoded**: `constants.py` values (always available, compiled into EXE)
 
 ### Key module: `src/core/remote_config.py`
@@ -214,6 +215,59 @@ python main.py
 9. **Windows Hello** - Secure API key protection
 10. **Auto-Update** - In-app update with retry, backup, and registry sync
 11. **Furigana** - Japanese reading guides (hiragana above kanji) via pykakasi
+12. **Fix Grammar** - Main-window button (default ON) or optional Win+Alt+G hotkey (default **OFF** - collides with Xbox Game Bar): corrects grammar of selected text in place (no translation, no rephrasing, no censoring). Toggle button + hotkey separately in Settings → Hotkeys.
+13. **Merged Translate-or-Fix** (v1.9.18) - Pressing a language hotkey (Win+Alt+V/E/J/C + custom) on text already in that language auto-fixes its grammar instead of translating, via one merged AI prompt. No dedicated hotkey needed. See "Merged Translate-or-Fix" section below.
+
+## Merged Translate-or-Fix (language hotkeys, v1.9.18)
+
+Pressing a **language hotkey** (Win+Alt+V/E/J/C, plus any custom language hotkey) sends **one merged
+prompt** that makes the model auto-decide: if the selection is **already in that hotkey's target
+language** → grammar-fix it in place (minimal change, same language); otherwise → translate. This
+covers every language hotkey because `_on_hotkey_translate`'s normal branch handles all non-special
+`language` values, and `register_hotkeys()` maps custom hotkeys to their language name too.
+
+### Key points
+- **Both branches uncensored & meaning-preserving** — offensive words survive (faithful equivalent
+  when translating, verbatim when fixing). The no-censor rule is ALSO in the plain `translate_text`
+  prompts and the screenshot vision prompt (v1.9.18), so all translations preserve slurs.
+- **LEAN routing** — `do_translate_or_fix()` queues the normal **5-tuple** (`is_grammar=False`); the
+  popup shows full buttons and the language header (not "Grammar") because the output is a real
+  language in both branches. No mode marker.
+- **Cache namespace `'merged'`** — `find_cached(original, target_lang, source_type='text')` gained a
+  `source_type` param; the merged path uses `'merged'` so a minimal-change fix is never cross-served
+  as a plain 'rephrase' translation (and vice versa).
+- **Caveat** — uncensored output is best-effort/model-dependent (hard content filters may refuse or
+  mask); the explicit no-censor line can also raise refusals on some models for benign text.
+
+### Files involved
+- `src/core/translation.py` - `translate_or_fix()`, `do_translate_or_fix()`, no-censor in `translate_text`
+- `src/core/history.py` - `find_cached(..., source_type=...)`
+- `src/app.py` - `_on_hotkey_translate()` normal branch → `do_translate_or_fix(language)`
+- `src/ui/screenshot_handler.py` - no-censor in the vision prompt
+
+## Fix Grammar (Win+Alt+G)
+
+Corrects grammar/spelling/punctuation of selected text **without translating, rephrasing, or censoring**. Output is the same text in the same language. Mirrors the screenshot-hotkey pattern (special `__fix_grammar__` marker) and the `ask_freeform` non-translation service pattern.
+
+### Flow:
+1. Hotkey `Win+Alt+G` → `app._on_hotkey_translate("__fix_grammar__")` (HWND captured for Replace) → `translation_service.do_grammar_fix()`
+2. `do_grammar_fix()` captures selection (Ctrl+C), calls `fix_grammar(text)`, queues a **6-tuple** `(original, corrected, "Grammar", trial_info, None, True)`
+3. `_check_queue()` routes the 6-tuple with `is_grammar=True` → popup shows **Copy/Replace** only (translation-only buttons hidden)
+4. Main-window **"Fix Grammar"** button → `_do_fix_grammar()` reads the input box, writes corrected text to the output box
+
+### Key points:
+- **Prompt** (`fix_grammar()` in `translation.py`): strict rules — never translate, fix only grammar/spelling/punctuation, minimal changes, no paraphrase/vocab/meaning change, **never censor offensive words**, return unchanged if already correct. Not written to history.
+- **Config**: `fix_grammar_hotkey` (default `win+alt+g`), `fix_grammar_enabled` (default `True`). Disabling un-registers the hotkey on Settings save and hides the button/tray entry.
+- **Default hotkey is Win+Alt+G** (per original spec): this collides with Xbox Game Bar "Record that". `register_hotkeys()` fails gracefully (error 1409) if Game Bar holds it; the hotkey is rebindable and the button always works. Win+Alt+F is the recommended conflict-free alternative if a user hits the collision.
+- **Caveat**: no prompt guarantees uncensored output across all providers/models; some have hard content filters.
+
+### Files involved:
+- `src/core/translation.py` - `fix_grammar()`, `do_grammar_fix()`, `last_grammar_fix_time`
+- `src/app.py` - `_on_hotkey_translate()` (`__fix_grammar__` branch), `_do_fix_grammar()`, `_update_grammar_result()`, `_check_queue()` (6-tuple)
+- `src/ui/quick_translate.py` - `show(..., is_grammar=...)`, `show_loading(..., loading_text=...)`
+- `src/ui/settings/hotkey_tab.py` - `_create_fix_grammar_section()` (toggle + rebindable hotkey)
+- `src/ui/tray.py` - Fix Grammar menu entry
+- `config.py` - `get/set_fix_grammar_hotkey`, `get/set_fix_grammar_enabled`
 
 ## Replace Button (Copy & Replace)
 
@@ -260,7 +314,7 @@ Popup "Replace" button copies translated text and pastes it back into the source
 
 ## Configuration
 
-Config file: `%APPDATA%\AITranslator\config.json`
+Config file: `%APPDATA%\CrossTrans\config.json`
 
 Key settings:
 - `api_keys` - Encrypted API key storage

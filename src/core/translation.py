@@ -49,6 +49,7 @@ class TranslationService:
         self.config: Config = config
         self.api_manager: AIAPIManager = AIAPIManager()
         self.last_translation_time: float = 0
+        self.last_grammar_fix_time: float = 0
         self.translation_queue: queue.Queue[Tuple[str, str, str, Optional[Dict]]] = queue.Queue()
         self.notification_callback: Optional[Callable[[str], None]] = notification_callback
         self.history_manager: HistoryManager = HistoryManager(config)
@@ -277,6 +278,7 @@ class TranslationService:
 
 Only return the translation, no explanations or additional text.
 If the text is already in {target_language}, still provide a natural rephrasing.
+Do NOT censor, soften, mask, or replace ANY word - including offensive, vulgar, or sensitive words; render the faithful equivalent.
 
 Additional instructions from user: {custom_prompt}"""
         else:
@@ -291,7 +293,8 @@ Additional instructions from user: {custom_prompt}"""
 Rules (DO NOT include these in your response):
 1. Output ONLY the translation in {target_language}
 2. No explanations, no meta-text, no repetition of these rules
-3. If already in {target_language}, return as-is or rephrase naturally"""
+3. If already in {target_language}, return as-is or rephrase naturally
+4. Do NOT censor, soften, mask, or replace ANY word - including offensive, vulgar, or sensitive words; render the faithful equivalent in {target_language}."""
 
         prompt = base_prompt
 
@@ -311,6 +314,88 @@ Rules (DO NOT include these in your response):
             self.history_manager.add_entry(
                 text, result, target_language,
                 source_type='custom' if has_custom_prompt else 'text')
+            return result
+        except TrialAPIError as e:
+            return f"Error: {str(e)}"
+        except Exception as e:
+            error_msg = str(e)
+            if "API_KEY_INVALID" in error_msg or "API key not valid" in error_msg:
+                return "Error: Invalid API key. Please check your API key in Settings."
+            return f"Error: {error_msg}"
+
+    def translate_or_fix(self, text: str, target_language: str,
+                         skip_cache: bool = False) -> str:
+        """Translate text to target_language, OR grammar-fix it in place when it is
+        already in that language — the model decides via ONE merged prompt.
+
+        Used by the language hotkeys (Win+Alt+V/E/J/C and any custom language hotkey):
+        pressing a language hotkey on text already in that language is a pointless
+        translation, so the model instead corrects grammar/spelling/punctuation in place
+        (minimal changes, same language). BOTH branches are uncensored and
+        meaning-preserving — offensive words survive (faithful equivalent when
+        translating, verbatim when fixing).
+
+        Results are cached/stored under source_type='merged' so a minimal-change fix is
+        never cross-served as a plain 'rephrase' translation, or vice versa.
+
+        Args:
+            text: Source text.
+            target_language: The hotkey's target language name.
+            skip_cache: When True, always call the API (bypass the merged cache).
+
+        Returns:
+            The translated-or-corrected text, or an "Error: ..." string.
+        """
+        if not text or not text.strip():
+            return ""
+
+        # Merged cache namespace: never mixes with plain translations (see find_cached).
+        if not skip_cache:
+            cached = self.history_manager.find_cached(text, target_language,
+                                                      source_type='merged')
+            if cached is not None:
+                logging.info("Merged cache hit - returning stored result, skipping API call")
+                return cached
+
+        prompt = f"""You are a translation-and-grammar fixer tool. Decide automatically between two modes based on the
+language of the text below, then output ONLY the result.
+
+===TEXT===
+{text}
+===END OF TEXT===
+
+DECISION RULE:
+- If the text is ENTIRELY or PREDOMINANTLY already in {target_language}, do NOT translate it.
+  Instead, correct ONLY its grammar, spelling, and punctuation, keeping the SAME language and the
+  SAME meaning (minimal changes; if it is already correct, return it unchanged).
+- Otherwise, TRANSLATE the text into {target_language}, preserving the full meaning and tone.
+
+STRICT RULES (DO NOT include these rules in your response):
+1. Output ONLY the final result - no explanations, no labels, no quotes, no meta-text, no notes
+   about which mode you chose.
+2. Never change the meaning. In grammar-fix mode make the minimal changes needed for correctness;
+   do not paraphrase, restyle, or change vocabulary/tone. In translate mode, translate faithfully.
+3. Do NOT add or remove information. Every piece of the original text is important and must be preserved in the output.
+4. Do NOT censor, soften, mask, euphemize, or replace ANY word - including offensive, vulgar,
+   slur, or sensitive words. In grammar-fix mode keep every such word exactly as written; in
+   translate mode render its faithful equivalent in {target_language}. Never omit or asterisk them.
+5. In grammar-fix mode, output the corrected text in the EXACT SAME language as the input; never
+   translate it. In translate mode, output ONLY {target_language}."""
+
+        try:
+            # Use trial mode if active
+            if self._is_trial_mode and self.trial_client:
+                result = self._translate_trial(prompt)
+            else:
+                result = self.api_manager.translate(prompt)
+
+            # Clean up AI thinking tags from result
+            result = self._strip_thinking_tags(result)
+
+            # Store under the 'merged' namespace so repeat requests are cached but never
+            # served in place of (or served) a plain translation.
+            self.history_manager.add_entry(
+                text, result, target_language, source_type='merged')
             return result
         except TrialAPIError as e:
             return f"Error: {str(e)}"
@@ -361,7 +446,7 @@ Rules (DO NOT include these in your response):
 2. **Source Language**: detected language
 3. **Definition**: explanation in {target_language} (REQUIRED)
 4. **Word Type**: noun/verb/adjective/adverb/etc.
-5. **Pronunciation**: /IPA/, / phonetic in {target_language} (Pronunciation, means how it is pronounced in the {target_language}.)/
+5. **Pronunciation**: /IPA/
 6. **Synonyms** (if any): synonym1 → {target_language} translation, synonym2 → {target_language} translation, synonym3 → {target_language} translation
 7. **Antonyms** (if any): antonym1 → {target_language} translation, antonym2 → {target_language} translation, antonym3 → {target_language} translation
 8. **Examples**:
@@ -380,6 +465,59 @@ Rules (DO NOT include these in your response):
 - Pronunciation: provide both IPA and {target_language} phonetic
   Example: hello → /həˈloʊ/, /ハロー/ (if target is Japanese)
   Example: 雨氷 → /uːhjou/, /u-hyô/ (if target is Vietnamese)"""
+
+        try:
+            # Use trial mode if active
+            if self._is_trial_mode and self.trial_client:
+                result = self._translate_trial(prompt)
+            else:
+                result = self.api_manager.translate(prompt)
+
+            # Clean up AI thinking tags from result
+            result = self._strip_thinking_tags(result)
+            return result
+        except TrialAPIError as e:
+            return f"Error: {str(e)}"
+        except Exception as e:
+            error_msg = str(e)
+            if "API_KEY_INVALID" in error_msg or "API key not valid" in error_msg:
+                return "Error: Invalid API key. Please check your API key in Settings."
+            return f"Error: {error_msg}"
+
+    def fix_grammar(self, text: str) -> str:
+        """Correct grammar, spelling, and punctuation of text WITHOUT translating it.
+
+        The output is the SAME text in the SAME language with only grammatical errors
+        fixed. It does NOT paraphrase, change vocabulary/meaning/tone, add or remove
+        information, or censor any word (including offensive ones). If the text is already
+        correct it is returned unchanged. Used by the Fix Grammar hotkey and the main
+        window "Fix Grammar" button. The result is NOT written to history.
+
+        Args:
+            text: Source text whose grammar should be corrected.
+
+        Returns:
+            The grammar-corrected text in the same language, or an "Error: ..." string.
+        """
+        if not text or not text.strip():
+            return ""
+
+        # Strict prompt: fix only grammar, never translate, never censor, never rephrase.
+        prompt = f"""You are a grammar correction tool. Correct ONLY the grammar, spelling, and punctuation of the text below.
+
+===TEXT===
+{text}
+===END OF TEXT===
+
+STRICT RULES (DO NOT include these rules in your response):
+1. Output the corrected text in the EXACT SAME LANGUAGE as the input. NEVER translate it.
+2. Fix ONLY grammar, spelling, punctuation, subject-verb agreement, verb tense, articles, prepositions, and word order.
+3. Make the MINIMAL changes needed for grammatical correctness.
+4. Do NOT paraphrase, improve style, change vocabulary, or alter the meaning or tone.
+5. Do NOT add or remove information.
+6. Do NOT censor, soften, mask, or replace ANY word - including offensive, vulgar, or sensitive words. Keep every word exactly as written.
+7. If the text is already grammatically correct, return it unchanged.
+8. Output ONLY the corrected text - no explanations, no quotes, no labels, no meta-text."""
 
         try:
             # Use trial mode if active
@@ -509,6 +647,69 @@ Rules (DO NOT include these in your response):
             logging.error(error_msg)
             self.translation_queue.put(("", error_msg, target_language, None))
 
+    def do_translate_or_fix(self, target_language: str) -> None:
+        """Merged translate-or-fix for the language hotkeys (Win+Alt+V/E/J/C + custom).
+
+        Mirrors do_translation() (captures the live selection via Ctrl+C, honors the
+        shared translation cooldown, surfaces trial info, generates furigana for Japanese
+        source) but calls translate_or_fix() so the model auto-decides between translating
+        and grammar-fixing text already in target_language. The result is queued as the
+        same 5-tuple as do_translation() (is_grammar stays False downstream) because the
+        output is always genuinely in target_language in both branches.
+        """
+        current_time = time.time()
+        if current_time - self.last_translation_time < COOLDOWN:
+            logging.info("Cooldown active, please wait...")
+            self.translation_queue.put(("", "Please wait a moment...", target_language, None))
+            return
+
+        self.last_translation_time = current_time
+        logging.info(f"Translate-or-fix for {target_language}...")
+
+        try:
+            if not self._configure_api():
+                error_msg = "Error: No API key configured.\n\nPlease add your AI API key in Settings.\n\nGo to Settings > Guide tab for instructions on getting a free API key."
+                logging.warning(error_msg)
+                self.translation_queue.put(("", error_msg, target_language, None))
+                return
+
+            selected_text = self.get_selected_text()
+
+            if selected_text:
+                logging.info(f"Selected text: {selected_text[:50]}...")
+
+                # One merged prompt: translate, or grammar-fix if already in target_language.
+                result = self.translate_or_fix(selected_text, target_language)
+
+                # Generate furigana offline if enabled and source is Japanese.
+                furigana_text = None
+                if (self.config.get_furigana_enabled()
+                        and self._is_japanese_text(selected_text)):
+                    logging.info("Japanese text detected, generating furigana offline")
+                    furigana_text = self.generate_furigana(selected_text)
+
+                logging.info("Translate-or-fix complete!")
+
+                # Include trial info if in trial mode
+                trial_info = self.get_trial_info()
+                self.translation_queue.put((selected_text, result, target_language, trial_info, furigana_text))
+            else:
+                error_msg = "No text selected. Please select text and try again."
+                logging.warning(error_msg)
+                self.translation_queue.put(("", error_msg, target_language, None))
+        except TrialAPIError as e:
+            error_msg = f"Error: {str(e)}"
+            logging.error(error_msg)
+            trial_info = self.get_trial_info()
+            if trial_info:
+                if "exhausted" in str(e).lower() or "quota" in str(e).lower():
+                    trial_info['is_exhausted'] = True
+            self.translation_queue.put(("", error_msg, target_language, trial_info))
+        except Exception as e:
+            error_msg = f"Error: {str(e)}"
+            logging.error(error_msg)
+            self.translation_queue.put(("", error_msg, target_language, None))
+
     def redo_translation(self, text: str, target_language: str) -> None:
         """Force a fresh API translation of already-known text (bypass cache).
 
@@ -558,6 +759,60 @@ Rules (DO NOT include these in your response):
             error_msg = f"Error: {str(e)}"
             logging.error(error_msg)
             self.translation_queue.put(("", error_msg, target_language, None))
+
+    def do_grammar_fix(self) -> None:
+        """Fix the grammar of the currently selected text and queue the result.
+
+        Mirrors do_translation() (captures the live selection via Ctrl+C, honors a
+        cooldown, surfaces trial info) but calls fix_grammar() instead of translating.
+        The result is pushed to translation_queue as a 6-tuple
+        (original, corrected, "Grammar", trial_info, None, True) so the queue checker can
+        route it to the grammar popup (Copy/Replace only). Not saved to history.
+        """
+        current_time = time.time()
+        if current_time - self.last_grammar_fix_time < COOLDOWN:
+            logging.info("Grammar-fix cooldown active, please wait...")
+            self.translation_queue.put(("", "Please wait a moment...", "Grammar", None, None, True))
+            return
+
+        self.last_grammar_fix_time = current_time
+        logging.info("Fixing grammar of selected text...")
+
+        try:
+            if not self._configure_api():
+                error_msg = "Error: No API key configured.\n\nPlease add your AI API key in Settings.\n\nGo to Settings > Guide tab for instructions on getting a free API key."
+                logging.warning(error_msg)
+                self.translation_queue.put(("", error_msg, "Grammar", None, None, True))
+                return
+
+            selected_text = self.get_selected_text()
+
+            if selected_text:
+                logging.info(f"Selected text for grammar fix: {selected_text[:50]}...")
+
+                corrected = self.fix_grammar(selected_text)
+
+                logging.info("Grammar fix complete!")
+
+                # Include trial info if in trial mode
+                trial_info = self.get_trial_info()
+                self.translation_queue.put((selected_text, corrected, "Grammar", trial_info, None, True))
+            else:
+                error_msg = "No text selected. Please select text and try again."
+                logging.warning(error_msg)
+                self.translation_queue.put(("", error_msg, "Grammar", None, None, True))
+        except TrialAPIError as e:
+            error_msg = f"Error: {str(e)}"
+            logging.error(error_msg)
+            trial_info = self.get_trial_info()
+            if trial_info:
+                if "exhausted" in str(e).lower() or "quota" in str(e).lower():
+                    trial_info['is_exhausted'] = True
+            self.translation_queue.put(("", error_msg, "Grammar", trial_info, None, True))
+        except Exception as e:
+            error_msg = f"Error: {str(e)}"
+            logging.error(error_msg)
+            self.translation_queue.put(("", error_msg, "Grammar", None, None, True))
 
     def ask_freeform(self, raw_prompt: str, target_language: str) -> None:
         """Send a raw user-authored prompt to the AI verbatim (freeform ask).

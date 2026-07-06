@@ -590,9 +590,9 @@ if errorlevel 1 (
 echo Installation successful >> %LOGFILE%
 
 :: Update Registry auto-start path if enabled
-reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "AITranslator" >NUL 2>&1
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "CrossTrans" >NUL 2>&1
 if not errorlevel 1 (
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "AITranslator" /t REG_SZ /d "{new_exe_path}" /f >NUL 2>&1
+    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "CrossTrans" /t REG_SZ /d "{new_exe_path}" /f >NUL 2>&1
     echo Registry auto-start updated to {new_exe_name} >> %LOGFILE%
 )
 

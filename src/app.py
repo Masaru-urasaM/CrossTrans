@@ -284,12 +284,25 @@ class TranslatorApp:
         except Exception:
             self._source_hwnd = None
 
-        # Normal language translation
+        # Check for special Fix Grammar hotkey (HWND already captured above for Replace)
+        if language == "__fix_grammar__":
+            if not self.config.get_fix_grammar_hotkey_enabled():
+                return
+            self.quick_translate_manager.capture_mouse_position()
+            self.root.after(0, lambda: self.quick_translate_manager.show_loading(
+                "Grammar", loading_text="Fixing grammar"))
+            self.translation_service.do_grammar_fix()
+            return
+
+        # Normal language hotkey: merged translate-or-fix. If the selection is already in
+        # the hotkey's target language the model grammar-fixes it in place; otherwise it
+        # translates. Covers every language hotkey (defaults + custom) since this branch
+        # handles all non-special `language` values.
         # Capture mouse position immediately when hotkey is pressed
         self.quick_translate_manager.capture_mouse_position()
 
         self.root.after(0, lambda: self.quick_translate_manager.show_loading(language))
-        self.translation_service.do_translation(language)
+        self.translation_service.do_translate_or_fix(language)
 
     def _on_screenshot_hotkey(self):
         """Handle screenshot hotkey press (Win+Alt+S)."""
@@ -300,15 +313,17 @@ class TranslatorApp:
         self.screenshot_handler.cleanup_pending_screenshot()
 
     def show_quick_translate(self, original: str, translated: str, target_lang: str,
-                             trial_info: dict = None, furigana_text: str = None):
+                             trial_info: dict = None, furigana_text: str = None,
+                             is_grammar: bool = False):
         """Show compact popup near mouse cursor with translation result.
 
         Args:
             original: Original text
-            translated: Translated text
-            target_lang: Target language
+            translated: Translated text (or grammar-corrected text when is_grammar)
+            target_lang: Target language (label "Grammar" for grammar-fix results)
             trial_info: Optional trial mode info dict
             furigana_text: Optional furigana-annotated text with {kanji|reading} notation
+            is_grammar: True when showing a Fix Grammar result (hides translation-only buttons)
         """
         self.current_original = original
         self.current_translated = translated
@@ -320,7 +335,7 @@ class TranslatorApp:
             return
 
         self.quick_translate_manager.show(translated, target_lang, trial_info, original,
-                                          furigana_text=furigana_text)
+                                          furigana_text=furigana_text, is_grammar=is_grammar)
 
     def close_quick_translate(self):
         """Close the quick translate popup."""
@@ -625,6 +640,17 @@ class TranslatorApp:
                                             text=f"Translate → {self.selected_language}",
                                             command=self._do_retranslate, width=25)
         self.translate_btn.pack(side=LEFT)
+
+        # Fix Grammar button (corrects grammar of the input text without translating)
+        if self.config.get_fix_grammar_enabled():
+            if HAS_TTKBOOTSTRAP:
+                self.fix_grammar_btn = ttk.Button(btn_frame, text="Fix Grammar",
+                                                  command=self._do_fix_grammar,
+                                                  bootstyle="info", width=14)
+            else:
+                self.fix_grammar_btn = ttk.Button(btn_frame, text="Fix Grammar",
+                                                  command=self._do_fix_grammar, width=14)
+            self.fix_grammar_btn.pack(side=LEFT, padx=10)
 
         # Copy button
         if HAS_TTKBOOTSTRAP:
@@ -1079,6 +1105,43 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         """Update translation result in popup."""
         self._update_translation_with_original(translated, "")
 
+    def _do_fix_grammar(self):
+        """Fix the grammar of the main-window input text (no translation).
+
+        Reads the input box, sends it to TranslationService.fix_grammar() off the UI
+        thread, and writes the corrected text (same language) into the output box.
+        """
+        original = self.original_text.get('1.0', tk.END).strip()
+        if not original:
+            self.toast.show_warning("No text to fix")
+            return
+
+        if hasattr(self, 'fix_grammar_btn'):
+            self.fix_grammar_btn.configure(state='disabled', text="Fixing...")
+
+        def fix_thread():
+            corrected = self.translation_service.fix_grammar(original)
+            if self.popup:
+                self.popup.after(0, lambda: self._update_grammar_result(corrected))
+
+        threading.Thread(target=fix_thread, daemon=True).start()
+
+    def _update_grammar_result(self, corrected: str):
+        """Write the grammar-fix result into the output box and reset the button."""
+        try:
+            self.trans_text.config(state='normal')
+            self.trans_text.delete('1.0', tk.END)
+            self.trans_text.insert('1.0', corrected)
+            self.trans_text.config(state='disabled')
+        except tk.TclError:
+            return  # Popup closed mid-flight
+        if hasattr(self, 'fix_grammar_btn'):
+            try:
+                self.fix_grammar_btn.configure(state='normal', text="Fix Grammar")
+            except tk.TclError:
+                pass
+        self._update_popup_title_with_trial()
+
     def _update_popup_title_with_trial(self):
         """Update popup title to show trial mode quota if in trial mode."""
         if not self.popup or not self.popup.winfo_exists():
@@ -1442,7 +1505,11 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
                 # Queue item format: (original, translated, target_lang, trial_info, furigana_text)
                 result = self.translation_service.translation_queue.get_nowait()
                 furigana_text = None
-                if len(result) == 5:
+                is_grammar = False
+                if len(result) == 6:
+                    # Grammar-fix result: (original, corrected, label, trial_info, furigana, is_grammar)
+                    original, translated, target_lang, trial_info, furigana_text, is_grammar = result
+                elif len(result) == 5:
                     original, translated, target_lang, trial_info, furigana_text = result
                 elif len(result) == 4:
                     original, translated, target_lang, trial_info = result
@@ -1451,7 +1518,8 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
                     original, translated, target_lang = result
                     trial_info = None
                 if self.running:
-                    self.show_quick_translate(original, translated, target_lang, trial_info, furigana_text)
+                    self.show_quick_translate(original, translated, target_lang, trial_info,
+                                              furigana_text, is_grammar=is_grammar)
         except queue.Empty:
             pass
         except Exception as e:

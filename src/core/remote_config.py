@@ -5,7 +5,7 @@ with local caching and hardcoded fallback.
 
 Architecture (3-tier fallback):
   Tier 1: Remote fetch from Cloudflare Worker /v1/config
-  Tier 2: Local cache file (%APPDATA%/AITranslator/models_config.json)
+  Tier 2: Local cache file (%APPDATA%/CrossTrans/models_config.json)
   Tier 3: Hardcoded defaults in constants.py
 """
 import json
@@ -30,7 +30,7 @@ SUPPORTED_SCHEMA_VERSIONS = {2}
 
 # Cache file location
 _APPDATA = os.environ.get('APPDATA', os.path.expanduser('~'))
-CACHE_DIR = os.path.join(_APPDATA, 'AITranslator')
+CACHE_DIR = os.path.join(_APPDATA, 'CrossTrans')
 CACHE_FILE = os.path.join(CACHE_DIR, 'models_config.json')
 
 logger = logging.getLogger(__name__)

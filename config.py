@@ -14,12 +14,9 @@ from src.core.crypto import SecureStorage
 
 
 class Config:
-    """Manages application configuration stored in %APPDATA%/AITranslator/config.json
+    """Manages application configuration stored in %APPDATA%/CrossTrans/config.json"""
 
-    Note: APP_NAME kept as 'AITranslator' for backward compatibility with existing configs.
-    """
-
-    APP_NAME = "AITranslator"
+    APP_NAME = "CrossTrans"
     CONFIG_DIR = os.path.join(os.environ.get('APPDATA', '.'), APP_NAME)
     CONFIG_FILE = os.path.join(CONFIG_DIR, 'config.json')
 
@@ -34,6 +31,12 @@ class Config:
     SCREENSHOT_HOTKEY_DEFAULT = "win+alt+s"
     SCREENSHOT_TARGET_LANGUAGE_DEFAULT = "Auto"  # "Auto" = use current selected_language
 
+    # Fix Grammar hotkey (corrects grammar of selected text without translating)
+    # NOTE: Win+Alt+G is also Xbox Game Bar's "Record that" default. Registration fails
+    # gracefully (error 1409) if Game Bar has it; the hotkey is rebindable and the
+    # main-window "Fix Grammar" button always works as a fallback.
+    FIX_GRAMMAR_HOTKEY_DEFAULT = "win+alt+g"
+
     # Languages that can be added as custom hotkeys
     DEFAULT_LANGUAGES = ["Vietnamese", "English", "Japanese", "Chinese Simplified"]
     MAX_CUSTOM_HOTKEYS = 4  # Max 4 additional custom hotkeys
@@ -44,6 +47,9 @@ class Config:
         "custom_hotkeys": {},  # Custom language hotkeys (max 4)
         "screenshot_hotkey": SCREENSHOT_HOTKEY_DEFAULT,  # Screenshot OCR hotkey
         "screenshot_target_language": SCREENSHOT_TARGET_LANGUAGE_DEFAULT,  # Target language for screenshot OCR
+        "fix_grammar_hotkey": FIX_GRAMMAR_HOTKEY_DEFAULT,  # Hotkey to fix grammar of selected text
+        "fix_grammar_enabled": True,  # Enable Fix Grammar main-window button
+        "fix_grammar_hotkey_enabled": False,  # Register global Win+Alt+G hotkey (off by default - collides with Xbox Game Bar; the button + language hotkeys always work)
         "autostart": False,
         "check_updates": False,  # Default to False
         "theme": "darkly",
@@ -340,6 +346,39 @@ class Config:
     def set_furigana_enabled(self, enabled: bool):
         """Set furigana mode for Japanese text."""
         self._config['furigana_enabled'] = enabled
+        self.save()
+
+    # Fix Grammar settings
+    def get_fix_grammar_hotkey(self) -> str:
+        """Get the Fix Grammar hotkey combination."""
+        return self._config.get('fix_grammar_hotkey', self.FIX_GRAMMAR_HOTKEY_DEFAULT)
+
+    def set_fix_grammar_hotkey(self, hotkey: str):
+        """Set the Fix Grammar hotkey combination."""
+        self._config['fix_grammar_hotkey'] = hotkey
+        self.save()
+
+    def get_fix_grammar_enabled(self) -> bool:
+        """Get whether the Fix Grammar main-window button is shown."""
+        return self._config.get('fix_grammar_enabled', True)
+
+    def set_fix_grammar_enabled(self, enabled: bool):
+        """Set whether the Fix Grammar main-window button is shown."""
+        self._config['fix_grammar_enabled'] = enabled
+        self.save()
+
+    def get_fix_grammar_hotkey_enabled(self) -> bool:
+        """Get whether the global Win+Alt+G Fix Grammar hotkey is registered.
+
+        Separate from get_fix_grammar_enabled() (the main-window button). Off by default
+        because Win+Alt+G collides with Xbox Game Bar; the button and the language
+        hotkeys' merged translate-or-fix always work regardless.
+        """
+        return self._config.get('fix_grammar_hotkey_enabled', False)
+
+    def set_fix_grammar_hotkey_enabled(self, enabled: bool):
+        """Set whether the global Win+Alt+G Fix Grammar hotkey is registered."""
+        self._config['fix_grammar_hotkey_enabled'] = enabled
         self.save()
 
     def restore_defaults(self):

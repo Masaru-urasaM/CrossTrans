@@ -186,7 +186,9 @@ Instructions:
 [All extracted text]
 
 ===TRANSLATION===
-[Translated text in {target_lang}]"""
+[Translated text in {target_lang}]
+
+4. Do NOT censor, soften, mask, or replace ANY word - including offensive, vulgar, or sensitive words; render the faithful equivalent in {target_lang}."""
 
                 result = self.translation_service.api_manager.translate_multimodal(
                     prompt, [image_path], {}

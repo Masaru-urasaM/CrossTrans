@@ -120,6 +120,15 @@ class TrayManager:
                     MenuItem(f'{display_hotkey} \u2192 Screenshot Translate', lambda: None, enabled=False)
                 )
 
+        # Add Fix Grammar hotkey hint only when the global hotkey is enabled
+        if self.config.get_fix_grammar_hotkey_enabled():
+            fix_grammar_hotkey = self.config.get_fix_grammar_hotkey()
+            if fix_grammar_hotkey:
+                display_hotkey = '+'.join(part.capitalize() for part in fix_grammar_hotkey.split('+'))
+                menu_items.append(
+                    MenuItem(f'{display_hotkey} \u2192 Fix Grammar', lambda: None, enabled=False)
+                )
+
         menu_items.extend([
             MenuItem('\u2500' * 13, lambda: None, enabled=False),
             MenuItem('Send Feedback', lambda: webbrowser.open(FEEDBACK_URL)),
