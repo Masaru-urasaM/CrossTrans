@@ -5,6 +5,90 @@ approaches. Newest first.
 
 ---
 
+### Decision 8 — Furigana everywhere: annotate at render time, structured segments, fail-safe readings
+
+**Date**: 2026-08-04
+**Status**: RESOLVED (Phase 0 implemented; Phases 1-7 planned)
+
+**Problem**: Furigana had to appear on **every** surface that displays Japanese, not just the
+Quick Translate popup's source block. The shipped design could not get there: readings were
+generated *inside the translation pipeline* (`translation.py` `do_translation` /
+`do_translate_or_fix` / `redo_translation`), hand-carried as a `{kanji|reading}` string in the
+5th queue element, and rendered by exactly one method. The main window had **never** shown
+furigana at all — `translation_queue`'s only consumer routes solely to the popup — and clicking
+"Open Translator" from a furigana popup silently dropped the readings. The queue could not be
+extended either: **arity is the discriminator** in `_check_queue`, so a 7th positional field
+falls into the `else` branch, raises `ValueError`, and is swallowed by a bare `except` that
+aborts the whole drain loop (the user would see no popup at all).
+
+Measurement also showed the existing feature was wrong in several ways: the ruby covered
+okurigana (`取り消し` → `{取り消|とりけ}し`), homographs were misread (`今日は` → こんにち),
+`kakasi()` was reconstructed on every call (~175 ms vs ~0.3 ms to convert), literal `{a|b}` in
+the source was re-parsed as a real ruby pair, and Tk's `Text.get()` **silently deletes**
+embedded ruby content (`日本語を勉強しています` reads back as `をしています`).
+
+**Options considered**:
+1. **Extend the pipeline per surface** — Pros: no new module. Cons: every surface needs its own
+   plumbing; cannot extend the tuple safely; leaves generation coupled to translation, so
+   screenshot/OCR, dictionary and freeform paths stay unannotated forever.
+2. **Annotate at render time behind a shared widget** — Pros: any surface that adopts the widget
+   gains furigana with zero pipeline change; the queue contract is untouched; one place to fix
+   rendering. Cons: needs a plain-text shadow model so nothing reads ruby back out of a widget.
+3. **Ask the AI model to return furigana** — Pros: no new dependency, context-aware. Cons: costs
+   tokens and latency on every translation, does not work offline, unusable for the input-box
+   preview (no API call yet), and quality varies across 15 providers.
+
+**Resolution**: **Option 2.** Generation moves to render time behind two modules —
+`src/core/furigana.py` (pure logic) and, from Phase 1, `src/ui/ruby_text.py` (the only place ruby
+is drawn). Four invariants govern it:
+
+- **I1 — annotation never alters text.** `''.join(seg.base) == source`, asserted at runtime.
+  This kills the injection class structurally instead of by careful escaping.
+- **I2 — the model owns the string.** Every read goes through `get_plain()`; no `.get()` on a
+  ruby-capable widget, ever. Non-negotiable because `Text.get()` drops embedded windows with
+  **zero visible trace** (verified: 0 characters contributed, but 1 index consumed each), so a
+  Copy would put kanji-stripped text into the user's document.
+- **I3 — editable implies plain.** A widget the user types into never holds ruby; `edit_undo()`
+  does not restore destroyed embedded windows.
+- **I4 — render-time and idempotent.** The queue tuple shapes stay frozen.
+
+Readings come from a **provider chain**: fugashi/UniDic (the Japanese NLP pack already defined
+in `nlp_manager.py`) preferred, pykakasi (bundled, verified working in the frozen EXE) as
+fallback. The aligner is **fail-safe** — it returns `None` rather than emit a reading it cannot
+map deterministically, because for a learner a wrong reading is worse than a blank one: it is
+unfalsifiable at the point of use.
+
+Two refinements were added only after measurement, not by assumption:
+- **Counters after digits are suppressed.** `2日` is *futsuka*; the digit holds part of the
+  reading and cannot take ruby, so カ over 日 alone invites "ni-ka". This also removes genuine
+  errors (`2人` is *futari*, not ni-**nin**).
+- **All-kanji compounds keep their compound reading.** UniDic splits `日本語` into 日本
+  (proper noun, ニッポン) + 語, giving にっぽんご. Where the fallback dictionary holds a single
+  all-kanji entry spanning two or more tokens, its compound reading wins.
+
+**Rejected**:
+- **Cross-provider disagreement as a wrongness signal** — measured 4/10 sentences disagree, and
+  fugashi is *right* in half of those (今日→きょう, 3時→じ) and wrong in the other half. Blanket
+  suppression on disagreement would delete ruby from ~40% of sentences for no accuracy gain.
+  The all-kanji compound rule is the narrow, targeted version that survives.
+- **Ruby inline in the main input box** — would corrupt `app.py:942` (the API receives
+  particle-only text, and `find_cached` then poisons history with the stripped key) and
+  `app.py:546` (an all-kanji input reads back as `""`, so the popup is destroyed and rebuilt
+  empty, losing everything the user typed). Replaced by a read-only Reading pane beneath it.
+- **A "Copy with readings" command** — considered and declined by the user; every Copy/Replace
+  emits the plain shadow string only.
+- **Ruby in toasts and the history list** — explicit non-goals. Toasts are `tk.Label` (no
+  embedded widgets possible) and history rows are 60-character truncations where readings do not
+  fit; converting those rows would also break click-to-load, since
+  `history_dialog.py` walks `winfo_children()` non-recursively.
+
+**References**: `src/core/furigana.py`, `tests/test_furigana_core.py`,
+`src/core/translation.py` (`_is_japanese_text`, `generate_furigana` delegates),
+`CrossTrans.spec:15` (pykakasi data payload), `src/core/nlp_manager.py:324-332` (Japanese pack),
+CHANGELOG "Phase 0 — Furigana engine".
+
+---
+
 ### Decision 7 — Storage-identity rename to CrossTrans: clean rename, no data migration
 
 **Date**: 2026-07-02

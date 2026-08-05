@@ -2,6 +2,90 @@
 
 All notable changes to CrossTrans are documented here.
 
+## [Unreleased]
+
+### Phase 0 — Furigana engine: structured segments, accurate readings (2026-08-04)
+
+First phase of "furigana everywhere". **Pure logic only — no UI file was touched**, so the
+Quick Translate popup looks and behaves exactly as before except that its readings are now
+correct. Groundwork for rendering ruby on every surface in later phases.
+
+**Added**
+- **`src/core/furigana.py`** — the furigana engine.
+  - `RubySegment(base, ruby)` — a structured segment model replacing the fragile
+    `{kanji|reading}` string as the internal contract.
+  - **Invariant I1**: `''.join(seg.base for seg in annotate(text)) == text`, asserted at
+    runtime and in tests. Annotation can no longer alter the text it describes.
+  - `should_annotate(text, lang_hint)` — requires kanji **plus** kana evidence, or an
+    explicit language hint. Chinese hanzi no longer qualifies for Japanese readings, while
+    kanji-only Japanese (`東京都`, `電源設定`) still annotates when the caller passes a hint.
+  - `align(surface, reading)` — maps a whole-token reading onto the kanji runs inside it by
+    anchoring on the kana already present. **Fail-safe**: returns `None` rather than guess,
+    so no wrong reading is ever drawn.
+  - Provider chain `FugashiProvider` → `KakasiProvider`, each built **once** and reused.
+  - `_refine_compounds()` — restores whole-compound readings that morphological splitting
+    destroys, restricted to all-kanji spans.
+  - `to_notation()` / `parse_notation()` with backslash escaping for `\ { } |`.
+- **`tests/test_furigana_core.py`** — 80 tests: detection matrix, aligner (incl. every
+  fail-safe branch), I1 over a 19-case corpus, notation escaping round-trip, whitespace
+  preservation, the pair cap, and the reading-quality regressions below.
+
+**Fixed**
+- **Okurigana covered by ruby** — `取り消し` produced `{取り消|とりけ}し`, the ruby spanning
+  the り, because the old code stripped only a *trailing* kana suffix. Now
+  `{取|と}り{消|け}し`. Same class fixed for `話し合い`, `申し込み`, `生き物`.
+- **Wrong homograph readings** — `今日は雨` gave こんにち; now きょう (morphological context).
+- **`kakasi()` rebuilt on every call** — measured ~175 ms to construct versus ~0.3 ms to
+  convert. Now a lock-guarded singleton, plus a 256-entry `lru_cache` on annotation.
+- **Notation injection** — source text containing a literal `{a|b}` was parsed back as a
+  real ruby pair and rendered as "a" with the reading "b". The segment model makes this
+  structurally impossible; until the renderer consumes segments (Phase 1), the legacy wire
+  format additionally suppresses ruby for any text holding `\ { } |`.
+- **Multi-line text lost all ruby** — tokenizers normalize whitespace away, which broke the
+  round-trip check. Annotation now runs on whitespace-free chunks and re-inserts separators
+  verbatim, so newlines, CRLF, tabs and blank lines survive.
+- **Misleading counter readings** — `2日` is *futsuka*: the digit carries part of the reading
+  and cannot take ruby, so drawing カ over 日 alone invited "ni-ka". Counters following a
+  digit are now suppressed, which also removes real errors (`2人` is *futari*, not ni-**nin**;
+  standalone `1月` reported ツキ instead of ガツ).
+- **Compound readings broken by splitting** — UniDic tags 日本 as a proper noun reading
+  ニッポン, so `日本語` came out にっぽんご and `日本人` にっぽんにん. Both correct now, and
+  `東京駅` → とうきょうえき, `中国語` → ちゅうごくご.
+- **Chinese text was given Japanese readings** — the pipeline gate matches U+4E00-U+9FFF, so
+  hanzi qualified. `你好世界` produced `{你|}{世界|せかい}` — note the **empty** reading on 你,
+  which would have rendered a blank ruby label. Both are gone.
+- **Misleading log message** — the old `"pykakasi not installed"` warning did not fire when
+  the package imported but its bundled dictionary data was missing, which is the likely
+  packaging regression. Provider failures now log the actual exception.
+
+**⚠️ One behaviour change: kanji-only source text no longer gets furigana from the hotkey path.**
+Ruby now requires kanji **plus** kana evidence, or an explicit language hint. A sentence
+(`今日は雨が降る`) is unaffected — it has kana. But a kanji-only selection (`電源設定`, `東京都`,
+`翻訳`) used to be annotated and now is not, because the pipeline calls
+`generate_furigana(selected_text)` with no hint and **cannot tell Japanese kanji from Chinese
+hanzi**: the same permissive check that annotated `東京都` is what annotated `你好世界`.
+This is the deliberate "blank beats a wrong reading" trade — a lost reading is visibly absent,
+whereas a wrong one is unfalsifiable at the point of use. Phase 2 closes the gap by threading
+the real source language from the surfaces that already know it (the popup, and the dictionary's
+`_open_with_language`), at which point kanji-only Japanese annotates again *without* also
+re-annotating Chinese.
+
+**Changed**
+- `src/core/translation.py` — `_is_japanese_text()` and `generate_furigana()` are now
+  two-line delegates onto the new module. `generate_furigana()` gained an optional
+  `lang_hint`. The queue tuple shapes are **unchanged** (arity is the discriminator in
+  `app.py:_check_queue`, so extending it positionally would abort the drain loop).
+
+**Verified**
+- Packaging: `collect_data_files('pykakasi')` at `CrossTrans.spec:15` is load-bearing and
+  sufficient — proven with two minimal one-file probe EXEs (with data: readings work in the
+  frozen EXE; without: `FileNotFoundError` on `kanwadict4.db`, swallowed into a silent
+  no-furigana state). No new packaging risk from this phase.
+
+**Tests**: 124 → 204 passed / 0 failed. No regressions; the pre-existing tuple-shape
+assertions in `test_translate_or_fix.py`, `test_fix_grammar.py` and `test_freeform_prompt.py`
+all still hold.
+
 ## [Unreleased] — Storage identity renamed to CrossTrans (2026-07-01)
 
 The app's internal **storage identity** — the `%APPDATA%` config folder, the model-config cache folder, the Windows auto-start registry value, and the DPAPI encryption entropy/description — was renamed from the legacy product name to **`CrossTrans`**, matching the user-facing name already in `src/constants.py`. A fresh install now uses `%APPDATA%\CrossTrans\` throughout.
