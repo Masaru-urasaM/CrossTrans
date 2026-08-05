@@ -692,15 +692,10 @@ def generate_notation(text: str, lang_hint: Optional[str] = None) -> Optional[st
     Compatibility helper for the translation pipeline, which still ships a
     notation string through the queue.
 
-    Source text containing a notation delimiter is left unannotated: the popup
-    renderer still parses this format with a regex that does not honor escapes,
-    so it would turn a literal "{A|B}" into a fake ruby pair. Suppressing ruby
-    for those rare strings is the fail-safe choice. Remove this guard once the
-    renderer consumes RubySegment directly and the notation is retired.
+    Delimiters in the source text are escaped by to_notation() and unescaped by
+    parse_notation(), which is what the renderer uses, so a literal "{A|B}"
+    survives as text instead of becoming a fake ruby pair.
     """
-    if any(ch in text for ch in _NOTATION_SPECIALS):
-        return None
-
     segments = annotate(text, lang_hint)
     if not any(seg.ruby for seg in segments):
         return None

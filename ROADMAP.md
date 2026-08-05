@@ -10,9 +10,9 @@
 
 | # | Item | Status | Notes |
 |---|------|--------|-------|
-| F0 | **Furigana engine** — `src/core/furigana.py`: structured `RubySegment` contract, invariant I1, fail-safe aligner, fugashi→pykakasi provider chain. Fixes 7 defects (okurigana span, homograph readings, `kakasi()` per-call rebuild, notation injection, multi-line ruby loss, digit-counter readings, split compounds). No UI change. | ✅ Done (2026-08-04) | 124 → 204 tests. See Decision 8 |
-| F1 | **`RubyText` primitive** — `src/ui/ruby_text.py` as the single place ruby is drawn; `_render_furigana` becomes a delegate. Fixes the height unit bug (13px `height` unit vs 47px real ruby line) and the wheel dead-zone over ruby frames. Popup must look identical. | 📋 Planned | Blocked on: popup-height ordering (annotate synchronously under a size cap — `geometry()` is set once on an `overrideredirect` Toplevel) |
-| F2 | **Popup fully ruby** — `popup_text` + replace preview; screenshot/OCR, grammar and merged results inherit it. Route the `.get()` at `quick_translate.py:1002` through `get_plain()`; guard the custom-prompt `state='normal'` window. | 📋 Planned | I2 gate: no `.get()` on a ruby widget |
+| F0 | **Furigana engine** — `src/core/furigana.py`: structured `RubySegment` contract, invariant I1, fail-safe aligner, fugashi→pykakasi provider chain. Fixes 7 defects (okurigana span, homograph readings, `kakasi()` per-call rebuild, notation injection, multi-line ruby loss, digit-counter readings, split compounds). No UI change. | ✅ Done (2026-08-04) | 124 → 208 tests. See Decision 8 |
+| F1 | **`RubyText` primitive** — `src/ui/ruby_text.py` as the single place ruby is drawn; `_render_furigana` is a delegate. Fixes the height unit bug (28px `height` unit vs 47px real ruby row), the popup height estimate, the wheel dead-zone over ruby frames, and the suppression of ruby for text holding `{`/`|`/`\`. Adds `get_plain()`. | ✅ Done (2026-08-05) | 208 → 257 tests. Popup verified pixel-identical by screenshot; height predictions match `count(..., 'ypixels')` exactly |
+| F2 | **Popup fully ruby** — `popup_text` + replace preview; screenshot/OCR, grammar and merged results inherit it. Route the `.get()` at `quick_translate.py:1002` through `RubyText.get_plain()`; guard the custom-prompt `state='normal'` window. | 📋 Planned | I2 gate: no `.get()` on a ruby widget |
 | F3 | **Main output + expanded window** — `trans_text` and `expanded_window` (make it read-only; nothing consumes its edits). Route `app.py:1248/1253/1269` and `expanded_window.py:112/161`. Fix "Open Translator" dropping readings (`app.py:443`). | 📋 Planned | |
 | F4 | **Input Reading pane** — read-only collapsible `RubyText` under `original_text`; input box stays plain (I3). Refresh on debounced keystroke **and** the programmatic writes at `app.py:1168-1169` / `1330-1331`. Fix the `config.py:344` default fallback; reword `hotkey_tab.py:255`. | 📋 Planned | |
 | F5 | **Dictionary result (8 fields)** — ruby on values only; keep the monospace label columns from `_align_dictionary_text`. Suppress ruby on field 5 (Pronunciation — the prompt deliberately asks for katakana). | 📋 Planned | |
@@ -23,6 +23,11 @@
 60-char truncations; converting history rows would break click-to-load), `tk.Listbox`,
 `ttk.Entry` / `Combobox`, buttons, menus, `messagebox`, OS title bars and the tray menu — Tk
 cannot embed widgets in any of these.
+
+**Archiving note**: the finished F-rows stay in this table until F7 lands, then the whole F0–F7
+block moves to `ROADMAP_DONE.md` as one item. They are the reference context the remaining
+phases are written against (invariants, file/line targets), so splitting them out mid-feature
+would cost more than it saves.
 
 ---
 

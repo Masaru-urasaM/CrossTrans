@@ -63,7 +63,8 @@ self.screenshot_handler.configure_callbacks(
 | Update quick translate popup | `src/ui/quick_translate.py` |
 | Add settings tab | `src/ui/settings/*.py` |
 | Translation logic | `src/core/translation.py` |
-| Furigana rendering | `src/ui/quick_translate.py` (`_render_furigana`) + `src/core/translation.py` (`generate_furigana`) |
+| Furigana readings (generation) | `src/core/furigana.py` |
+| Furigana rendering (any surface) | `src/ui/ruby_text.py` (`RubyText`) |
 | Dictionary mode | `src/core/nlp_manager.py` + `src/ui/dictionary_mode.py` + `src/ui/custom_word_boxes.py` + `src/core/translation.py` (prompt) |
 | Update system | `src/utils/updates.py` + `src/ui/settings/update_manager.py` |
 
@@ -141,6 +142,7 @@ Hardcoded values in `constants.py` serve as fallback defaults.
 ## Core Modules (src/core/)
 
 - `remote_config.py` - Dynamic model/provider config from Cloudflare KV
+- `furigana.py` - Furigana engine: Japanese detection, fugashi/pykakasi providers, reading aligner
 - `api_manager.py` - Multi-provider API communication (15 providers)
 - `translation.py` - Translation service, clipboard integration, furigana generation
 - `hotkey.py` - Global hotkey registration (Win+Alt+V/E/J/C/S)
@@ -161,6 +163,7 @@ Hardcoded values in `constants.py` serve as fallback defaults.
 
 ## UI Components (src/ui/)
 
+- `ruby_text.py` - `RubyText` widget: the single place furigana is drawn (+ `get_plain()` readback)
 - `quick_translate.py` - QuickTranslateManager (translation popup with Copy, Replace, Dictionary, Open Translator, furigana rendering)
 - `tray.py` - System tray manager
 - `dialogs.py` - Error/trial dialogs
@@ -454,32 +457,80 @@ of newly installed subpackages.
 
 ## Furigana System (Japanese Reading Guides)
 
-Displays original Japanese text with hiragana readings above kanji characters.
+Displays Japanese text with hiragana readings above kanji characters.
+Being rolled out to every surface that can show Japanese — see `ROADMAP.md` rows F0–F7.
+**Engine (F0) and renderer (F1) are done**; the remaining phases add surfaces.
 
-### Data flow:
+### Architecture: annotate at render time
 ```
-Translation completes → pykakasi converts kanji to hiragana → {kanji|reading} notation
-Quick Translate popup → _render_furigana() → embedded frames in tk.Text widget
+src/core/furigana.py   engine   text -> (RubySegment(base, ruby), ...)     [no Tk]
+src/ui/ruby_text.py    widget   segments -> embedded frames in a tk.Text   [no engine logic]
 ```
+Reading generation and drawing are separate: the engine is pure logic (unit-testable, no
+display), the widget is pure presentation. Callers annotate the text they are about to
+display rather than receiving pre-annotated strings through the queue.
 
-### How it works:
-1. **Generation** (`translation.py` `generate_furigana()`): Uses pykakasi offline to convert Japanese text. Detects kanji vs kana, outputs `{kanji|reading}` notation (e.g., `{表示|ひょうじ}`).
-2. **Rendering** (`quick_translate.py` `_render_furigana()`): Parses `{kanji|reading}` notation. Each pair becomes an embedded `tk.Frame` (reading label on top, kanji label on bottom) inserted into a `tk.Text` widget with `align='baseline'` for perfect vertical alignment.
-3. **Integration** (`translation.py` `do_translation()`): Generates furigana after translation if enabled AND Japanese detected AND no custom prompt. Passes 5-item tuple via queue.
+### Engine: `src/core/furigana.py`
+- `annotate(text, lang_hint=None) -> tuple[RubySegment, ...]` — the main entry point. Safe on
+  ANY string (empty, Latin, Chinese, provider missing) so callers need no branching.
+- **Invariant I1**: `''.join(seg.base for seg in annotate(t)) == t`. Annotation can never alter
+  the text it describes; violation falls back to plain.
+- `should_annotate(text, lang_hint)` — needs kanji **plus** kana in the string, or an explicit
+  `lang_hint="Japanese"`. Kanji-only strings look identical to Chinese, and
+  `nlp_manager.detect_language()` reports Chinese for them, so a caller that knows the language
+  must say so. Pass the hint wherever it is known.
+- **Provider chain**: fugashi/UniDic (per-token `feature.kana`) → pykakasi → none. The aligner
+  maps a whole-token reading onto interleaved kanji/kana runs and returns `None` on any
+  mismatch. **Blank beats a wrong reading** — an absent reading is visibly absent, a wrong one
+  is not.
+- Two measured suppression rules: digit + counter pairs (`2日` would read as a bare fragment)
+  and all-kanji compound refinement (`日本語` would read にっぽんご because UniDic tags 日本 as a
+  proper noun).
+- `MAX_RUBY_PAIRS = 400`, `lru_cache` on annotation, `prewarm()` to load the dictionary.
+- Legacy `{kanji|reading}` notation (`to_notation` / `parse_notation` / `generate_notation`)
+  still carries furigana through the translation queue. It escapes `\ { } |`, so source text
+  containing a delimiter round-trips as text. New code should use segments.
+
+### Renderer: `src/ui/ruby_text.py`
+- `RubyText(tk.Text)` — `insert_ruby()` (annotates), `insert_notation()`, `insert_plain()`,
+  `set_ruby()`, `set_notation()`, `clear()`. All work while `state='disabled'`.
+- **`get_plain()` — always use this instead of `get()` on a RubyText.** `Text.get()` returns
+  zero characters for an embedded window while consuming one index, so `get()` silently deletes
+  every annotated word from Copy / Replace / re-send paths. `get_plain()` rebuilds the true
+  text from `dump(text=True, window=True)`.
+- **`fit_height(available_px)` — never set `height` from a line count.** The option counts rows
+  of the base font (28 px) but a row carrying ruby is 47 px. `layout_rows()` simulates the
+  `wrap='char'` layout and the pixel requirement is converted to `height` units. Row heights
+  are derived from `font.metrics`, matching `Text.count(..., 'ypixels')` exactly.
+- `estimate_notation_px()` sizes a window *before* the widget exists — required for the popup,
+  whose `overrideredirect` Toplevel gets its geometry once.
+- `MAX_ANNOTATE_CHARS = 3000`: longer text inserts plain, because annotation and frame
+  construction run on the UI thread.
+- Every ruby frame and label is bound to the wheel handler; an embedded window otherwise
+  swallows `<MouseWheel>` and creates a scroll dead zone.
 
 ### Key details:
-- **Embedded frames, not monospace text** — Each ruby pair is a `tk.Frame` with two `tk.Label`s, embedded via `window_create(align='baseline')`. This ensures kanji aligns with surrounding plain text regardless of font size.
+- **Embedded frames, not monospace text** — each pair is a `tk.Frame` holding two `tk.Label`s,
+  inserted with `window_create(align='baseline')` so the base characters stay level with
+  surrounding text at any font size.
 - **Word wrap**: `wrap=tk.CHAR` for CJK-friendly line breaking
-- **Fonts**: MS Gothic 11pt (kanji, white), MS Gothic 8pt (reading, blue #88ccff)
-- **Offline only**: pykakasi runs locally, no API call needed
+- **Fonts/colors**: Yu Gothic 11pt base (`#ffffff` under a reading, `#cccccc` plain),
+  Yu Gothic 7pt reading (`#80b8ff`), ruby plate `#363636`
+- **Offline only** — no API call is involved in generating readings
 - **Toggle**: Settings → Hotkeys → "Enable Furigana" checkbox
-- **Config**: `furigana_enabled` (default `True` in config.py)
+- **Config**: `furigana_enabled` (default `True` in the defaults dict; note the getter at
+  `config.py:344` falls back to `False`, fixed in F4)
 
 ### Files involved:
-- `src/core/translation.py` - `generate_furigana()`, `_is_japanese_text()`, queue integration in `do_translation()`
-- `src/ui/quick_translate.py` - `_render_furigana()`, `show()` height calculation
+- `src/core/furigana.py` - engine: detection, provider chain, aligner, notation
+- `src/ui/ruby_text.py` - `RubyText` widget: rendering, `get_plain()`, sizing, wheel
+- `src/core/translation.py` - `generate_furigana()` / `_is_japanese_text()` delegate to the
+  engine; queue integration in `do_translation()` (5-item tuple)
+- `src/ui/quick_translate.py` - `_render_furigana()` (delegate), `show()` height budget
 - `config.py` - `get_furigana_enabled()` / `set_furigana_enabled()`
 - `src/ui/settings/hotkey_tab.py` - Furigana toggle checkbox
+- `tests/test_furigana_core.py` (engine, headless), `tests/test_ruby_text.py` (widget, uses the
+  `tk_root` fixture in `tests/conftest.py` which skips without a display)
 
 ## Vision Detection System
 

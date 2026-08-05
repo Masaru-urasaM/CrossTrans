@@ -7,8 +7,8 @@ approaches. Newest first.
 
 ### Decision 8 — Furigana everywhere: annotate at render time, structured segments, fail-safe readings
 
-**Date**: 2026-08-04
-**Status**: RESOLVED (Phase 0 implemented; Phases 1-7 planned)
+**Date**: 2026-08-04 (Phase 1 addendum 2026-08-05)
+**Status**: RESOLVED (Phases 0-1 implemented; Phases 2-7 planned)
 
 **Problem**: Furigana had to appear on **every** surface that displays Japanese, not just the
 Quick Translate popup's source block. The shipped design could not get there: readings were
@@ -66,6 +66,22 @@ Two refinements were added only after measurement, not by assumption:
   (proper noun, ニッポン) + 語, giving にっぽんご. Where the fallback dictionary holds a single
   all-kanji entry spanning two or more tokens, its compound reading wins.
 
+**Phase 1 addendum — how ruby height is determined.** A window must be sized before the widget
+that fills it exists: the popup is an `overrideredirect` Toplevel whose `geometry()` is set once,
+and calling `update_idletasks()` mid-build to measure a realized widget would flash it at the
+wrong position first. So height is **derived from font metrics** and a `wrap='char'` simulation
+(`ruby row = ruby linespace + base linespace + 2·pad + base descent`, `spacing1 + spacing3`
+charged once per *logical* line, not per wrapped row). Predictions match
+`Text.count(..., 'ypixels')` exactly on every case measured, which is what exposed the
+per-logical-line spacing rule — a per-display-row model over-estimated by 4 px per wrapped row.
+Rejected alternative: render off-screen and measure, which doubles the frame construction cost
+on the UI thread for content that is already capped at `MAX_ANNOTATE_CHARS`.
+
+The Phase 0 fail-safe that suppressed ruby for source text containing `\ { } |` was **removed**
+in Phase 1: it existed only because the old regex renderer ignored escapes, and `RubyText`
+parses through `parse_notation()`, which honors them. Keeping it would have cost every reading
+in any sentence containing a pipe.
+
 **Rejected**:
 - **Cross-provider disagreement as a wrongness signal** — measured 4/10 sentences disagree, and
   fugashi is *right* in half of those (今日→きょう, 3時→じ) and wrong in the other half. Blanket
@@ -83,9 +99,10 @@ Two refinements were added only after measurement, not by assumption:
   `history_dialog.py` walks `winfo_children()` non-recursively.
 
 **References**: `src/core/furigana.py`, `tests/test_furigana_core.py`,
+`src/ui/ruby_text.py`, `tests/test_ruby_text.py`,
 `src/core/translation.py` (`_is_japanese_text`, `generate_furigana` delegates),
 `CrossTrans.spec:15` (pykakasi data payload), `src/core/nlp_manager.py:324-332` (Japanese pack),
-CHANGELOG "Phase 0 — Furigana engine".
+CHANGELOG "Phase 0 — Furigana engine" and "Phase F1 — RubyText primitive".
 
 ---
 

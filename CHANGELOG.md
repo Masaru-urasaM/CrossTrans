@@ -4,6 +4,78 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase F1 — RubyText primitive: one renderer, correct sizing (2026-08-05)
+
+Second phase of "furigana everywhere". The ruby drawing code moves out of the Quick Translate
+popup into a reusable widget, so the later phases add surfaces instead of copying a renderer.
+**The popup renders pixel-for-pixel identically** (verified with a side-by-side screenshot of
+the old and new renderers) — every change below is either a bug fix or new capability.
+
+**Added**
+- **`src/ui/ruby_text.py`** — `RubyText`, a `tk.Text` subclass that owns ruby rendering.
+  - `insert_ruby(index, text, lang_hint)` annotates on the way in; `insert_notation()` consumes
+    the legacy `{kanji|reading}` string; `insert_plain()` skips annotation. All three work while
+    the widget is `state='disabled'`, so read-only surfaces need no state juggling.
+  - **`get_plain()`** — the readback that Copy / Replace / re-send paths need. `Text.get()`
+    contributes **zero characters** for an embedded window while still consuming one index, so
+    reading an annotated widget with `get()` silently deletes every annotated word. Measured on
+    the popup's own sample: `get()` returns 8 of 14 characters, `get_plain()` all 14.
+  - `LayoutModel` / `layout_rows()` / `measure_px()` — a `wrap='char'` simulation that predicts
+    the pixel height of annotated content. Row heights are **derived from font metrics**, not
+    guessed: `frame = ruby linespace + base linespace + 2·pad`, `ruby row = frame + base
+    descent`, plus `spacing1 + spacing3` once per logical line. Predictions match
+    `Text.count(..., 'ypixels')` **exactly** on every case tested (47 / 86 / 122 / 28 px).
+  - `estimate_notation_px()` — lets a caller size its window *before* creating the widget,
+    which the popup must do because an `overrideredirect` Toplevel gets its geometry once.
+  - `MAX_ANNOTATE_CHARS` (3000) — above this, text is inserted plain. Annotation and frame
+    construction run on the UI thread, so a pasted document cannot freeze it.
+- **`tests/test_ruby_text.py`** — 49 tests. The wrap arithmetic runs headless through an
+  injected `LayoutModel`; the widget tests use a new session-scoped `tk_root` fixture in
+  `tests/conftest.py` that skips itself when no display is available.
+
+**Fixed during implementation**
+- **Insertion order was reversed** (found by a render probe, not by reading the code): feeding
+  runs one at a time to a fixed index put each run *before* the previous one, so
+  `私は日本語を勉強しています。` rendered as `しています。勉強を日本語は私`. Insertion now walks
+  a right-gravity mark. This bug did not exist in the old renderer (it always appended to
+  `END`) — it was introduced and killed inside this phase, and is now covered by two tests.
+- **Height unit bug — multi-line ruby was clipped.** The `height` option counts rows of the
+  *base* font (28 px measured), but a row carrying ruby is 47 px. The old renderer asked for
+  one unit per logical line, so it under-allocated 19 px for every annotated row: fine for one
+  line, clipped from the second onwards. Height is now converted from the real pixel
+  requirement.
+- **Popup height estimate replaced.** `paragraphs * 38 + 30` ignored wrapping entirely; a
+  Japanese paragraph that wraps to two ruby rows was budgeted 68 px and needed 103 px. The
+  estimate now measures at the actual wrap width.
+- **Scroll dead zone over ruby.** An embedded frame swallows `<MouseWheel>`, so the wheel did
+  nothing precisely where the annotated text is. Measured: over a ruby label the old renderer
+  leaves `yview` at `0.0000`, `RubyText` scrolls to `0.1615`. Every frame and label created is
+  now bound to the same handler.
+- **Text containing `{`, `|` or `\` lost all its readings.** `generate_notation()` suppressed
+  ruby for those strings because the old regex renderer would have turned a literal `{A|B}`
+  into a fake pair. `RubyText` parses through `parse_notation()`, which honors the escapes, so
+  the guard is gone: `設定{A|B}テストを保存` now shows readings and reads back byte-identical.
+- Dead `<Shift-MouseWheel>` binding removed — `wrap='char'` has no horizontal view, so
+  `xview_scroll` could never do anything.
+- `ROADMAP.md` and the Phase 0 entry said "124 → 204 tests"; the real Phase 0 total was **208**.
+
+**Changed**
+- `src/ui/quick_translate.py` — `_render_furigana()` is now a five-line delegate and takes the
+  wrap width. `HORIZONTAL_PADDING` moved to module scope so `calculate_size()` and the furigana
+  estimate cannot drift apart; added `FURIGANA_SEPARATOR_PX`. New `popup_furigana` attribute
+  (reset in `close()`) exposes the widget to the later phases.
+
+**Verified**
+- Visual parity: old and new renderers drawn in one window and screenshotted — identical
+  glyph positions, colours, plate backgrounds and baselines.
+- `get_plain()` round-trips text holding `{`, `|` and `\` through the real popup path.
+- No circular imports: `src.ui.ruby_text` pulls in `src.core.furigana` only.
+
+**Tests**: 208 → 257 passed / 0 failed (+49). One Phase 0 test was rewritten
+(`test_generate_notation_suppresses_text_holding_delimiters` →
+`test_generate_notation_escapes_delimiters_in_the_source`) because the behaviour it pinned was
+the guard removed above.
+
 ### Phase 0 — Furigana engine: structured segments, accurate readings (2026-08-04)
 
 First phase of "furigana everywhere". **Pure logic only — no UI file was touched**, so the
@@ -82,7 +154,7 @@ re-annotating Chinese.
   frozen EXE; without: `FileNotFoundError` on `kanwadict4.db`, swallowed into a silent
   no-furigana state). No new packaging risk from this phase.
 
-**Tests**: 124 → 204 passed / 0 failed. No regressions; the pre-existing tuple-shape
+**Tests**: 124 → 208 passed / 0 failed. No regressions; the pre-existing tuple-shape
 assertions in `test_translate_or_fix.py`, `test_fix_grammar.py` and `test_freeform_prompt.py`
 all still hold.
 

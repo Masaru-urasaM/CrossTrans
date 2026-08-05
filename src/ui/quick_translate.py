@@ -20,7 +20,16 @@ except ImportError:
     HAS_TTKBOOTSTRAP = False
 
 from src.core.nlp_manager import nlp_manager
+from src.ui.ruby_text import RubyText, estimate_notation_px
 from src.ui.toast import ToastManager
+
+# Popup padding - SINGLE SOURCE OF TRUTH, shared by calculate_size() and the
+# furigana height estimate (both need the same wrap width).
+HORIZONTAL_PADDING = 50  # frame(30) + scrollbar(20)
+
+# Height taken by the rule drawn between the furigana block and the
+# translation: 1px line plus its 8px padding above and below.
+FURIGANA_SEPARATOR_PX = 17
 
 # Dictionary button colors (dark red) - consistent with dictionary_mode.py
 DICT_BUTTON_COLOR = "#822312"  # Dark red (main color)
@@ -178,6 +187,7 @@ class QuickTranslateManager:
         self.config = config
         self.popup: Optional[tk.Toplevel] = None
         self.popup_text: Optional[tk.Text] = None
+        self.popup_furigana: Optional[RubyText] = None  # Read-only reading guide
         self.popup_copy_btn: Optional[ttk.Button] = None
         self.popup_dict_btn: Optional[ttk.Button] = None
         self.toast = ToastManager(root)  # For shake notifications
@@ -390,8 +400,8 @@ class QuickTranslateManager:
         else:
             MAX_HEIGHT = self.root.winfo_screenheight() - 80
 
-        # Padding - SINGLE SOURCE OF TRUTH
-        HORIZONTAL_PADDING = 50  # frame(30) + scrollbar(20)
+        # Padding - HORIZONTAL_PADDING lives at module scope (shared with the
+        # furigana height estimate)
         VERTICAL_PADDING = 100   # header + footer + margins
 
         # Font with 20% safety margin for cross-machine compatibility
@@ -457,10 +467,13 @@ class QuickTranslateManager:
         if trial_info and trial_info.get('is_trial') and not is_error:
             height += 35  # Extra space for trial header row
 
-        # Add extra height for furigana section (2 lines per paragraph: reading + text)
+        # Add extra height for the furigana section. Measured from real font
+        # metrics at the wrap width the block will actually get: an annotated
+        # display row is far taller than a plain one (47px vs 28px on Tk 8.6),
+        # so a per-paragraph guess clips multi-line Japanese.
         if furigana_text and not is_error:
-            furigana_paragraphs = furigana_text.count('\n') + 1
-            height += furigana_paragraphs * 38 + 30  # 38px per pair (reading + text) + separator
+            height += estimate_notation_px(furigana_text, width - HORIZONTAL_PADDING)
+            height += FURIGANA_SEPARATOR_PX
 
         # Create popup window
         self.popup = tk.Toplevel(self.root)
@@ -682,7 +695,8 @@ class QuickTranslateManager:
 
         # Furigana section (if available)
         if furigana_text and not is_error:
-            self._render_furigana(main_frame, furigana_text)
+            self._render_furigana(main_frame, furigana_text,
+                                  width - HORIZONTAL_PADDING)
             # Separator between furigana and translation
             sep_frame = tk.Frame(main_frame, bg='#555555', height=1)
             sep_frame.pack(fill=X, pady=(8, 8))
@@ -726,77 +740,23 @@ class QuickTranslateManager:
         # Bindings
         self.popup.bind('<Escape>', lambda e: on_popup_close())
 
-    def _render_furigana(self, parent, furigana_text: str):
-        """Render furigana using embedded frames for perfect alignment.
+    def _render_furigana(self, parent, furigana_text: str, available_px: int):
+        """Render the read-only furigana guide above the translation.
 
-        Each kanji+reading pair becomes a small inline frame:
-        - Top: hiragana reading (small, blue)
-        - Bottom: kanji text (normal, white)
-        Plain text is inserted inline. align='baseline' keeps kanji
-        level with surrounding text regardless of font size differences.
+        RubyText owns the ruby layout, the plain-text readback and the wheel
+        handling; the notation escapes are honored, so source text containing
+        a literal "{a|b}" shows as itself instead of a fake reading.
 
         Args:
             parent: Parent frame to pack into
             furigana_text: Text with {kanji|reading} notation
+            available_px: Content width the block wraps at, used for sizing
         """
-        bg_color = '#2b2b2b'
-        ruby_bg = '#363636'
-        cjk_font = 'Yu Gothic'
-        text_font = (cjk_font, 11)
-        reading_font = (cjk_font, 7)
-
-        furigana_widget = tk.Text(parent, wrap=tk.CHAR, bg=bg_color,
-                                  relief='flat', borderwidth=0, highlightthickness=0,
-                                  cursor='arrow', spacing1=4, spacing3=4)
-
-        furigana_widget.tag_configure('text', font=text_font, foreground='#cccccc')
-
-        pattern = re.compile(r'\{([^|]+)\|([^}]+)\}')
-
-        lines = furigana_text.split('\n')
-        for line_idx, line in enumerate(lines):
-            last_end = 0
-
-            for match in pattern.finditer(line):
-                plain = line[last_end:match.start()]
-                if plain:
-                    furigana_widget.insert(tk.END, plain, 'text')
-
-                kanji = match.group(1)
-                reading = match.group(2)
-
-                # Embedded frame: reading on top, kanji on bottom, subtle bg
-                frame = tk.Frame(furigana_widget, bg=ruby_bg, bd=0,
-                                 highlightthickness=0, padx=0, pady=0)
-                tk.Label(frame, text=reading, font=reading_font,
-                         fg='#80b8ff', bg=ruby_bg, bd=0,
-                         padx=2, pady=0, anchor='center').pack(side='top', fill='x', pady=(1, 0))
-                tk.Label(frame, text=kanji, font=text_font,
-                         fg='#ffffff', bg=ruby_bg, bd=0,
-                         padx=2, pady=0, anchor='center').pack(side='top', fill='x', pady=(0, 1))
-
-                furigana_widget.window_create(tk.END, window=frame, align='baseline')
-                last_end = match.end()
-
-            remaining = line[last_end:]
-            if remaining:
-                furigana_widget.insert(tk.END, remaining, 'text')
-
-            if line_idx < len(lines) - 1:
-                furigana_widget.insert(tk.END, '\n', 'text')
-
-        # Each line with ruby pairs is taller; use enough height
-        total_lines = len(lines) + 1
-        furigana_widget.config(height=min(total_lines, 12))
-
-        furigana_widget.config(state='disabled')
-        furigana_widget.pack(side=TOP, fill=BOTH, expand=True, pady=(0, 0))
-
-        # Horizontal + vertical scroll
-        furigana_widget.bind('<MouseWheel>',
-                             lambda e: furigana_widget.yview_scroll(int(-3 * (e.delta / 120)), "units"))
-        furigana_widget.bind('<Shift-MouseWheel>',
-                             lambda e: furigana_widget.xview_scroll(int(-3 * (e.delta / 120)), "units"))
+        self.popup_furigana = RubyText(parent, bg='#2b2b2b')
+        self.popup_furigana.insert_notation(tk.END, furigana_text)
+        self.popup_furigana.config(state='disabled')
+        self.popup_furigana.fit_height(available_px)
+        self.popup_furigana.pack(side=TOP, fill=BOTH, expand=True, pady=(0, 0))
 
     def _calculate_position(self, width: int, height: int) -> Tuple[int, int, int]:
         """Calculate popup position and adjust height if needed.
@@ -1610,6 +1570,7 @@ class QuickTranslateManager:
                 pass
             self.popup = None
             self.popup_text = None
+            self.popup_furigana = None
             self.popup_copy_btn = None
             self.popup_replace_btn = None
             self._replace_gear_btn = None

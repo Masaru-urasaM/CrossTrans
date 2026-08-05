@@ -206,13 +206,16 @@ class TestNotation:
         assert result is not None
         assert "|" in result
 
-    def test_generate_notation_suppresses_text_holding_delimiters(self):
-        # The legacy renderer regex-parses this format without honoring escapes,
-        # so a literal "{A|B}" would become a fake ruby pair. No ruby is safer.
-        assert F.generate_notation("設定{A|B}テスト", "Japanese") is None
-        assert F.generate_notation("日本|語", "Japanese") is None
-        assert F.generate_notation("バック\\スラッシュ", "Japanese") is None
-        # Unaffected text still annotates.
+    def test_generate_notation_escapes_delimiters_in_the_source(self):
+        # RubyText parses the notation with parse_notation(), which honors the
+        # escapes, so text holding a delimiter still gets its readings and the
+        # delimiter round-trips as literal text rather than a fake ruby pair.
+        for source in ("設定{A|B}テスト", "日本|語", "設定\\パス"):
+            result = F.generate_notation(source, "Japanese")
+            assert result is not None, source
+            assert F.to_notation(F.parse_notation(result)) == result
+            rebuilt = ''.join(seg.base for seg in F.parse_notation(result))
+            assert rebuilt == source
         assert F.generate_notation("設定を保存", "Japanese") is not None
 
 
