@@ -137,6 +137,35 @@ class TestMeasurePx:
         assert R.FALLBACK_LAYOUT.row_ruby == 47
 
 
+class TestEstimateRubyOverheadPx:
+    def test_nothing_to_annotate_costs_nothing(self):
+        for text in ("", "hello world", "こんにちは", "你好世界", "12345"):
+            assert R.estimate_ruby_overhead_px(text, 600, model=FIXED) == 0, text
+
+    def test_over_budget_text_costs_nothing(self):
+        long_text = "日本語です。" * 1000
+        assert len(long_text) > R.MAX_ANNOTATE_CHARS
+        assert R.estimate_ruby_overhead_px(long_text, 600, model=FIXED) == 0
+
+    def test_kanji_only_needs_the_hint(self):
+        assert R.estimate_ruby_overhead_px("電源設定", 600, model=FIXED) == 0
+
+    @HAS_PROVIDER
+    def test_japanese_costs_the_difference(self):
+        # One logical line either way, so the overhead is exactly the extra
+        # height of a ruby row over a plain row.
+        overhead = R.estimate_ruby_overhead_px(SOURCE, 600, "Japanese",
+                                               model=FIXED)
+        assert overhead == FIXED.content_ruby - FIXED.content_plain
+
+    @HAS_PROVIDER
+    def test_never_negative(self):
+        # A narrow width makes the plain text wrap a lot; the capped ruby height
+        # can end up smaller, and a negative budget would shrink the window.
+        assert R.estimate_ruby_overhead_px(SOURCE * 20, 60, "Japanese",
+                                           max_rows=1, model=FIXED) == 0
+
+
 class TestEstimateNotationPx:
     def test_empty_notation_costs_nothing(self):
         assert R.estimate_notation_px("", 600) == 0
@@ -256,6 +285,30 @@ class TestInsertion:
         widget.set_ruby("plain")
         assert widget.get_plain() == "plain"
 
+    def test_set_plain_flattens_ruby(self, widget):
+        widget.insert_notation(tk.END, NOTATION)
+        widget.set_plain(widget.get_plain())
+        assert widget.ruby_pairs == 0
+        assert widget.has_ruby is False
+        # The whole text must survive the flattening, kanji included.
+        assert widget.get_plain() == SOURCE
+        assert widget.get('1.0', 'end-1c') == SOURCE
+
+    def test_kanji_fg_override_colours_the_base(self, widget):
+        widget.insert_notation(tk.END, NOTATION, tags='mine', kanji_fg='#4ec9b0')
+        for frame in widget._frames:
+            _reading, base = frame.winfo_children()
+            assert str(base.cget('fg')) == '#4ec9b0'
+
+    def test_default_ruby_colours_survive_the_theme(self, widget):
+        # ttkbootstrap re-themes standard tk widgets and discards explicit
+        # colours unless autostyle=False; the reading must stay distinguishable.
+        widget.insert_notation(tk.END, NOTATION)
+        reading, base = widget._frames[0].winfo_children()
+        assert str(reading.cget('fg')) == R.RUBY_FG
+        assert str(base.cget('fg')) == R.KANJI_FG
+        assert str(reading.cget('bg')) == R.RUBY_BG
+
 
 class TestReadback:
     def test_get_drops_ruby_but_get_plain_does_not(self, widget):
@@ -338,6 +391,13 @@ class TestSizing:
     def test_fit_height_always_leaves_at_least_one_row(self, widget):
         widget.fit_height(620)
         assert int(widget.cget('height')) >= 1
+
+    def test_fit_height_respects_min_rows(self, widget):
+        # The popup measures word wrap and passes its row count as the floor;
+        # this class simulates character wrap and must not shrink below it.
+        widget.insert_notation(tk.END, NOTATION)
+        widget.fit_height(620, min_rows=9)
+        assert int(widget.cget('height')) == 9
 
     def test_required_px_without_a_width_does_not_raise(self, widget):
         widget.insert_notation(tk.END, NOTATION)

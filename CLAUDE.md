@@ -109,6 +109,8 @@ Key points:
 
 - **Single instance**: TCP socket lock on `127.0.0.1:47823` (see `src/utils/single_instance.py`)
 
+- **ttkbootstrap discards explicit colours on standard `tk` widgets**: it re-themes them at construction, so `tk.Label(fg='#80b8ff', bg='#363636')` comes back `fg='#ffffff'`, `bg='#222222'`. Measured, not theoretical — it is why the furigana reading colour never actually shipped before v1.9.19. Pass `autostyle=False` (as the `tk.Button` call sites in `quick_translate.py` and `ruby_text.py` do) whenever a colour must survive. `tag_configure()` colours are **not** affected, only widget options. Leave a widget themed when it should match the frame around it.
+
 - **Never use `grab_set()` on popups**: Tkinter `grab_set()` + `transient(hidden_root)` causes permanent UI freeze. The root window is withdrawn, so modal grab locks all input with no visible dialog to dismiss. Always use `attributes('-topmost', True)` + `lift()` + `focus_force()` + `after(100, topmost=False)` pattern instead.
 
 ## Remote Config System (Important)
@@ -459,7 +461,8 @@ of newly installed subpackages.
 
 Displays Japanese text with hiragana readings above kanji characters.
 Being rolled out to every surface that can show Japanese — see `ROADMAP.md` rows F0–F7.
-**Engine (F0) and renderer (F1) are done**; the remaining phases add surfaces.
+**Engine (F0), renderer (F1) and the Quick Translate popup (F2) are done**; the remaining
+phases add surfaces (main window, input pane, dictionary, word chips).
 
 ### Architecture: annotate at render time
 ```
@@ -513,24 +516,38 @@ display rather than receiving pre-annotated strings through the queue.
 - **Embedded frames, not monospace text** — each pair is a `tk.Frame` holding two `tk.Label`s,
   inserted with `window_create(align='baseline')` so the base characters stay level with
   surrounding text at any font size.
-- **Word wrap**: `wrap=tk.CHAR` for CJK-friendly line breaking
-- **Fonts/colors**: Yu Gothic 11pt base (`#ffffff` under a reading, `#cccccc` plain),
+- **`autostyle=False` on the ruby frame and labels** — ttkbootstrap would otherwise repaint them
+  (see Known Issues). The `RubyText` widget itself stays themed so it matches its parent frame.
+- **Word wrap**: `wrap=tk.CHAR` by default, but the popup's output box passes `wrap=tk.WORD` and
+  `base_font=('Segoe UI', 11)` to keep Latin translations looking exactly as before.
+- **Fonts/colors** (defaults): Yu Gothic 11pt base (`#ffffff` under a reading, `#cccccc` plain),
   Yu Gothic 7pt reading (`#80b8ff`), ruby plate `#363636`
 - **Offline only** — no API call is involved in generating readings
-- **Toggle**: Settings → Hotkeys → "Enable Furigana" checkbox
-- **Config**: `furigana_enabled` (default `True` in the defaults dict; note the getter at
-  `config.py:344` falls back to `False`, fixed in F4)
+- **Toggle**: Settings → Hotkeys → "Enable Furigana" checkbox. It gates **render-time
+  annotation**, so it governs every surface, not just the pipeline's notation string.
+- **Config**: `furigana_enabled` (default `True`)
+
+### Which surfaces annotate, and with what hint
+| Surface | Hint used | Notes |
+|---------|-----------|-------|
+| Popup source block | none (pipeline notation) | kanji-only source stays plain: it cannot be told from Chinese |
+| Popup translation box | `target_lang` | authoritative, so kanji-only output *does* annotate |
+| Popup, grammar fix | none | "Grammar" is a label, not a language; kana-bearing text still qualifies |
+| Replace preview | `target_lang` | translated half only; the struck-through original stays plain |
+| Custom Prompt edit mode | — | box is flattened to plain first (I3) |
 
 ### Files involved:
 - `src/core/furigana.py` - engine: detection, provider chain, aligner, notation
 - `src/ui/ruby_text.py` - `RubyText` widget: rendering, `get_plain()`, sizing, wheel
 - `src/core/translation.py` - `generate_furigana()` / `_is_japanese_text()` delegate to the
   engine; queue integration in `do_translation()` (5-item tuple)
-- `src/ui/quick_translate.py` - `_render_furigana()` (delegate), `show()` height budget
+- `src/ui/quick_translate.py` - `_render_furigana()` (delegate), `show()` height budget,
+  `_ruby_enabled()` / `_ruby_hint()`, replace preview, custom-prompt flattening
 - `config.py` - `get_furigana_enabled()` / `set_furigana_enabled()`
 - `src/ui/settings/hotkey_tab.py` - Furigana toggle checkbox
-- `tests/test_furigana_core.py` (engine, headless), `tests/test_ruby_text.py` (widget, uses the
-  `tk_root` fixture in `tests/conftest.py` which skips without a display)
+- `tests/test_furigana_core.py` (engine, headless), `tests/test_ruby_text.py` (widget),
+  `tests/test_popup_ruby.py` (popup integration) — the widget tests use the `tk_root` fixture in
+  `tests/conftest.py`, which skips without a display
 
 ## Vision Detection System
 

@@ -4,6 +4,67 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase F2 — Readings on the translation itself, not just the source (2026-08-06)
+
+Third phase of "furigana everywhere". The Quick Translate popup's **output** box is now a
+`RubyText`, so a Japanese translation carries readings — previously only the Japanese *source*
+block did, which meant translating **into** Japanese (Win+Alt+J, the main use for a learner)
+produced no readings at all. Screenshot/OCR, grammar-fix and merged translate-or-fix results
+inherit this for free, because they all render through the same popup.
+
+**Added**
+- `src/ui/ruby_text.py`
+  - `estimate_ruby_overhead_px()` — the extra pixels annotation needs beyond plain text, so a
+    caller that already sized its window for plain text adds room instead of re-deriving the
+    whole height with a different wrap model.
+  - `set_plain()` — flatten a widget before handing it to the user for typing (I3).
+  - `fit_height(min_rows=...)` — the popup measures **word** wrap while this class simulates
+    **character** wrap, so its row count is a floor, not a replacement.
+  - `insert_ruby(..., kanji_fg=...)` — base-character colour per insertion, for callers whose
+    own tag carries a foreground (the replace preview's teal).
+- `tests/test_popup_ruby.py` — 29 integration tests driving the real `show()`.
+
+**Fixed during implementation**
+- **Custom Prompt sent the model a kanji-stripped prompt.** `_handle_custom_prompt_send()` read
+  the box with `.get()`, which returns nothing for an embedded ruby frame: measured **8 of 14
+  characters** on a normal Japanese sentence. Now `get_plain()`. Entering edit mode also
+  flattens the box first, per I3.
+- **Phase 0's kanji-only gap is closed for output text.** `東京都` had no kana, so it was
+  indistinguishable from Chinese and stayed plain. The popup knows the *target* language, which
+  is authoritative for a translation, so kanji-only Japanese output annotates again — while a
+  kanji-only result with a Chinese target still, correctly, does not.
+- **ttkbootstrap was discarding the ruby colours.** It re-themes standard `tk` widgets at
+  construction and drops explicit colour kwargs unless `autostyle=False` (measured: a
+  `tk.Label` asked for `fg='#80b8ff'` comes back `#ffffff`, `bg='#363636'` comes back
+  `#222222`). So the blue reading colour that has been in the code and the docs all along
+  **never actually shipped** — readings rendered white. This predates this work; the old
+  renderer had the same problem. ⚠️ **Visible change**: readings are now blue (`#80b8ff`) on a
+  `#363636` plate. The `RubyText` widget itself deliberately stays themed so it keeps matching
+  the frame around it. (This also means the "pixel-identical" screenshot in Phase F1 was taken
+  under plain Tk, where colours are not overridden: the geometry parity it proved holds, the
+  colours in it were the intended ones rather than the shipped ones.)
+- **`config.get_furigana_enabled()` fell back to `False`** while `DEFAULT_CONFIG` documents
+  `True`, so any config file written before the key existed had the feature silently off. Was
+  scheduled for F4; fixed here because it gates everything this phase adds.
+- **Error text was annotated but not budgeted for.** The height calculation excluded error
+  messages while the insertion did not, so a provider error containing Japanese could overflow
+  the box. Found by a test written for this phase.
+
+**Changed**
+- The Settings → Hotkeys "Enable Furigana" toggle now governs **render-time annotation**, not
+  just whether the pipeline generates a notation string. One switch, every surface.
+- Replace preview: the translated half is annotated in the matching teal; the struck-through
+  original stays plain, because Tk cannot strike through an embedded frame and the text is
+  being discarded anyway.
+
+**Verified**
+- Screenshots of the popup and the replace preview; ruby label colours asserted numerically
+  (base and reading foreground per frame), not judged by eye.
+- Audited every read of a ruby-capable widget: no `.get()` remains (I2). Copy and Replace take
+  `app.current_translated`, a plain string, so they were never affected.
+
+**Tests**: 257 → 286 passed / 0 failed (+29).
+
 ### Phase F1 — RubyText primitive: one renderer, correct sizing (2026-08-05)
 
 Second phase of "furigana everywhere". The ruby drawing code moves out of the Quick Translate

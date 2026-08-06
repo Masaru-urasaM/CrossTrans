@@ -20,7 +20,8 @@ except ImportError:
     HAS_TTKBOOTSTRAP = False
 
 from src.core.nlp_manager import nlp_manager
-from src.ui.ruby_text import RubyText, estimate_notation_px
+from src.ui.ruby_text import (RubyText, estimate_notation_px,
+                              estimate_ruby_overhead_px)
 from src.ui.toast import ToastManager
 
 # Popup padding - SINGLE SOURCE OF TRUTH, shared by calculate_size() and the
@@ -186,7 +187,7 @@ class QuickTranslateManager:
         self.root = root
         self.config = config
         self.popup: Optional[tk.Toplevel] = None
-        self.popup_text: Optional[tk.Text] = None
+        self.popup_text: Optional[RubyText] = None  # Read with get_plain(), not get()
         self.popup_furigana: Optional[RubyText] = None  # Read-only reading guide
         self.popup_copy_btn: Optional[ttk.Button] = None
         self.popup_dict_btn: Optional[ttk.Button] = None
@@ -475,6 +476,13 @@ class QuickTranslateManager:
             height += estimate_notation_px(furigana_text, width - HORIZONTAL_PADDING)
             height += FURIGANA_SEPARATOR_PX
 
+        # Same for the translation box, which now carries readings too.
+        if not is_error and self._ruby_enabled():
+            height += estimate_ruby_overhead_px(
+                translated, width - HORIZONTAL_PADDING,
+                lang_hint=self._ruby_hint(target_lang, is_grammar),
+                base_font=('Segoe UI', 11))
+
         # Create popup window
         self.popup = tk.Toplevel(self.root)
         self.popup.overrideredirect(True)
@@ -719,19 +727,33 @@ class QuickTranslateManager:
         text_height = max(1, (height - VERTICAL_PADDING) // LINE_HEIGHT)
         text_width = max(30, width // avg_char_width)
 
-        self.popup_text = tk.Text(main_frame, wrap=tk.WORD,
+        self.popup_text = RubyText(main_frame, wrap=tk.WORD,
                                     bg='#3d1f1f' if is_error else '#2b2b2b',
-                                    fg=text_fg,
-                                    font=('Segoe UI', 11), relief='flat',
-                                    width=text_width, height=text_height,
-                                    borderwidth=0, highlightthickness=0)
-        self.popup_text.insert('1.0', translated)
+                                    base_fg=text_fg, kanji_fg=text_fg,
+                                    base_font=('Segoe UI', 11),
+                                    spacing1=0, spacing3=0, cursor='xterm',
+                                    width=text_width, height=text_height)
+        # Readings on the translation itself, not just the source block. The
+        # target language is a reliable hint here, so a kanji-only translation
+        # ("東京都") annotates where the source block cannot.
+        # Error text is excluded, matching the height budget above: a diagnostic
+        # needs no readings, and annotating it would overflow the box.
+        if self._ruby_enabled() and not is_error:
+            self.popup_text.insert_ruby(
+                '1.0', translated,
+                lang_hint=self._ruby_hint(target_lang, is_grammar))
+        else:
+            self.popup_text.insert_plain('1.0', translated)
         self.popup_text.config(state='disabled')
         self.popup_text.pack(side=TOP, fill=BOTH, expand=True)
 
-        # Mouse wheel scroll
-        self.popup_text.bind('<MouseWheel>',
-                               lambda e: self.popup_text.yview_scroll(int(-3 * (e.delta / 120)), "units"))
+        # Grow the box for the taller annotated rows, but never below the row
+        # count calculate_size() derived from word wrap.
+        if self.popup_text.has_ruby:
+            self.popup_text.fit_height(width - HORIZONTAL_PADDING,
+                                       min_rows=text_height)
+
+        # Mouse wheel scroll is bound by RubyText, including over ruby frames
 
         # Position near mouse
         x, y, height = self._calculate_position(width, height)
@@ -739,6 +761,26 @@ class QuickTranslateManager:
 
         # Bindings
         self.popup.bind('<Escape>', lambda e: on_popup_close())
+
+    def _ruby_enabled(self) -> bool:
+        """Whether popup output should carry readings.
+
+        The Settings toggle now governs every annotated surface, because the
+        popup annotates at render time instead of relying on the pipeline
+        having shipped a notation string.
+        """
+        return bool(self.config and self.config.get_furigana_enabled())
+
+    @staticmethod
+    def _ruby_hint(target_lang: str, is_grammar: bool = False) -> Optional[str]:
+        """Language hint for annotating output text, or None when unknown.
+
+        The target language is authoritative for a translation. A grammar fix
+        returns the *source* language, which nobody in this class knows, so it
+        gets no hint - Japanese with kana still annotates on its own evidence,
+        and kanji-only output stays plain rather than guessing.
+        """
+        return None if is_grammar else target_lang
 
     def _render_furigana(self, parent, furigana_text: str, available_px: int):
         """Render the read-only furigana guide above the translation.
@@ -897,6 +939,13 @@ class QuickTranslateManager:
         if not self.popup_text or not self._btn_frame:
             return
 
+        # I3 - an editable widget never holds ruby. edit_undo() cannot restore a
+        # destroyed embedded window, and typing next to one would leave the
+        # readings describing text the user has already changed. The source
+        # block above the box keeps its readings.
+        if self.popup_text.has_ruby:
+            self.popup_text.set_plain(self.popup_text.get_plain())
+
         # Make the box editable and visually mark edit mode (teal border).
         self.popup_text.config(state='normal',
                                highlightthickness=1,
@@ -959,7 +1008,11 @@ class QuickTranslateManager:
         """Read the entire edit-box content and dispatch it as a freeform prompt."""
         if not self.popup_text:
             return
-        content = self.popup_text.get('1.0', 'end-1c')
+        # get_plain(), never get(): an embedded ruby frame contributes no
+        # characters to get(), so the model would receive text with every
+        # annotated word deleted. Editing already flattened the box, but this
+        # must stay correct regardless of how the content got there.
+        content = self.popup_text.get_plain()
         if self._on_custom_prompt_send:
             self._on_custom_prompt_send(content)
 
@@ -978,8 +1031,9 @@ class QuickTranslateManager:
             return
 
         # --- Update text content ---
-        self.popup_text.config(state='normal')
-        self.popup_text.delete('1.0', tk.END)
+        # clear() rather than delete(): it also drops the ruby bookkeeping, so a
+        # later get_plain() cannot resurrect words from the previous content.
+        self.popup_text.clear()
 
         # Configure tags
         self.popup_text.tag_configure('strikethrough',
@@ -992,10 +1046,18 @@ class QuickTranslateManager:
                                          font=('Segoe UI', 11),
                                          foreground='#4ec9b0')
 
-        # Insert: strikethrough original → translated
-        self.popup_text.insert('1.0', original, 'strikethrough')
-        self.popup_text.insert(tk.END, '\n\n→\n\n', 'arrow')
-        self.popup_text.insert(tk.END, translated, 'translated')
+        # Insert: strikethrough original → translated.
+        # The original stays plain: it is being discarded, and Tk cannot strike
+        # through an embedded frame, so ruby there would render un-struck.
+        self.popup_text.insert_plain('1.0', original, 'strikethrough')
+        self.popup_text.insert_plain(tk.END, '\n\n→\n\n', 'arrow')
+        if self._ruby_enabled():
+            self.popup_text.insert_ruby(
+                tk.END, translated,
+                lang_hint=self._ruby_hint(self._current_target_lang, self._is_grammar),
+                tags='translated', kanji_fg='#4ec9b0')
+        else:
+            self.popup_text.insert_plain(tk.END, translated, 'translated')
 
         self.popup_text.config(state='disabled')
 
@@ -1045,6 +1107,13 @@ class QuickTranslateManager:
         combined_text = original + '\n\n\u2192\n\n' + translated
         new_width, new_height = self.calculate_size(combined_text)
 
+        # Room for the readings on the translated half, if it has any.
+        if self.popup_text.has_ruby:
+            new_height += estimate_ruby_overhead_px(
+                translated, new_width - HORIZONTAL_PADDING,
+                lang_hint=self._ruby_hint(self._current_target_lang, self._is_grammar),
+                base_font=('Segoe UI', 11))
+
         if self.popup:
             current_geo = self.popup.geometry()
             parts = current_geo.split('+')
@@ -1060,7 +1129,11 @@ class QuickTranslateManager:
                 line_height = 20
             VERTICAL_PADDING = 100
             new_text_height = max(1, (final_height - VERTICAL_PADDING) // line_height)
-            self.popup_text.config(height=new_text_height)
+            if self.popup_text.has_ruby:
+                self.popup_text.fit_height(final_width - HORIZONTAL_PADDING,
+                                           min_rows=new_text_height)
+            else:
+                self.popup_text.config(height=new_text_height)
 
             # Reposition to stay within screen
             x, y, adjusted_height = self._calculate_position(final_width, final_height)

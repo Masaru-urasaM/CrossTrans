@@ -340,8 +340,13 @@ class Config:
 
     # Furigana setting
     def get_furigana_enabled(self) -> bool:
-        """Get whether furigana (reading guides) is enabled for Japanese text."""
-        return self._config.get('furigana_enabled', False)
+        """Get whether furigana (reading guides) is enabled for Japanese text.
+
+        Defaults to True to match DEFAULT_CONFIG: the fallback only applies to a
+        config file written before this key existed, and those users should get
+        the documented default rather than the feature silently switched off.
+        """
+        return self._config.get('furigana_enabled', True)
 
     def set_furigana_enabled(self, enabled: bool):
         """Set furigana mode for Japanese text."""
