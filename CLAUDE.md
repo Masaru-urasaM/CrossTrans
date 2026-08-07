@@ -332,6 +332,7 @@ Key settings:
 - `auto_check_updates` - Check for updates on startup
 - `quick_replace` - Replace mode (False=Manual with preview, True=Quick immediate paste)
 - `furigana_enabled` - Furigana reading guides for Japanese (True=show readings above kanji)
+- `furigana_reading_pane` - Reading pane under the main-window input box expanded (True) or collapsed
 
 ## Dictionary Mode
 
@@ -525,7 +526,8 @@ display rather than receiving pre-annotated strings through the queue.
 - **Offline only** — no API call is involved in generating readings
 - **Toggle**: Settings → Hotkeys → "Enable Furigana" checkbox. It gates **render-time
   annotation**, so it governs every surface, not just the pipeline's notation string.
-- **Config**: `furigana_enabled` (default `True`)
+- **Config**: `furigana_enabled` (default `True`), `furigana_reading_pane` (default `True`) —
+  the latter is only the Reading pane's collapse state, not a second feature switch
 
 ### Which surfaces annotate, and with what hint
 | Surface | Hint used | Notes |
@@ -537,10 +539,28 @@ display rather than receiving pre-annotated strings through the queue.
 | Custom Prompt edit mode | — | box is flattened to plain first (I3) |
 | Main window output (`trans_text`) | `target_lang` / `selected_language` | read-only, so I3 holds by construction |
 | Expanded view | `target_language` arg | read-only since F3; a disabled `tk.Text` still selects and copies |
-| Main window input (`original_text`) | — | editable, stays plain (I3); Reading pane is F4 |
+| Main window input (`original_text`) | — | editable, so it stays plain (I3) forever; its readings live in the Reading pane below |
+| Reading pane (`_reading_text`) | none | mirrors the input box; source language unknown, so kanji-only input stays plain |
 
 All result text goes through `ruby_text.insert_output(widget, index, text, lang_hint, enabled)`,
 so the toggle is honored in one place. Read every one of these boxes with `get_plain()`.
+
+### Reading pane (main window input, F4)
+Read-only `RubyText` under `original_text`, **shown by default** and collapsible via its
+`▼ Reading` header (the choice persists in `furigana_reading_pane`). Hidden entirely while
+`furigana_enabled` is off.
+
+- **Why a separate pane and not inline ruby**: `edit_undo()` cannot restore destroyed embedded
+  windows, and a caret moving between them behaves unpredictably. I3 is not negotiable for a box
+  the user types in.
+- **Refresh**: one debounced (`READING_PANE_DEBOUNCE_MS`) `<<Modified>>` binding on the input box.
+  It covers typing, paste, drag-and-drop, undo/redo **and** the programmatic rewrites in
+  `_update_translation_with_original()` / `_load_history_item()` — do not add per-call-site
+  refreshes. Tk re-fires only after the flag is cleared, and clearing it fires the event again;
+  the debounce collapses that pair into one render.
+- **Nothing to annotate → dim placeholder**, never a mirror of the box above: mirroring is noise,
+  and it would re-insert a pasted 50 000-character document on every edit.
+- The pane grows with the content up to `READING_PANE_MAX_ROWS`, then scrolls.
 
 ### Files involved:
 - `src/core/furigana.py` - engine: detection, provider chain, aligner, notation
@@ -550,14 +570,19 @@ so the toggle is honored in one place. Read every one of these boxes with `get_p
 - `src/ui/quick_translate.py` - `_render_furigana()` (delegate), `show()` height budget,
   `_ruby_enabled()` / `_ruby_hint()`, replace preview, custom-prompt flattening
 - `src/app.py` - `_create_translation_box()`, `_ruby_enabled()`, `_update_grammar_result()`,
-  `_update_translation_with_original()`, `_copy_translation()`, `_open_expanded_translation()`
+  `_update_translation_with_original()`, `_copy_translation()`, `_open_expanded_translation()`;
+  Reading pane: `_create_reading_pane()`, `_refresh_reading_pane()`,
+  `_apply_reading_pane_state()`, `_toggle_reading_pane()`, `_on_input_modified()`,
+  `_reading_pane_alive()`, `READING_PANE_*` constants
 - `src/ui/expanded_window.py` - read-only `RubyText`, `get_plain()` for Copy and the counter
-- `config.py` - `get_furigana_enabled()` / `set_furigana_enabled()`
+- `config.py` - `get_furigana_enabled()` / `set_furigana_enabled()`,
+  `get_furigana_reading_pane()` / `set_furigana_reading_pane()`
 - `src/ui/settings/hotkey_tab.py` - Furigana toggle checkbox
 - `tests/test_furigana_core.py` (engine, headless), `tests/test_ruby_text.py` (widget),
   `tests/test_popup_ruby.py` (popup), `tests/test_main_window_ruby.py` (main window + expanded
-  view; builds `TranslatorApp` via `__new__` to avoid starting hotkeys/tray) — the widget tests
-  use the `tk_root` fixture in `tests/conftest.py`, which skips without a display
+  view), `tests/test_reading_pane.py` (input Reading pane) — the last two build `TranslatorApp`
+  via `__new__` to avoid starting hotkeys/tray; the widget tests use the `tk_root` fixture in
+  `tests/conftest.py`, which skips without a display
 
 ## Vision Detection System
 

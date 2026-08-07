@@ -7,8 +7,8 @@ approaches. Newest first.
 
 ### Decision 8 — Furigana everywhere: annotate at render time, structured segments, fail-safe readings
 
-**Date**: 2026-08-04 (Phase 1 addendum 2026-08-05)
-**Status**: RESOLVED (Phases 0-1 implemented; Phases 2-7 planned)
+**Date**: 2026-08-04 (Phase 1 addendum 2026-08-05, Phase 4 addendum 2026-08-07)
+**Status**: RESOLVED (Phases 0-4 implemented; Phases 5-7 planned)
 
 **Problem**: Furigana had to appear on **every** surface that displays Japanese, not just the
 Quick Translate popup's source block. The shipped design could not get there: readings were
@@ -77,6 +77,22 @@ per-logical-line spacing rule — a per-display-row model over-estimated by 4 px
 Rejected alternative: render off-screen and measure, which doubles the frame construction cost
 on the UI thread for content that is already capped at `MAX_ANNOTATE_CHARS`.
 
+**Phase 4 addendum — how the Reading pane learns the text changed.** The pane could have been
+refreshed from each site that writes to the input box (the plan named
+`_update_translation_with_original` and `_load_history_item`) plus a `<KeyRelease>` binding. A
+single debounced `<<Modified>>` binding replaces all of it: Tk raises it for typing, paste of any
+kind, drag-and-drop, undo/redo *and* programmatic `insert`/`delete`, so no future write site can
+forget to refresh. Its one quirk is that it fires only on a False→True flip, and clearing the flag
+inside the handler fires it a second time; the debounce that keeps UI-thread annotation off the
+keystroke path also collapses that pair into one render. Measured: focus and caret stay in the
+input box across a refresh, and `edit_undo()` still works with the pane following the undo.
+
+The pane is **always present** while furigana is on, rather than appearing when Japanese is
+detected (the alternative offered to the user, who chose always-visible): a pane that appears and
+disappears moves everything below it and is undiscoverable before the first Japanese input. With
+nothing to annotate it shows a dim one-line placeholder — **not** a mirror of the box above, which
+would be visual noise *and* would re-insert a pasted 50 000-character document on every edit.
+
 The Phase 0 fail-safe that suppressed ruby for source text containing `\ { } |` was **removed**
 in Phase 1: it existed only because the old regex renderer ignored escapes, and `RubyText`
 parses through `parse_notation()`, which honors them. Keeping it would have cost every reading
@@ -87,10 +103,12 @@ in any sentence containing a pipe.
   fugashi is *right* in half of those (今日→きょう, 3時→じ) and wrong in the other half. Blanket
   suppression on disagreement would delete ruby from ~40% of sentences for no accuracy gain.
   The all-kanji compound rule is the narrow, targeted version that survives.
-- **Ruby inline in the main input box** — would corrupt `app.py:942` (the API receives
-  particle-only text, and `find_cached` then poisons history with the stripped key) and
-  `app.py:546` (an all-kanji input reads back as `""`, so the popup is destroyed and rebuilt
-  empty, losing everything the user typed). Replaced by a read-only Reading pane beneath it.
+- **Ruby inline in the main input box** — would corrupt the three `original_text.get()` reads that
+  feed the API (`app.py:955` / `1127` / `1452`: it would receive particle-only text, and
+  `find_cached` would then poison history with the stripped key) and the popup-reuse check
+  (`app.py:560`: an all-kanji input reads back as `""`, so the popup is destroyed and rebuilt
+  empty, losing everything the user typed). Replaced by a read-only Reading pane beneath it
+  (implemented in Phase 4); these `get()` calls stay correct precisely because I3 holds there.
 - **A "Copy with readings" command** — considered and declined by the user; every Copy/Replace
   emits the plain shadow string only.
 - **Ruby in toasts and the history list** — explicit non-goals. Toasts are `tk.Label` (no

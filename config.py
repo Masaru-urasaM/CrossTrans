@@ -73,6 +73,7 @@ class Config:
         "quick_replace": False,  # False = Manual Replace (preview), True = Quick Replace (immediate)
         "model_rotation": False,  # Try other models before switching keys on failure
         "furigana_enabled": True,  # Show furigana (reading guides) for Japanese source text
+        "furigana_reading_pane": True,  # Reading pane under the main-window input box
     }
 
     def __init__(self):
@@ -351,6 +352,20 @@ class Config:
     def set_furigana_enabled(self, enabled: bool):
         """Set furigana mode for Japanese text."""
         self._config['furigana_enabled'] = enabled
+        self.save()
+
+    def get_furigana_reading_pane(self) -> bool:
+        """Get whether the main window's Reading pane is expanded.
+
+        Only the user's collapse choice, not a feature switch: the pane exists
+        whenever furigana is enabled. Defaults to True (expanded) so the
+        readings are visible without anyone having to find the toggle.
+        """
+        return self._config.get('furigana_reading_pane', True)
+
+    def set_furigana_reading_pane(self, expanded: bool):
+        """Remember whether the Reading pane is expanded."""
+        self._config['furigana_reading_pane'] = expanded
         self.save()
 
     # Fix Grammar settings

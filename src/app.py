@@ -48,7 +48,8 @@ from src.ui.dialogs import APIErrorDialog, TrialExhaustedDialog, TrialFeatureDia
 from src.ui.history_dialog import HistoryDialog
 from src.ui.toast import ToastManager, ToastType
 from src.ui.quick_translate import QuickTranslateManager
-from src.ui.ruby_text import RubyText, insert_output
+from src.core import furigana
+from src.ui.ruby_text import MAX_ANNOTATE_CHARS, RubyText, insert_output
 from src.ui.tray import TrayManager
 from src.utils.updates import (
     AutoUpdater,
@@ -66,6 +67,17 @@ from src.core.update_ui_manager import UpdateUIManager
 from src.core.trial_manager import TrialManager
 from src.ui.screenshot_handler import ScreenshotHandler
 from src.ui.dictionary_popup import DictionaryPopup
+
+# ===== Reading pane (furigana under the main-window input box) =====
+# The input box itself must stay plain (an embedded ruby frame cannot survive
+# edit_undo, and typing between two frames is unpredictable), so the readings
+# for what the user typed live in a read-only pane below it.
+READING_PANE_DEBOUNCE_MS = 350      # keystroke burst absorbed before annotating
+READING_PANE_MAX_ROWS = 4           # taller than this and the pane scrolls
+READING_PANE_PLACEHOLDER = "Readings appear here when the text above contains Japanese."
+READING_PANE_PLACEHOLDER_FG = '#666666'
+READING_PANE_PLACEHOLDER_TAG = 'reading_placeholder'
+READING_PANE_LABEL = "Reading"
 
 
 class TranslatorApp:
@@ -758,13 +770,18 @@ class TranslatorApp:
         # Update Dictionary button state based on NLP availability
         self._update_dict_button_state()
 
-        self.original_text = tk.Text(content_frame, height=6, wrap=tk.WORD,
+        # Input box and its Reading pane share one container so the 15px gap
+        # before the language selector stays the same whether the pane shows.
+        input_frame = ttk.Frame(content_frame)
+        input_frame.pack(fill=X, pady=(5, 15))
+
+        self.original_text = tk.Text(input_frame, height=6, wrap=tk.WORD,
                                      bg='#2b2b2b', fg='#cccccc',
                                      font=('Segoe UI', 11), relief='flat',
                                      padx=10, pady=10, insertbackground='white',
                                      undo=True, maxundo=-1)
         self.original_text.insert('1.0', original)
-        self.original_text.pack(fill=X, pady=(5, 15))
+        self.original_text.pack(fill=X)
         self.original_text.bind('<MouseWheel>',
             lambda e: self.original_text.yview_scroll(int(-3*(e.delta/120)), "units"))
 
@@ -773,6 +790,8 @@ class TranslatorApp:
         self.original_text.bind('<Control-Z>', lambda e: self.original_text.edit_undo() or "break")
         self.original_text.bind('<Control-Shift-z>', lambda e: self.original_text.edit_redo() or "break")
         self.original_text.bind('<Control-Shift-Z>', lambda e: self.original_text.edit_redo() or "break")
+
+        self._create_reading_pane(input_frame)
 
         # ===== LANGUAGE SELECTOR =====
         ttk.Label(content_frame, text="Translate to:", font=('Segoe UI', 10)).pack(anchor='w')
@@ -1271,6 +1290,141 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         surface rather than only the popup's source block.
         """
         return bool(self.config and self.config.get_furigana_enabled())
+
+    # ------------------------------------------------------------------ #
+    # Reading pane (furigana for the text being typed)
+    # ------------------------------------------------------------------ #
+    def _create_reading_pane(self, parent):
+        """Build the read-only furigana pane under the input box.
+
+        The pane is always present while furigana is enabled - it is not shown
+        only on detection, so its position never shifts and it is discoverable
+        before any Japanese is typed. Collapsing it is a deliberate click, and
+        that choice is remembered.
+
+        Args:
+            parent: The input container; the pane packs directly under the box.
+        """
+        self._reading_pane_job = None
+        self._reading_block = ttk.Frame(parent)
+
+        header = ttk.Frame(self._reading_block)
+        header.pack(fill=X)
+        self._reading_toggle = ttk.Label(header, font=('Segoe UI', 9),
+                                         foreground='#888888', cursor='hand2')
+        self._reading_toggle.pack(side=LEFT)
+        self._reading_toggle.bind('<Button-1>',
+                                  lambda e: self._toggle_reading_pane())
+
+        self._reading_text = RubyText(self._reading_block, height=1, wrap=tk.WORD,
+                                      bg='#252525', base_fg='#cccccc',
+                                      spacing1=0, spacing3=0, padx=10, pady=6)
+        self._reading_text.tag_configure(READING_PANE_PLACEHOLDER_TAG,
+                                         foreground=READING_PANE_PLACEHOLDER_FG)
+        self._reading_text.config(state='disabled')
+
+        # Fires for typing, paste, drag-and-drop, undo AND the programmatic
+        # rewrites in _update_translation_with_original / _load_history_item, so
+        # one binding covers every way the input box can change.
+        self.original_text.bind('<<Modified>>', self._on_input_modified)
+
+        # Only show it now if furigana is on, or the pane would flash on screen
+        # for one debounce interval before the first refresh hid it again.
+        if self._ruby_enabled():
+            self._apply_reading_pane_state()
+        self._schedule_reading_refresh()
+
+    def _on_input_modified(self, event=None):
+        """Handle <<Modified>> on the input box, then re-arm the flag.
+
+        Tk only fires this when the flag flips False -> True, so it has to be
+        cleared to hear about the next change. Clearing it fires the event a
+        second time; the debounce collapses the pair into one refresh.
+        """
+        try:
+            self.original_text.edit_modified(False)
+        except tk.TclError:
+            return
+        self._schedule_reading_refresh()
+
+    def _schedule_reading_refresh(self, delay_ms: int = READING_PANE_DEBOUNCE_MS):
+        """Debounce a pane refresh: annotation runs on the UI thread."""
+        if not self.popup:
+            return
+        if self._reading_pane_job:
+            try:
+                self.popup.after_cancel(self._reading_pane_job)
+            except (tk.TclError, ValueError):
+                pass
+        try:
+            self._reading_pane_job = self.popup.after(delay_ms,
+                                                      self._refresh_reading_pane)
+        except tk.TclError:
+            self._reading_pane_job = None
+
+    def _refresh_reading_pane(self):
+        """Re-render the pane from the current input text."""
+        self._reading_pane_job = None
+        if not self._reading_pane_alive():
+            return
+
+        # The Settings toggle is read here, not cached, so switching furigana
+        # off takes effect on the next edit like every other surface.
+        if not self._ruby_enabled():
+            self._reading_block.pack_forget()
+            return
+        self._apply_reading_pane_state()
+        if not self.config.get_furigana_reading_pane():
+            return
+
+        # Plain get() is correct here: the input box never holds ruby (I3).
+        text = self.original_text.get('1.0', 'end-1c')
+        available = self._reading_text.winfo_width()
+        if available <= 1:
+            available = max(200, self.original_text.winfo_width() - 30)
+
+        # No lang_hint: the source language is unknown, so kanji-only text
+        # stays plain rather than being guessed at (it reads as Chinese).
+        if len(text) <= MAX_ANNOTATE_CHARS and furigana.should_annotate(text):
+            self._reading_text.set_ruby(text)
+        else:
+            # Mirroring unannotatable text would just duplicate the box above.
+            self._reading_text.set_plain(READING_PANE_PLACEHOLDER,
+                                         READING_PANE_PLACEHOLDER_TAG)
+        self._reading_text.fit_height(available, max_rows=READING_PANE_MAX_ROWS)
+
+    def _apply_reading_pane_state(self):
+        """Show or hide the pane body to match the remembered collapse state."""
+        if not self._reading_pane_alive():
+            return
+        expanded = bool(self.config.get_furigana_reading_pane())
+        arrow = '▼' if expanded else '▶'      # down / right triangle
+        self._reading_toggle.configure(text=f"{arrow} {READING_PANE_LABEL}")
+        if not self._reading_block.winfo_manager():   # '' once pack_forgotten
+            self._reading_block.pack(fill=X, pady=(4, 0))
+        if expanded:
+            self._reading_text.pack(fill=X, pady=(3, 0))
+        else:
+            self._reading_text.pack_forget()
+
+    def _toggle_reading_pane(self):
+        """Collapse or expand the pane, remembering the choice."""
+        if not self._reading_pane_alive():
+            return
+        self.config.set_furigana_reading_pane(
+            not self.config.get_furigana_reading_pane())
+        self._apply_reading_pane_state()
+        if self.config.get_furigana_reading_pane():
+            self._schedule_reading_refresh(delay_ms=1)
+
+    def _reading_pane_alive(self) -> bool:
+        """True while the pane widgets still exist (the popup can be closed)."""
+        try:
+            return bool(getattr(self, '_reading_text', None)
+                        and self._reading_text.winfo_exists()
+                        and self.original_text.winfo_exists())
+        except tk.TclError:
+            return False
 
     def _open_expanded_translation(self):
         """Open translation in expanded fullscreen window."""

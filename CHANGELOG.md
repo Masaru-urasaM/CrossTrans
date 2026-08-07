@@ -4,6 +4,51 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase F4 — Reading pane under the input box (2026-08-07)
+
+Fifth phase of "furigana everywhere". The main window's **input box** now has a read-only
+Reading pane beneath it that shows what you typed with hiragana above the kanji. The box itself
+stays plain: an embedded ruby frame cannot survive `edit_undo()`, and a caret moving between
+embedded windows behaves unpredictably, so the readings live in a separate widget instead of
+inline (invariant I3 — editable implies plain).
+
+**Added**
+- `src/app.py` `_create_reading_pane()`, `_refresh_reading_pane()`, `_apply_reading_pane_state()`,
+  `_toggle_reading_pane()`, `_on_input_modified()`, `_reading_pane_alive()`, plus the
+  `READING_PANE_*` constants. The input box and its pane share one container frame, so the gap
+  before the language selector is the same whether the pane is showing or collapsed.
+- `config.py` `get/set_furigana_reading_pane()` (default `True`) — remembers a manual collapse.
+  It is a collapse state, not a second feature switch: the pane exists whenever furigana is on.
+- `tests/test_reading_pane.py` — 24 tests: construction, content rules, refresh wiring, the
+  collapse toggle, and that the input box is never a `RubyText`.
+
+**Changed**
+- `src/ui/settings/hotkey_tab.py` — the Furigana toggle's description said "shows original
+  Japanese text with furigana readings + translation", which described the old pipeline-only
+  behaviour. It now names the surfaces the toggle actually governs.
+
+**Design notes**
+- **Always present, not shown-on-detection.** The pane's position never shifts and the feature is
+  discoverable before any Japanese is typed. When there is nothing to annotate it shows a dim
+  one-line placeholder rather than mirroring the box above, which would be noise — and would
+  also mean re-inserting a pasted 50 000-character document on every edit.
+- **One `<<Modified>>` binding, not per-call-site refreshes.** It fires for typing, paste,
+  drag-and-drop, undo/redo *and* the programmatic rewrites in
+  `_update_translation_with_original()` / `_load_history_item()`, so those call sites needed no
+  changes (the plan had them patched individually). Tk only re-fires after the flag is cleared,
+  and clearing it fires the event a second time; a 350 ms debounce collapses the pair into one
+  render, which also keeps UI-thread annotation off the keystroke path.
+- **No `lang_hint`.** The source language is unknown here, so kanji-only input stays plain rather
+  than being guessed at — the same rule as the popup's source block.
+
+**Verified empirically**: focus and caret stay in the input box across a refresh, `edit_undo()`
+still works (and the pane follows the undo), and the pane's predicted height matches
+`Text.count(..., 'ypixels')`.
+
+**Tests**: 307 → 331 passed / 0 failed (+24). Each new test was mutation-checked: breaking the
+annotation, the sizing, the `<<Modified>>` binding, the collapse persistence, the collapse state
+or the placeholder all make the suite fail.
+
 ### Phase F3 — Main window and expanded view (2026-08-07)
 
 Fourth phase of "furigana everywhere". The **main translator window's output box** and the
