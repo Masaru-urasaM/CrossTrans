@@ -21,7 +21,7 @@ except ImportError:
 
 from src.core.nlp_manager import nlp_manager
 from src.ui.ruby_text import (RubyText, estimate_notation_px,
-                              estimate_ruby_overhead_px)
+                              estimate_ruby_overhead_px, insert_output)
 from src.ui.toast import ToastManager
 
 # Popup padding - SINGLE SOURCE OF TRUTH, shared by calculate_size() and the
@@ -481,7 +481,7 @@ class QuickTranslateManager:
             height += estimate_ruby_overhead_px(
                 translated, width - HORIZONTAL_PADDING,
                 lang_hint=self._ruby_hint(target_lang, is_grammar),
-                base_font=('Segoe UI', 11))
+                base_font=('Segoe UI', 11), line_spacing=0)
 
         # Create popup window
         self.popup = tk.Toplevel(self.root)
@@ -738,12 +738,9 @@ class QuickTranslateManager:
         # ("東京都") annotates where the source block cannot.
         # Error text is excluded, matching the height budget above: a diagnostic
         # needs no readings, and annotating it would overflow the box.
-        if self._ruby_enabled() and not is_error:
-            self.popup_text.insert_ruby(
-                '1.0', translated,
-                lang_hint=self._ruby_hint(target_lang, is_grammar))
-        else:
-            self.popup_text.insert_plain('1.0', translated)
+        insert_output(self.popup_text, '1.0', translated,
+                      lang_hint=self._ruby_hint(target_lang, is_grammar),
+                      enabled=self._ruby_enabled() and not is_error)
         self.popup_text.config(state='disabled')
         self.popup_text.pack(side=TOP, fill=BOTH, expand=True)
 
@@ -1051,13 +1048,10 @@ class QuickTranslateManager:
         # through an embedded frame, so ruby there would render un-struck.
         self.popup_text.insert_plain('1.0', original, 'strikethrough')
         self.popup_text.insert_plain(tk.END, '\n\n→\n\n', 'arrow')
-        if self._ruby_enabled():
-            self.popup_text.insert_ruby(
-                tk.END, translated,
-                lang_hint=self._ruby_hint(self._current_target_lang, self._is_grammar),
-                tags='translated', kanji_fg='#4ec9b0')
-        else:
-            self.popup_text.insert_plain(tk.END, translated, 'translated')
+        insert_output(
+            self.popup_text, tk.END, translated,
+            lang_hint=self._ruby_hint(self._current_target_lang, self._is_grammar),
+            enabled=self._ruby_enabled(), tags='translated', kanji_fg='#4ec9b0')
 
         self.popup_text.config(state='disabled')
 
@@ -1112,7 +1106,7 @@ class QuickTranslateManager:
             new_height += estimate_ruby_overhead_px(
                 translated, new_width - HORIZONTAL_PADDING,
                 lang_hint=self._ruby_hint(self._current_target_lang, self._is_grammar),
-                base_font=('Segoe UI', 11))
+                base_font=('Segoe UI', 11), line_spacing=0)
 
         if self.popup:
             current_geo = self.popup.geometry()

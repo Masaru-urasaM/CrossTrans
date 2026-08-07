@@ -461,8 +461,8 @@ of newly installed subpackages.
 
 Displays Japanese text with hiragana readings above kanji characters.
 Being rolled out to every surface that can show Japanese — see `ROADMAP.md` rows F0–F7.
-**Engine (F0), renderer (F1) and the Quick Translate popup (F2) are done**; the remaining
-phases add surfaces (main window, input pane, dictionary, word chips).
+**Engine (F0), renderer (F1), Quick Translate popup (F2), main window + expanded view (F3) are
+done**; the remaining phases add the input Reading pane, the dictionary result and word chips.
 
 ### Architecture: annotate at render time
 ```
@@ -535,6 +535,12 @@ display rather than receiving pre-annotated strings through the queue.
 | Popup, grammar fix | none | "Grammar" is a label, not a language; kana-bearing text still qualifies |
 | Replace preview | `target_lang` | translated half only; the struck-through original stays plain |
 | Custom Prompt edit mode | — | box is flattened to plain first (I3) |
+| Main window output (`trans_text`) | `target_lang` / `selected_language` | read-only, so I3 holds by construction |
+| Expanded view | `target_language` arg | read-only since F3; a disabled `tk.Text` still selects and copies |
+| Main window input (`original_text`) | — | editable, stays plain (I3); Reading pane is F4 |
+
+All result text goes through `ruby_text.insert_output(widget, index, text, lang_hint, enabled)`,
+so the toggle is honored in one place. Read every one of these boxes with `get_plain()`.
 
 ### Files involved:
 - `src/core/furigana.py` - engine: detection, provider chain, aligner, notation
@@ -543,11 +549,15 @@ display rather than receiving pre-annotated strings through the queue.
   engine; queue integration in `do_translation()` (5-item tuple)
 - `src/ui/quick_translate.py` - `_render_furigana()` (delegate), `show()` height budget,
   `_ruby_enabled()` / `_ruby_hint()`, replace preview, custom-prompt flattening
+- `src/app.py` - `_create_translation_box()`, `_ruby_enabled()`, `_update_grammar_result()`,
+  `_update_translation_with_original()`, `_copy_translation()`, `_open_expanded_translation()`
+- `src/ui/expanded_window.py` - read-only `RubyText`, `get_plain()` for Copy and the counter
 - `config.py` - `get_furigana_enabled()` / `set_furigana_enabled()`
 - `src/ui/settings/hotkey_tab.py` - Furigana toggle checkbox
 - `tests/test_furigana_core.py` (engine, headless), `tests/test_ruby_text.py` (widget),
-  `tests/test_popup_ruby.py` (popup integration) — the widget tests use the `tk_root` fixture in
-  `tests/conftest.py`, which skips without a display
+  `tests/test_popup_ruby.py` (popup), `tests/test_main_window_ruby.py` (main window + expanded
+  view; builds `TranslatorApp` via `__new__` to avoid starting hotkeys/tray) — the widget tests
+  use the `tk_root` fixture in `tests/conftest.py`, which skips without a display
 
 ## Vision Detection System
 

@@ -138,11 +138,20 @@ def _as_font_tuple(spec, default_size: int) -> Tuple[str, int]:
     return (spec[0], int(spec[1]))
 
 
-def tk_layout_model(base_font=None, ruby_font=None) -> LayoutModel:
+def tk_layout_model(base_font=None, ruby_font=None,
+                    line_spacing: Optional[int] = None) -> LayoutModel:
     """Build a LayoutModel from real font metrics.
 
     Falls back to FALLBACK_LAYOUT when there is no usable Tk interpreter, so
     callers never have to guard the call.
+
+    Args:
+        base_font: Font of the base text, (family, size) or family.
+        ruby_font: Font of the readings.
+        line_spacing: spacing1 + spacing3 of the target widget. Defaults to this
+            module's own default; pass the widget's real values when it was
+            configured differently, or every measurement is off by the
+            difference on every line.
 
     The row heights are derived, not guessed:
         frame = ruby linespace + base linespace + 2 * RUBY_PAD_Y
@@ -154,6 +163,8 @@ def tk_layout_model(base_font=None, ruby_font=None) -> LayoutModel:
     """
     base_spec = _as_font_tuple(base_font, BASE_FONT_SIZE)
     ruby_spec = _as_font_tuple(ruby_font, RUBY_FONT_SIZE)
+    if line_spacing is None:
+        line_spacing = 2 * LINE_SPACING
 
     try:
         base = font.Font(family=base_spec[0], size=base_spec[1])
@@ -162,7 +173,7 @@ def tk_layout_model(base_font=None, ruby_font=None) -> LayoutModel:
         base_descent = int(base.metrics('descent'))
         ruby_line = int(ruby.metrics('linespace'))
     except Exception:
-        return FALLBACK_LAYOUT
+        return FALLBACK_LAYOUT._replace(line_spacing=line_spacing)
 
     frame_height = ruby_line + base_line + 2 * RUBY_PAD_Y
     char_cache: Dict[str, int] = {}
@@ -181,7 +192,7 @@ def tk_layout_model(base_font=None, ruby_font=None) -> LayoutModel:
     return LayoutModel(
         content_plain=base_line,
         content_ruby=frame_height + base_descent,
-        line_spacing=2 * LINE_SPACING,
+        line_spacing=line_spacing,
         char_width=char_width,
         ruby_width=ruby_width,
     )
@@ -277,7 +288,8 @@ def estimate_ruby_overhead_px(text: str, available_px: int,
                               lang_hint: Optional[str] = None,
                               max_rows: int = DEFAULT_MAX_ROWS,
                               model: Optional[LayoutModel] = None,
-                              base_font=None, ruby_font=None) -> int:
+                              base_font=None, ruby_font=None,
+                              line_spacing: Optional[int] = None) -> int:
     """Extra pixels annotating `text` needs beyond rendering it plain.
 
     A caller that already sized its window for plain text adds this to make
@@ -294,11 +306,27 @@ def estimate_ruby_overhead_px(text: str, available_px: int,
     if not any(seg.ruby for seg in segments):
         return 0
     if model is None:
-        model = tk_layout_model(base_font, ruby_font)
+        model = tk_layout_model(base_font, ruby_font, line_spacing)
     ruby_px = min(measure_px(segments, available_px, model),
                   max_rows * model.row_ruby)
     plain_px = measure_px((RubySegment(text, None),), available_px, model)
     return max(0, ruby_px - plain_px)
+
+
+def insert_output(widget: 'RubyText', index, text: str,
+                  lang_hint: Optional[str] = None, enabled: bool = True,
+                  tags=None, kanji_fg: Optional[str] = None) -> None:
+    """Insert display text into a RubyText, annotating only when `enabled`.
+
+    The one place every surface routes result text through, so the Settings
+    toggle behaves identically everywhere and no call site repeats the branch.
+    `enabled` stays a caller decision: only the caller knows whether its widget
+    is showing a result, an error, or something the user is about to edit.
+    """
+    if enabled:
+        widget.insert_ruby(index, text, lang_hint, tags, kanji_fg)
+    else:
+        widget.insert_plain(index, text, tags)
 
 
 class RubyText(tk.Text):
@@ -523,9 +551,14 @@ class RubyText(tk.Text):
     # ------------------------------------------------------------------ #
     @property
     def layout(self) -> LayoutModel:
-        """Cached measurement model for this widget's fonts."""
+        """Cached measurement model for this widget's fonts and line spacing."""
         if self._layout is None:
-            self._layout = tk_layout_model(self.base_font, self.ruby_font)
+            try:
+                spacing = int(self.cget('spacing1')) + int(self.cget('spacing3'))
+            except (tk.TclError, ValueError):
+                spacing = 2 * LINE_SPACING
+            self._layout = tk_layout_model(self.base_font, self.ruby_font,
+                                           line_spacing=spacing)
         return self._layout
 
     @property

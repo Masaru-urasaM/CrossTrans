@@ -344,14 +344,14 @@ class TestReadback:
 
 
 class TestSizing:
-    def _measure(self, tk_root, notation, width=620):
+    def _measure(self, tk_root, notation, width=620, **widget_kwargs):
         """Render `notation` in a visible toplevel and return (predicted, real)."""
         top = tk.Toplevel(tk_root)
         top.geometry(f"{width + 40}x400+100+100")
         frame = tk.Frame(top, width=width, height=380)
         frame.pack_propagate(False)
         frame.pack()
-        w = RubyText(frame)
+        w = RubyText(frame, **widget_kwargs)
         w.insert_notation(tk.END, notation)
         w.config(state='disabled')
         predicted = w.required_px(width)
@@ -375,6 +375,20 @@ class TestSizing:
             if not real:
                 pytest.skip("Tk reported no laid-out pixels (headless display)")
             assert predicted == real, f"notation={notation!r}"
+
+    def test_prediction_follows_the_widgets_line_spacing(self, tk_root):
+        # The popup and main-window boxes are built with spacing1/spacing3 = 0,
+        # so a model hard-coded to this module's default would be off by 8px on
+        # every logical line.
+        for kwargs in ({'spacing1': 0, 'spacing3': 0},
+                       {'spacing1': 6, 'spacing3': 2},
+                       {'base_font': ('Segoe UI', 11), 'spacing1': 0,
+                        'spacing3': 0, 'wrap': tk.WORD}):
+            predicted, real, _req = self._measure(
+                tk_root, NOTATION + "\n" + NOTATION, **kwargs)
+            if not real:
+                pytest.skip("Tk reported no laid-out pixels (headless display)")
+            assert predicted == real, kwargs
 
     def test_fit_height_does_not_clip(self, tk_root):
         predicted, real, req = self._measure(tk_root, NOTATION * 4)

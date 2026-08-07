@@ -4,6 +4,52 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase F3 — Main window and expanded view (2026-08-07)
+
+Fourth phase of "furigana everywhere". The **main translator window's output box** and the
+**expanded fullscreen view** now render furigana. The main window had never shown readings at
+all — `translation_queue`'s only consumer routes to the popup — so "Open Translator" from an
+annotated popup used to drop them silently. It no longer can: annotation happens where the text
+is drawn, so anything that reaches the box is annotated.
+
+**Added**
+- `src/ui/ruby_text.py` `insert_output(widget, index, text, lang_hint, enabled, ...)` — the one
+  place every surface routes result text through, so the Settings toggle behaves identically
+  everywhere and no call site repeats the branch. `enabled` stays the caller's decision: only it
+  knows whether the widget is showing a result, an error, or something about to be edited.
+- `src/app.py` `_create_translation_box()` — extracted from `show_popup()` so the output box can
+  be built and asserted on without starting the application (which registers global hotkeys,
+  builds a tray icon and takes the single-instance lock).
+- `tests/test_main_window_ruby.py` — 20 tests covering the main-window box, its update paths and
+  the expanded window.
+
+**Fixed during implementation**
+- **Measurements ignored the widget's real line spacing.** `LayoutModel` hard-coded this
+  module's own `spacing1 + spacing3`, but the popup and main-window boxes are built with
+  spacing 0, so every logical line was mis-measured by 8 px. The model now reads the widget's
+  actual values; a test asserts pixel-exact predictions for spacing 0, 6/2 and the popup's real
+  configuration.
+- **Copy and Expand from the main window would have handed over kanji-stripped text**
+  (`app.py` `_copy_translation` / `_open_expanded_translation` read the box with `.get()`), as
+  would the expanded window's own Copy button and its character counter. All now use
+  `get_plain()`.
+
+**Changed**
+- The expanded view's text box is **read-only**. It was editable "for selection/copy", but a
+  disabled `tk.Text` still supports mouse selection and Ctrl+C (verified empirically), so
+  nothing is lost — and read-only is what lets it hold ruby without violating I3. Nothing
+  consumed its edits. The now-pointless `<KeyRelease>` status refresh is gone with it.
+- `ExpandedTranslationWindow.__init__` takes `config` so it can read the furigana toggle.
+- `_update_translation_with_original()` and `_update_grammar_result()` replace their
+  delete/insert pairs with `clear()` + `insert_output()`; `RubyText` restores the disabled state
+  itself, so the manual state juggling is gone.
+
+**Known limitation** (unchanged from F0): the *source* text still cannot be annotated when it is
+kanji-only, because the source language is auto-detected and kanji-only strings are
+indistinguishable from Chinese. Output text has no such problem — the target language is known.
+
+**Tests**: 286 → 307 passed / 0 failed (+21).
+
 ### Phase F2 — Readings on the translation itself, not just the source (2026-08-06)
 
 Third phase of "furigana everywhere". The Quick Translate popup's **output** box is now a

@@ -48,6 +48,7 @@ from src.ui.dialogs import APIErrorDialog, TrialExhaustedDialog, TrialFeatureDia
 from src.ui.history_dialog import HistoryDialog
 from src.ui.toast import ToastManager, ToastType
 from src.ui.quick_translate import QuickTranslateManager
+from src.ui.ruby_text import RubyText, insert_output
 from src.ui.tray import TrayManager
 from src.utils.updates import (
     AutoUpdater,
@@ -123,7 +124,8 @@ class TranslatorApp:
         self.toast = ToastManager(self.root)
 
         # Expanded translation window
-        self.expanded_window = ExpandedTranslationWindow(self.root, self.toast)
+        self.expanded_window = ExpandedTranslationWindow(self.root, self.toast,
+                                                         self.config)
 
         # Update UI manager (check previous update status)
         self.update_manager = UpdateUIManager(self.root, self.config, self.toast)
@@ -852,15 +854,7 @@ class TranslatorApp:
         self.expand_btn = ttk.Button(trans_header, **expand_kwargs)
         self.expand_btn.pack(side=tk.RIGHT)
 
-        self.trans_text = tk.Text(content_frame, height=10, wrap=tk.WORD,
-                                  bg='#2b2b2b', fg='#ffffff',
-                                  font=('Segoe UI', 12), relief='flat',
-                                  padx=10, pady=10)
-        self.trans_text.insert('1.0', translated)
-        self.trans_text.config(state='disabled')  # Make read-only
-        self.trans_text.pack(fill=BOTH, expand=True, pady=(5, 0))
-        self.trans_text.bind('<MouseWheel>',
-            lambda e: self.trans_text.yview_scroll(int(-3*(e.delta/120)), "units"))
+        self._create_translation_box(content_frame, translated, target_lang)
 
         # Enable DnD for popup window - delay to ensure window is fully realized
         self.popup.after(300, lambda: self._setup_drop_handling(self.popup))
@@ -1129,10 +1123,12 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
     def _update_grammar_result(self, corrected: str):
         """Write the grammar-fix result into the output box and reset the button."""
         try:
-            self.trans_text.config(state='normal')
-            self.trans_text.delete('1.0', tk.END)
-            self.trans_text.insert('1.0', corrected)
-            self.trans_text.config(state='disabled')
+            # No language hint: a grammar fix keeps the source language, which
+            # is auto-detected and not known here. Japanese with kana still
+            # annotates on its own evidence.
+            self.trans_text.clear()
+            insert_output(self.trans_text, tk.END, corrected,
+                          enabled=self._ruby_enabled())
         except tk.TclError:
             return  # Popup closed mid-flight
         if hasattr(self, 'fix_grammar_btn'):
@@ -1168,11 +1164,11 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
             self.original_text.delete('1.0', tk.END)
             self.original_text.insert('1.0', extracted_original)
 
-        # Update translation text box
-        self.trans_text.config(state='normal')  # Enable to update
-        self.trans_text.delete('1.0', tk.END)
-        self.trans_text.insert('1.0', translated)
-        self.trans_text.config(state='disabled')  # Make read-only again
+        # Update translation text box (RubyText restores the disabled state)
+        self.trans_text.clear()
+        insert_output(self.trans_text, tk.END, translated,
+                      lang_hint=self.selected_language,
+                      enabled=self._ruby_enabled())
         self.translate_btn.configure(text=f"Translate → {self.selected_language}",
                                      state='normal')
 
@@ -1243,14 +1239,50 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
             # Widget destroyed
             self._translate_animation_running = False
 
+    def _create_translation_box(self, parent, translated: str, target_lang: str):
+        """Build the main window's output box and fill it with the translation.
+
+        A RubyText, so Japanese results show furigana. It stays read-only, which
+        satisfies I3 (editable implies plain) by construction; read it back with
+        get_plain(), never get(). The mouse wheel, including over ruby frames, is
+        bound by the widget itself.
+
+        Args:
+            parent: Frame to pack into
+            translated: Text to display
+            target_lang: Target language, the authoritative annotation hint
+        """
+        self.trans_text = RubyText(parent, height=10, wrap=tk.WORD,
+                                   bg='#2b2b2b', base_fg='#ffffff',
+                                   kanji_fg='#ffffff',
+                                   base_font=('Segoe UI', 12), relief='flat',
+                                   spacing1=0, spacing3=0, cursor='xterm',
+                                   padx=10, pady=10)
+        insert_output(self.trans_text, '1.0', translated,
+                      lang_hint=target_lang, enabled=self._ruby_enabled())
+        self.trans_text.config(state='disabled')  # Make read-only
+        self.trans_text.pack(fill=BOTH, expand=True, pady=(5, 0))
+        return self.trans_text
+
+    def _ruby_enabled(self) -> bool:
+        """Whether result text should carry furigana (Settings toggle).
+
+        Annotation happens at render time, so this one setting governs every
+        surface rather than only the popup's source block.
+        """
+        return bool(self.config and self.config.get_furigana_enabled())
+
     def _open_expanded_translation(self):
         """Open translation in expanded fullscreen window."""
-        translated = self.trans_text.get('1.0', tk.END).strip()
+        # get_plain(): get() would hand over text with every annotated word
+        # deleted, so the expanded window would show a broken sentence.
+        translated = self.trans_text.get_plain().strip()
         self.expanded_window.show(translated, self.selected_language)
 
     def _copy_translation(self):
         """Copy translation to clipboard."""
-        translated = self.trans_text.get('1.0', tk.END).strip()
+        # get_plain(), never get() - see _open_expanded_translation.
+        translated = self.trans_text.get_plain().strip()
         if not translated:
             self.toast.show_warning("No translation to copy")
             return
