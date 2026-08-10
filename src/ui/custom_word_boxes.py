@@ -5,9 +5,10 @@ Allows users to manually compose lookup phrases by typing or
 dragging words from the tokenized word selection area.
 Right-click drag tags within/between boxes to reorder them.
 """
+import math
 import tkinter as tk
 from tkinter import LEFT, RIGHT, BOTH, X, TOP, BOTTOM, END
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 try:
     import ttkbootstrap as ttk
@@ -15,6 +16,11 @@ try:
 except ImportError:
     from tkinter import ttk
     HAS_TTKBOOTSTRAP = False
+
+from src.core import furigana
+from src.core.furigana import RubySegment
+from src.ui.ruby_text import (CJK_FONT_FAMILY, RUBY_FONT_SIZE, RubyRow,
+                              tk_layout_model)
 
 TAG_BG = '#fd7e14'
 TAG_FG = '#ffffff'
@@ -25,35 +31,94 @@ BOX_FONT = ('Segoe UI', 11)
 HIGHLIGHT_BORDER = '#fd7e14'
 MAX_BOXES = 5
 
+# Reading above a tag. #80b8ff would be unreadable on the orange plate.
+RUBY_FONT = (CJK_FONT_FAMILY, RUBY_FONT_SIZE)
+RUBY_FG = '#fff1e0'
+RUBY_DIM_FG = '#998877'
+TAG_DIM_BG = '#8B5A1A'
+
+
+def _ruby_rows() -> int:
+    """Height, in base-font rows, that a tag with a reading needs."""
+    model = tk_layout_model(BOX_FONT, RUBY_FONT, line_spacing=0)
+    return max(1, math.ceil(model.row_ruby / model.row_plain))
+
 
 class WordTag:
-    """An orange tag inside a CustomWordBox, removable by clicking x."""
+    """An orange tag inside a CustomWordBox, removable by clicking x.
+
+    With a reading it becomes a two-row grid (readings above, word below) with
+    the close button on the word row, so the x stays next to the word instead
+    of floating against the reading.
+    """
 
     def __init__(self, parent_text: tk.Text, word: str, on_remove: Callable,
-                 on_drag_start: Optional[Callable] = None):
+                 on_drag_start: Optional[Callable] = None,
+                 segments: Optional[Sequence[RubySegment]] = None):
         self.word = word
         self.parent_text = parent_text
         self._on_remove = on_remove
         self._on_drag_start = on_drag_start
+        self.segments = tuple(segments or ())
+        self.row: Optional[RubyRow] = None
 
-        self.frame = tk.Frame(parent_text, bg=TAG_BG, padx=1, pady=0)
+        if self.segments and any(seg.ruby for seg in self.segments):
+            self.row = RubyRow(parent_text, self.segments,
+                               base_font=TAG_FONT, ruby_font=RUBY_FONT,
+                               bg=TAG_BG, base_fg=TAG_FG, ruby_fg=RUBY_FG,
+                               padx=1, pady=0, cursor='hand2')
+            self.frame = self.row.frame
+            self.label = self.row.bases[0]
+            self.close_btn = tk.Label(
+                self.frame, text='×', font=('Segoe UI', 9),
+                bg=TAG_BG, fg='#ffddcc', padx=2, pady=0, cursor='hand2')
+            # On the word row, not spanning both, so it tracks the word.
+            self.close_btn.grid(row=1, column=len(self.segments), sticky='s')
+            self._parts = list(self.row.widgets) + [self.close_btn]
+        else:
+            # Unchanged single-row tag.
+            self.frame = tk.Frame(parent_text, bg=TAG_BG, padx=1, pady=0)
+            self.label = tk.Label(
+                self.frame, text=word,
+                font=TAG_FONT, bg=TAG_BG, fg=TAG_FG,
+                padx=2, pady=1, cursor='hand2'
+            )
+            self.label.pack(side=LEFT)
+            self.close_btn = tk.Label(
+                self.frame, text='×', font=('Segoe UI', 9),
+                bg=TAG_BG, fg='#ffddcc', padx=2, pady=0, cursor='hand2'
+            )
+            self.close_btn.pack(side=LEFT)
+            self._parts = [self.frame, self.label, self.close_btn]
 
-        self.label = tk.Label(
-            self.frame, text=word,
-            font=TAG_FONT, bg=TAG_BG, fg=TAG_FG,
-            padx=2, pady=1, cursor='hand2'
-        )
-        self.label.pack(side=LEFT)
-
-        self.close_btn = tk.Label(
-            self.frame, text='×', font=('Segoe UI', 9),
-            bg=TAG_BG, fg='#ffddcc', padx=2, pady=0, cursor='hand2'
-        )
-        self.close_btn.pack(side=LEFT)
         self.close_btn.bind('<Button-1>', lambda e: self._remove())
+        for widget in self._parts:
+            if widget is not self.close_btn:
+                widget.bind('<Button-3>', self._handle_drag_start)
 
-        self.label.bind('<Button-3>', self._handle_drag_start)
-        self.frame.bind('<Button-3>', self._handle_drag_start)
+    @property
+    def has_ruby(self) -> bool:
+        """True when this tag displays at least one reading."""
+        return bool(self.row and self.row.has_ruby)
+
+    def set_dimmed(self, dimmed: bool):
+        """Dim the whole tag while it is being dragged.
+
+        Every part has to follow, reading included, or the reading stays bright
+        orange over a dimmed word.
+        """
+        background = TAG_DIM_BG if dimmed else TAG_BG
+        try:
+            for widget in self._parts:
+                widget.configure(bg=background)
+            self.label.configure(fg='#aaaaaa' if dimmed else TAG_FG)
+            self.close_btn.configure(fg='#777777' if dimmed else '#ffddcc')
+            if self.row:
+                self.row.set_colors(
+                    base_fg='#aaaaaa' if dimmed else TAG_FG,
+                    ruby_fg=RUBY_DIM_FG if dimmed else RUBY_FG)
+        except tk.TclError:
+            pass
 
     def _handle_drag_start(self, event):
         if self._on_drag_start:
@@ -71,10 +136,14 @@ class CustomWordBox:
 
     def __init__(self, parent, index: int, is_first: bool,
                  on_add: Callable, on_remove: Callable,
-                 on_tag_drag_start: Optional[Callable] = None):
+                 on_tag_drag_start: Optional[Callable] = None,
+                 language: Optional[str] = None,
+                 furigana_enabled: bool = True):
         self.index = index
         self._tags: list[WordTag] = []
         self._on_tag_drag_start = on_tag_drag_start
+        self.language = language
+        self.furigana_enabled = furigana_enabled
 
         self.frame = tk.Frame(parent, bg='#2b2b2b')
 
@@ -139,20 +208,57 @@ class CustomWordBox:
                 self._remove_tag(tag)
                 return 'break'
 
+    def _segments_for(self, word: str):
+        """Readings for a tag, or None.
+
+        A tag is one lookup phrase, so it is annotated on its own - unlike the
+        word chips, which take their readings from the sentence they came from.
+        There is no larger context here: the phrase is whatever the user typed
+        or dropped.
+        """
+        if not self.furigana_enabled or not word:
+            return None
+        try:
+            return furigana.annotate(word, self.language)
+        except Exception:
+            return None
+
     def add_word_tag(self, word: str):
         """Insert an orange word tag at the current cursor position."""
         tag = WordTag(self.text_widget, word, self._remove_tag,
-                      on_drag_start=self._on_tag_drag_start)
+                      on_drag_start=self._on_tag_drag_start,
+                      segments=self._segments_for(word))
         self._tags.append(tag)
-        self.text_widget.window_create('insert', window=tag.frame)
+        # align='baseline' so typed text keeps the tag's baseline; Tk's default
+        # 'center' would lift it against a tag carrying a reading.
+        self.text_widget.window_create('insert', window=tag.frame,
+                                       align='baseline')
+        self._sync_height()
 
     def insert_tag_at_position(self, word: str, tk_index: str):
         """Insert a tag at a specific text widget index."""
         tag = WordTag(self.text_widget, word, self._remove_tag,
-                      on_drag_start=self._on_tag_drag_start)
+                      on_drag_start=self._on_tag_drag_start,
+                      segments=self._segments_for(word))
         self._tags.append(tag)
-        self.text_widget.window_create(tk_index, window=tag.frame)
+        self.text_widget.window_create(tk_index, window=tag.frame,
+                                       align='baseline')
         self._rebuild_tags_order()
+        self._sync_height()
+
+    def _sync_height(self):
+        """Keep the box tall enough for the tags it holds.
+
+        `height` counts rows of the *base* font, but a tag carrying a reading is
+        taller than one such row, so a height of 1 would clip it. The row count
+        is derived from the real font metrics rather than guessed.
+        """
+        rows = _ruby_rows() if any(tag.has_ruby for tag in self._tags) else 1
+        try:
+            if int(self.text_widget.cget('height')) != rows:
+                self.text_widget.configure(height=rows)
+        except (tk.TclError, ValueError):
+            pass
 
     def remove_tag_for_drag(self, tag: WordTag):
         """Remove a tag for drag-move (destroys widget, caller recreates at destination)."""
@@ -164,6 +270,7 @@ class CustomWordBox:
             except tk.TclError:
                 pass
             tag.destroy()
+            self._sync_height()
 
     def _rebuild_tags_order(self):
         """Rebuild _tags list to match visual order in the text widget."""
@@ -186,6 +293,7 @@ class CustomWordBox:
         if tag in self._tags:
             self._tags.remove(tag)
             tag.destroy()
+            self._sync_height()
 
     @staticmethod
     def _strip_surrogates(text: str) -> str:
@@ -304,8 +412,11 @@ class CustomWordBoxesFrame:
     Supports right-click drag to reorder tags within and between boxes.
     """
 
-    def __init__(self, parent):
+    def __init__(self, parent, language: Optional[str] = None,
+                 furigana_enabled: bool = True):
         self.parent = parent
+        self.language = language
+        self.furigana_enabled = furigana_enabled
         self._boxes: list[CustomWordBox] = []
 
         self.frame = tk.Frame(parent, bg='#2b2b2b')
@@ -337,7 +448,9 @@ class CustomWordBoxesFrame:
             self._boxes_container, new_index, is_first,
             on_add=self._on_add_clicked,
             on_remove=self._on_remove_clicked,
-            on_tag_drag_start=self._on_tag_drag_start
+            on_tag_drag_start=self._on_tag_drag_start,
+            language=self.language,
+            furigana_enabled=self.furigana_enabled
         )
 
         if is_first:
@@ -385,21 +498,11 @@ class CustomWordBoxesFrame:
 
     def _dim_tag(self, tag: 'WordTag'):
         """Dim a tag to indicate it is being dragged."""
-        try:
-            tag.frame.configure(bg='#8B5A1A')
-            tag.label.configure(bg='#8B5A1A', fg='#aaaaaa')
-            tag.close_btn.configure(bg='#8B5A1A', fg='#777777')
-        except tk.TclError:
-            pass
+        tag.set_dimmed(True)
 
     def _restore_tag(self, tag: 'WordTag'):
         """Restore a tag to normal appearance."""
-        try:
-            tag.frame.configure(bg=TAG_BG)
-            tag.label.configure(bg=TAG_BG, fg=TAG_FG)
-            tag.close_btn.configure(bg=TAG_BG, fg='#ffddcc')
-        except tk.TclError:
-            pass
+        tag.set_dimmed(False)
 
     def _on_tag_drag_start(self, tag: 'WordTag', event):
         """Handle right-click drag start on a WordTag."""
@@ -421,12 +524,18 @@ class CustomWordBoxesFrame:
         self._drag_ghost.overrideredirect(True)
         self._drag_ghost.attributes('-topmost', True)
         self._drag_ghost.attributes('-alpha', 0.85)
-        ghost_label = tk.Label(
-            self._drag_ghost, text=tag.word,
-            font=TAG_FONT, bg=TAG_BG, fg=TAG_FG,
-            padx=4, pady=2
-        )
-        ghost_label.pack()
+        # Same segments as the tag, so a multi-reading word previews correctly.
+        if tag.has_ruby:
+            RubyRow(self._drag_ghost, tag.segments,
+                    base_font=TAG_FONT, ruby_font=RUBY_FONT,
+                    bg=TAG_BG, base_fg=TAG_FG, ruby_fg=RUBY_FG,
+                    padx=4, pady=2).frame.pack()
+        else:
+            tk.Label(
+                self._drag_ghost, text=tag.word,
+                font=TAG_FONT, bg=TAG_BG, fg=TAG_FG,
+                padx=4, pady=2
+            ).pack()
         self._drag_ghost.geometry(f"+{event.x_root + 12}+{event.y_root + 8}")
 
         self.frame.bind_all('<B3-Motion>', self._on_tag_drag_motion)
@@ -444,7 +553,9 @@ class CustomWordBoxesFrame:
             self._drop_line.overrideredirect(True)
             self._drop_line.attributes('-topmost', True)
             self._drop_line.configure(bg='#00d4ff')
-        self._drop_line.geometry(f"3x{h - 4}+{sx - 1}+{sy + 2}")
+        # max(): an unmapped box reports height 1, and "3x-3+..." is a TclError
+        # raised inside a live motion handler, which would break the drag.
+        self._drop_line.geometry(f"3x{max(8, h - 4)}+{sx - 1}+{sy + 2}")
         self._drop_line.deiconify()
         self._drop_line.lift()
 

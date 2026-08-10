@@ -337,3 +337,76 @@ class TestKakasiFallback:
         F.clear_cache()
         assert F._KAKASI.is_available() is True
         assert notation("取り消し") == "{取|と}り{消|け}し"
+
+
+# --------------------------------------------------------------------------- #
+# Per-token annotation (F6: dictionary word chips)
+# --------------------------------------------------------------------------- #
+class TestAnnotateTokens:
+    """`annotate_tokens` hands out readings generated for the whole line.
+
+    The caller's tokenizer and this module disagree about compounds, so the
+    interesting cases are all about what happens at a token boundary.
+    """
+
+    SENTENCE = "\u4eca\u65e5\u306f\u65e5\u672c\u8a9e\u3092\u52c9\u5f37\u3057\u3066\u4f1a\u3044\u307e\u3059\u3002"
+
+    def test_always_returns_one_entry_per_token(self):
+        tokens = ["a", "", "b"]
+        assert len(F.annotate_tokens(tokens, "ab", "English")) == 3
+
+    def test_every_entry_reconstructs_its_token(self):
+        # I1, per token.
+        tokens = ["\u4eca\u65e5", "\u306f", "\u65e5\u672c", "\u8a9e", "\u3092", "\u52c9\u5f37",
+                  "\u3057", "\u3066", "\u4f1a\u3044", "\u307e\u3059", "\u3002"]
+        for token, segments in zip(tokens,
+                                   F.annotate_tokens(tokens, self.SENTENCE, "Japanese")):
+            assert ''.join(seg.base for seg in segments) == token
+
+    @FUGASHI_ONLY
+    def test_reading_comes_from_the_line_not_the_token(self):
+        tokens = ["\u4eca\u65e5", "\u306f"]
+        result = F.annotate_tokens(tokens, self.SENTENCE, "Japanese")
+        assert result[0][0].ruby == "\u304d\u3087\u3046"        # kyou, not konnichi
+
+    def test_a_token_cutting_a_compound_gets_no_reading(self):
+        # The tokenizer splits the compound; a reading for half of it would be
+        # wrong (nippon instead of nihon), so the chip stays bare.
+        tokens = ["\u65e5\u672c", "\u8a9e"]
+        result = F.annotate_tokens(tokens, "\u65e5\u672c\u8a9e\u3092\u52c9\u5f37", "Japanese")
+        assert all(seg.ruby is None for segments in result for seg in segments)
+
+    def test_a_plain_run_is_clipped_to_the_token(self):
+        # The plain run beside a reading continues past the token; splitting text
+        # that carries no reading cannot make it wrong, so the reading survives.
+        tokens = ["\u4f1a\u3044", "\u307e\u3059"]
+        result = F.annotate_tokens(tokens, "\u4f1a\u3044\u307e\u3059\u3002", "Japanese")
+        assert result[0][0].ruby is not None
+        assert ''.join(seg.base for seg in result[0]) == "\u4f1a\u3044"
+        assert all(seg.ruby is None for seg in result[1])
+
+    def test_no_hint_and_no_kana_means_no_readings(self):
+        tokens = ["\u6771\u4eac", "\u90fd"]
+        result = F.annotate_tokens(tokens, "\u6771\u4eac\u90fd", None)
+        assert all(seg.ruby is None for segments in result for seg in segments)
+
+    def test_latin_text_is_untouched(self):
+        tokens = ["I", "study", "Japanese"]
+        result = F.annotate_tokens(tokens, "I study Japanese", "English")
+        assert [segments[0].base for segments in result] == tokens
+        assert all(seg.ruby is None for segments in result for seg in segments)
+
+    def test_a_token_absent_from_the_text_stays_plain(self):
+        result = F.annotate_tokens(["\u52c9\u5f37", "zzz"], self.SENTENCE, "Japanese")
+        assert result[1] == (F.RubySegment("zzz", None),)
+
+    def test_repeated_tokens_advance_through_the_text(self):
+        text = "\u52c9\u5f37\u3068\u52c9\u5f37"
+        result = F.annotate_tokens(["\u52c9\u5f37", "\u3068", "\u52c9\u5f37"], text, "Japanese")
+        assert [''.join(s.base for s in segs) for segs in result] == \
+            ["\u52c9\u5f37", "\u3068", "\u52c9\u5f37"]
+
+    def test_empty_inputs_are_safe(self):
+        assert F.annotate_tokens([], "", None) == ()
+        assert F.annotate_tokens(["x"], "", None) == ((F.RubySegment("x", None),),)
+        assert F.annotate_tokens([""], "abc", None) == ((),)

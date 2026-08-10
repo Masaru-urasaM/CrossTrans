@@ -7,8 +7,8 @@ approaches. Newest first.
 
 ### Decision 8 — Furigana everywhere: annotate at render time, structured segments, fail-safe readings
 
-**Date**: 2026-08-04 (addenda: Phase 1 2026-08-05, Phase 4 2026-08-07, Phase 5 2026-08-10)
-**Status**: RESOLVED (Phases 0-5 implemented; Phases 6-7 planned)
+**Date**: 2026-08-04 (addenda: Phase 1 2026-08-05, Phase 4 2026-08-07, Phases 5-6 2026-08-10)
+**Status**: RESOLVED (Phases 0-6 implemented; Phase 7 planned)
 
 **Problem**: Furigana had to appear on **every** surface that displays Japanese, not just the
 Quick Translate popup's source block. The shipped design could not get there: readings were
@@ -110,6 +110,26 @@ looked-up word is typically bare kanji. It is resolved **per `## [Word]` entry**
 lookup can mix source languages) and any unrecognized value degrades to no hint. Field 5
 (Pronunciation) is excluded from annotation entirely: it holds IPA plus a target-language phonetic,
 and hiragana over katakana is redundant and invites misreading — confirmed by the user.
+
+**Phase 6 addendum — whose tokenization wins.** The word chips are already tokenized, by
+`nlp_manager`, and the obvious move is to annotate each chip. Measurement killed that: this
+tokenizer splits 日本語 into 日本 + 語, and 日本 annotated alone reads **にっぽん** where the
+compound is にほん — so per-chip annotation prints a wrong reading on exactly the words a learner
+is looking up. `annotate_tokens()` therefore annotates the **line** and hands the readings out,
+leaving a token bare when it cuts through one. The decision is a single join check — the per-token
+form of I1 — rather than a boundary guard: a ruby run is never clipped, so an overhanging run
+cannot produce a string equal to the token. A plain run *is* clipped, because splitting text that
+carries no reading cannot make it wrong, and that is what lets 会い keep 会[あ].
+
+Two measured layout facts came with it. `window_create` defaults to `align='center'`, which lifts
+the plain chips **7 px** off an annotated chip's baseline; `align='baseline'` brings both to within
+1 px. And `CustomWordBox(height=1)` clips its own tags, because `height` counts base-font rows —
+the same unit confusion as Phase 1, in a second place — so the row count is derived from font
+metrics instead.
+
+Chips and tags differ deliberately: a **chip** is a fragment of a sentence and takes its reading
+from that sentence; a **tag** is one lookup phrase the user typed or composed, with no larger
+context, so it is annotated on its own.
 
 The Phase 0 fail-safe that suppressed ruby for source text containing `\ { } |` was **removed**
 in Phase 1: it existed only because the old regex renderer ignored escapes, and `RubyText`

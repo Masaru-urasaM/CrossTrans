@@ -593,6 +593,83 @@ def annotate(text: str, lang_hint: Optional[str] = None) -> Tuple[RubySegment, .
         return (RubySegment(text, None),) if text else ()
 
 
+def annotate_tokens(tokens: Sequence[str], text: str,
+                    lang_hint: Optional[str] = None
+                    ) -> Tuple[Tuple[RubySegment, ...], ...]:
+    """Annotate a tokenization *in context*, one segment tuple per token.
+
+    Readings are generated for the whole `text` once and then handed out to the
+    tokens that contain them, rather than annotating each token on its own.
+    That matters because the caller's tokenizer and this module disagree about
+    compounds: a dictionary tokenizer splits 日本語 into 日本 + 語, and 日本 read
+    alone is にっぽん while inside 日本語 it is にほん.
+
+    A token that cuts through a *reading* gets no reading at all - blank beats
+    wrong, and a fragment of a compound is exactly the case where a per-token
+    reading would be wrong. Plain runs are clipped to the token instead, since
+    splitting text that carries no reading cannot make it wrong: the tokenizer's
+    会い keeps 会[あ] even though the plain run beside it continues past the
+    token.
+
+    Args:
+        tokens: Tokens in the order they appear in `text`.
+        text: The full string the tokens came from; the annotation context.
+        lang_hint: Language name the caller knows, e.g. "Japanese".
+
+    Returns:
+        One tuple of RubySegment per input token, always the same length as
+        `tokens`. Each tuple's bases concatenate back to its token (I1).
+    """
+    plain = tuple((RubySegment(token, None),) if token else () for token in tokens)
+    if not tokens or not text or not should_annotate(text, lang_hint):
+        return plain
+
+    segments = annotate(text, lang_hint)
+    if not any(seg.ruby for seg in segments):
+        return plain
+
+    # Absolute span of every segment within `text`.
+    spans: List[Tuple[int, int, RubySegment]] = []
+    position = 0
+    for segment in segments:
+        spans.append((position, position + len(segment.base), segment))
+        position += len(segment.base)
+
+    result: List[Tuple[RubySegment, ...]] = []
+    cursor = 0
+    for token in tokens:
+        if not token:
+            result.append(())
+            continue
+        start = text.find(token, cursor)
+        if start < 0:
+            result.append((RubySegment(token, None),))
+            continue
+        end = start + len(token)
+        cursor = end
+        covering = [span for span in spans if span[0] < end and start < span[1]]
+        pieces: List[RubySegment] = []
+        for span_start, span_end, segment in covering:
+            if segment.ruby:
+                # Never clipped: a reading belongs to the whole run it was
+                # aligned to, so half of 日本語/にほんご is not 日本/にほんご. An
+                # overhanging run makes the join below fail, which is what
+                # leaves the token bare.
+                pieces.append(segment)
+            else:
+                clipped = segment.base[max(0, start - span_start):
+                                       len(segment.base) - max(0, span_end - end)]
+                if clipped:
+                    pieces.append(RubySegment(clipped, None))
+        # The join is the decision: it is invariant I1 applied per token, and it
+        # is what rejects a token that cuts through a reading.
+        if pieces and ''.join(piece.base for piece in pieces) == token:
+            result.append(tuple(pieces))
+        else:
+            result.append((RubySegment(token, None),))
+    return tuple(result)
+
+
 def clear_cache() -> None:
     """Drop the annotation cache (used by tests and after a provider change)."""
     _annotate_cached.cache_clear()

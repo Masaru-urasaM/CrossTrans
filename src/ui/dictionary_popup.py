@@ -55,6 +55,10 @@ class DictionaryPopup:
         self._get_selected_language: Optional[Callable] = None
         self._get_popup: Optional[Callable] = None
 
+    def _furigana_enabled(self) -> bool:
+        """Whether word chips should carry readings (Settings toggle)."""
+        return bool(self.config and self.config.get_furigana_enabled())
+
     def configure_callbacks(self,
                            on_show_settings_tab: Optional[Callable] = None,
                            get_selected_language: Optional[Callable] = None,
@@ -458,14 +462,17 @@ class DictionaryPopup:
             on_lookup=on_lookup,
             on_expand=expand_dictionary,
             on_no_selection=on_no_selection,
-            language=language  # Pass language for NLP tokenization
+            language=language,  # Pass language for NLP tokenization
+            furigana_enabled=self._furigana_enabled()
         )
         dict_frame.set_exit_callback(dict_popup.destroy)
         dict_frame.pack(fill=BOTH, expand=True)
 
         # Custom word boxes (between text area and action buttons)
         from src.ui.custom_word_boxes import CustomWordBoxesFrame
-        custom_boxes = CustomWordBoxesFrame(dict_frame.frame)
+        custom_boxes = CustomWordBoxesFrame(
+            dict_frame.frame, language=language,
+            furigana_enabled=self._furigana_enabled())
         dict_frame.insert_custom_widget(custom_boxes.frame)
         dict_frame.set_drop_target(custom_boxes)
 

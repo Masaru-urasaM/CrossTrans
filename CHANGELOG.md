@@ -4,6 +4,59 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase F6 — Dictionary word chips and custom-box tags (2026-08-10)
+
+Seventh phase of "furigana everywhere". The clickable word chips in Dictionary mode and the
+orange tags in Custom lookup now carry readings. These are embedded widgets with their own
+click, hover, selection and right-click-drag behaviour, so most of the work was keeping that
+behaviour intact around a chip that is suddenly two rows tall.
+
+**Added**
+- `src/core/furigana.py` `annotate_tokens(tokens, text, lang_hint)` — readings for a
+  tokenization, generated from the **whole line** and then handed to the tokens. Each token's
+  segments concatenate back to that token (I1, per token).
+- `src/ui/ruby_text.py` `RubyRow` — a standalone two-row ruby chip (grid: readings above, bases
+  below) for surfaces that are not a `Text` widget. Used by the chips, the tags and both drag
+  ghosts. `NO_AUTOSTYLE` is now public so every module uses the same ttkbootstrap workaround.
+- `WordButtonFrame(..., furigana_enabled=)` and `CustomWordBoxesFrame(..., language=,
+  furigana_enabled=)`; both dictionary-mode call sites pass the Settings toggle.
+- `WordTag.set_dimmed()` — the drag-dim now covers the reading, which the caller poking at
+  `tag.frame/label/close_btn` could not.
+- `tests/test_word_chips_ruby.py` (36 tests) + `TestAnnotateTokens` in `tests/test_furigana_core.py`
+  (11 tests). All mutation-checked, including the drag paths.
+
+**Fixed during implementation**
+- **A wrong reading on split compounds, found by measurement.** The dictionary tokenizer splits
+  日本語 into 日本 + 語, and 日本 annotated on its own reads **にっぽん** where the compound is
+  にほん. Per-chip annotation would therefore print a wrong reading on exactly the words a
+  learner is looking up. Readings now come from the line, and a token that cuts through a
+  reading is left bare — the chips for 日本 and 語 show nothing rather than something wrong.
+  A plain run *is* clipped to the token (splitting text with no reading cannot make it wrong),
+  which is what lets 会い keep 会[あ].
+- **Chips were 7 px out of alignment** (measured): `window_create` defaults to `align='center'`,
+  so a taller annotated chip lifted the plain chips off its baseline. Both the chips and the tags
+  now insert with `align='baseline'`.
+- **The custom box clipped its own tags.** `height=1` counts rows of the *base* font, and a tag
+  with a reading is taller than one — the F1 height-unit bug again. The box now derives the row
+  count from real font metrics, growing when a reading appears and shrinking when it goes.
+- **The wheel was dead over every chip** (pre-existing): an embedded widget swallows
+  `<MouseWheel>`, and chips cover nearly all of the word area, so a long text could not be
+  scrolled at all. Bound on the area and on every chip part.
+- **`_show_drop_line` could raise inside a live motion handler**: an unmapped box reports height
+  1, making the geometry string `3x-3+...`, which is a `TclError`. Clamped.
+
+**Design notes**
+- A word with no reading keeps the **single-label chip it always had**, so non-Japanese
+  Dictionary mode is unchanged.
+- A tag is annotated **on its own**, unlike a chip: a tag is one lookup phrase the user typed or
+  composed, and there is no larger context to read it in.
+- Readings switch to white on the orange selection/highlight — `#80b8ff` on `#fd7e14` is
+  unreadable.
+- Ghosts are built from the same segments as the chip, never from a concatenated reading string:
+  取り消し would otherwise preview as the nonsense とけ.
+
+**Tests**: 376 → 422 passed / 0 failed (+46).
+
 ### Phase F5 — Dictionary result window (2026-08-10)
 
 Sixth phase of "furigana everywhere". The dictionary result window now shows readings on the

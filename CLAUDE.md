@@ -110,7 +110,7 @@ Key points:
 
 - **Single instance**: TCP socket lock on `127.0.0.1:47823` (see `src/utils/single_instance.py`)
 
-- **ttkbootstrap discards explicit colours on standard `tk` widgets**: it re-themes them at construction, so `tk.Label(fg='#80b8ff', bg='#363636')` comes back `fg='#ffffff'`, `bg='#222222'`. Measured, not theoretical — it is why the furigana reading colour never actually shipped before v1.9.19. Pass `autostyle=False` (as the `tk.Button` call sites in `quick_translate.py` and `ruby_text.py` do) whenever a colour must survive. `tag_configure()` colours are **not** affected, only widget options. Leave a widget themed when it should match the frame around it.
+- **ttkbootstrap discards explicit colours on standard `tk` widgets**: it re-themes them at construction, so `tk.Label(fg='#80b8ff', bg='#363636')` comes back `fg='#ffffff'`, `bg='#222222'`. Measured, not theoretical — it is why the furigana reading colour never actually shipped before v1.9.19. Pass `autostyle=False` whenever a colour must survive - use `ruby_text.NO_AUTOSTYLE`, which guards the kwarg for the no-ttkbootstrap case. `tag_configure()` colours are **not** affected, only widget options. Leave a widget themed when it should match the frame around it.
 
 - **Never use `grab_set()` on popups**: Tkinter `grab_set()` + `transient(hidden_root)` causes permanent UI freeze. The root window is withdrawn, so modal grab locks all input with no visible dialog to dismiss. Always use `attributes('-topmost', True)` + `lift()` + `focus_force()` + `after(100, topmost=False)` pattern instead.
 
@@ -543,6 +543,8 @@ display rather than receiving pre-annotated strings through the queue.
 | Main window input (`original_text`) | — | editable, so it stays plain (I3) forever; its readings live in the Reading pane below |
 | Reading pane (`_reading_text`) | none | mirrors the input box; source language unknown, so kanji-only input stays plain |
 | Dictionary result window | `target_lang` for Translation/Definition, the result's own **Source Language** field elsewhere | monospace columns preserved; Pronunciation never annotated. See below |
+| Dictionary word chips | mode language, applied to the whole line | a chip that cuts a compound stays bare. See below |
+| Custom lookup tags | mode language, per tag | a tag is one lookup phrase, so it is annotated on its own |
 
 All result text goes through `ruby_text.insert_output(widget, index, text, lang_hint, enabled)`,
 so the toggle is honored in one place. Read every one of these boxes with `get_plain()`.
@@ -586,9 +588,34 @@ Read-only `RubyText` under `original_text`, **shown by default** and collapsible
   `calculate_size()` measures with Segoe UI 11 while this window renders Consolas 10. The furigana
   part of the budget (`overhead_px`) is exact.
 
+### Word chips and custom-box tags (F6)
+Both are embedded widgets, not text, so they use `RubyRow` (a two-row grid: readings above, bases
+below) instead of `RubyText`. A word with **no** reading keeps the single `tk.Label` chip it always
+had, which is why non-Japanese Dictionary mode is unchanged.
+
+- **Readings come from the line, via `furigana.annotate_tokens()`** - never per chip. The
+  dictionary tokenizer splits compounds (日本語 -> 日本 + 語) and 日本 alone reads にっぽん where
+  the compound is にほん. A token that cuts through a reading is left **bare**; a plain run *is*
+  clipped to the token, which is what lets 会い keep 会[あ].
+- **`align='baseline'` on every `window_create`.** Tk's default `center` lifts the plain chips 7 px
+  off an annotated chip's baseline (measured).
+- **`CustomWordBox` height is derived, not fixed.** `height` counts base-font rows and a tag with a
+  reading is taller than one, so `_sync_height()` grows the box (and shrinks it again) from real
+  font metrics - the F1 height-unit bug in a second place.
+- **Wheel is bound on the word area *and* every chip part**: an embedded widget swallows
+  `<MouseWheel>`, and the chips cover nearly the whole area.
+- **Selection/dim recolour the reading too** (white on the orange plate; `#80b8ff` there is
+  unreadable), via `RubyRow.set_colors()` / `WordTag.set_dimmed()`.
+- **Drag ghosts are built from the chip's segments**, never from a concatenated reading string -
+  取り消し would otherwise preview as the nonsense とけ.
+- A **tag** is annotated on its own: it is one lookup phrase the user typed or composed, so there
+  is no larger context to read it in.
+
 ### Files involved:
-- `src/core/furigana.py` - engine: detection, provider chain, aligner, notation
-- `src/ui/ruby_text.py` - `RubyText` widget: rendering, `get_plain()`, sizing, wheel
+- `src/core/furigana.py` - engine: detection, provider chain, aligner, notation,
+  `annotate_tokens()` (readings for a tokenization, generated in context)
+- `src/ui/ruby_text.py` - `RubyText` widget: rendering, `get_plain()`, sizing, wheel; `RubyRow`
+  (two-row chip for non-Text surfaces); `NO_AUTOSTYLE`
 - `src/ui/dictionary_render.py` - dictionary result run model: `split_dictionary_text()`,
   `field_policy()`, `source_language_hint()`, `overhead_px()`
 - `src/core/translation.py` - `generate_furigana()` / `_is_japanese_text()` delegate to the
@@ -604,11 +631,16 @@ Read-only `RubyText` under `original_text`, **shown by default** and collapsible
 - `src/ui/expanded_window.py` - read-only `RubyText`, `get_plain()` for Copy and the counter
 - `config.py` - `get_furigana_enabled()` / `set_furigana_enabled()`,
   `get_furigana_reading_pane()` / `set_furigana_reading_pane()`
+- `src/ui/dictionary_mode.py` - `WordLabel` chips (`RubyRow`), `_token_readings()`, `_on_wheel()`,
+  baseline-aligned `window_create`, drag ghost
+- `src/ui/custom_word_boxes.py` - `WordTag` (`RubyRow` + close button on the word row),
+  `set_dimmed()`, `CustomWordBox._sync_height()`, `_ruby_rows()`
 - `src/ui/settings/hotkey_tab.py` - Furigana toggle checkbox
 - `tests/test_furigana_core.py` (engine, headless), `tests/test_ruby_text.py` (widget),
   `tests/test_popup_ruby.py` (popup), `tests/test_main_window_ruby.py` (main window + expanded
   view), `tests/test_reading_pane.py` (input Reading pane),
-  `tests/test_dictionary_ruby.py` (dictionary run model + result window) — the middle two build `TranslatorApp`
+  `tests/test_dictionary_ruby.py` (dictionary run model + result window),
+  `tests/test_word_chips_ruby.py` (word chips, custom-box tags, drag and drop) — the middle two build `TranslatorApp`
   via `__new__` to avoid starting hotkeys/tray; the widget tests use the `tk_root` fixture in
   `tests/conftest.py`, which skips without a display
 

@@ -43,10 +43,11 @@ try:
     # colours they were given - the whole point of the reading is that it looks
     # different from the base text - so they opt out, the same way the existing
     # tk.Button call sites in quick_translate.py do. The Text widget itself does
-    # NOT opt out: it should keep matching the themed frame around it.
-    _NO_AUTOSTYLE = {'autostyle': False}
+    # NOT opt out: it should keep matching the themed frame around it. Public so
+    # every module that must keep a colour uses the same guarded constant.
+    NO_AUTOSTYLE = {'autostyle': False}
 except ImportError:
-    _NO_AUTOSTYLE = {}
+    NO_AUTOSTYLE = {}
 
 # --------------------------------------------------------------------------- #
 # Appearance - identical to the original popup renderer
@@ -329,6 +330,83 @@ def insert_output(widget: 'RubyText', index, text: str,
         widget.insert_plain(index, text, tags)
 
 
+class RubyRow:
+    """A standalone two-row ruby chip: readings on top, bases below.
+
+    For surfaces that are not a `Text` widget - the dictionary word chips, the
+    drag ghosts that preview them - where `RubyText` cannot be used but the same
+    alignment is needed. A grid keeps every base on one line no matter how many
+    readings the word carries (取り消し needs two, and concatenating them into
+    one label would print the nonsense reading とけ).
+
+    Attributes:
+        frame: The container to embed or pack.
+        bases: Labels holding the text itself.
+        readings: Labels holding the readings, in the same order.
+        widgets: frame + every label, for binding and recolouring.
+    """
+
+    def __init__(self, parent, segments: Sequence[RubySegment], *,
+                 base_font=None, ruby_font=None, bg: str = DEFAULT_BG,
+                 base_fg: str = KANJI_FG, ruby_fg: str = RUBY_FG,
+                 padx: int = 2, pady: int = 1, cursor: Optional[str] = None):
+        self.base_font = _as_font_tuple(base_font, BASE_FONT_SIZE)
+        self.ruby_font = _as_font_tuple(ruby_font, RUBY_FONT_SIZE)
+        self.bases: List[tk.Label] = []
+        self.readings: List[tk.Label] = []
+
+        extra = {'cursor': cursor} if cursor else {}
+        self.frame = tk.Frame(parent, bg=bg, padx=padx, pady=pady, bd=0,
+                              highlightthickness=0, **extra, **NO_AUTOSTYLE)
+        for column, (base, ruby) in enumerate(segments):
+            reading = tk.Label(self.frame, text=ruby or '', font=self.ruby_font,
+                               bg=bg, fg=ruby_fg, padx=0, pady=0, **extra,
+                               **NO_AUTOSTYLE)
+            reading.grid(row=0, column=column, sticky='s')
+            label = tk.Label(self.frame, text=base, font=self.base_font,
+                             bg=bg, fg=base_fg, padx=0, pady=0, **extra,
+                             **NO_AUTOSTYLE)
+            label.grid(row=1, column=column, sticky='n')
+            self.readings.append(reading)
+            self.bases.append(label)
+
+        self.widgets: List[tk.Misc] = [self.frame]
+        for reading, label in zip(self.readings, self.bases):
+            self.widgets.extend((reading, label))
+
+    @property
+    def has_ruby(self) -> bool:
+        """True when at least one reading is displayed."""
+        return any(label.cget('text') for label in self.readings)
+
+    def bind_all_parts(self, sequence: str, handler) -> None:
+        """Bind an event on the frame and every label inside it.
+
+        Needed for both input and scrolling: a click or wheel event over a child
+        label never reaches the frame, let alone the Text widget behind it.
+        """
+        for widget in self.widgets:
+            widget.bind(sequence, handler)
+
+    def set_colors(self, bg: Optional[str] = None, base_fg: Optional[str] = None,
+                   ruby_fg: Optional[str] = None, base_font=None) -> None:
+        """Recolour the chip, e.g. on selection."""
+        if bg is not None:
+            for widget in self.widgets:
+                widget.configure(bg=bg)
+        for label in self.bases:
+            if base_fg is not None:
+                label.configure(fg=base_fg)
+            if base_font is not None:
+                label.configure(font=base_font)
+        if ruby_fg is not None:
+            for label in self.readings:
+                label.configure(fg=ruby_fg)
+
+    def destroy(self) -> None:
+        self.frame.destroy()
+
+
 class RubyText(tk.Text):
     """A tk.Text that can render furigana inline and read its text back.
 
@@ -441,16 +519,16 @@ class RubyText(tk.Text):
                      kanji_fg: Optional[str] = None) -> None:
         """Embed one reading-over-base frame at `index`."""
         frame = tk.Frame(self, bg=self._ruby_bg, bd=0, highlightthickness=0,
-                         padx=0, pady=0, **_NO_AUTOSTYLE)
+                         padx=0, pady=0, **NO_AUTOSTYLE)
         reading_label = tk.Label(frame, text=ruby, font=self.ruby_font,
                                  fg=self._ruby_fg, bg=self._ruby_bg, bd=0,
                                  padx=RUBY_PAD_X, pady=0, anchor='center',
-                                 **_NO_AUTOSTYLE)
+                                 **NO_AUTOSTYLE)
         reading_label.pack(side='top', fill='x', pady=(RUBY_PAD_Y, 0))
         base_label = tk.Label(frame, text=base, font=self.base_font,
                               fg=kanji_fg or self._kanji_fg, bg=self._ruby_bg,
                               bd=0, padx=RUBY_PAD_X, pady=0, anchor='center',
-                              **_NO_AUTOSTYLE)
+                              **NO_AUTOSTYLE)
         base_label.pack(side='top', fill='x', pady=(0, RUBY_PAD_Y))
 
         # An embedded window would otherwise swallow the wheel event.

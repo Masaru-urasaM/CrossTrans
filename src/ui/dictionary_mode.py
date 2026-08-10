@@ -8,7 +8,7 @@ Uses NLP tokenization for smart compound word recognition when available.
 import re
 import tkinter as tk
 from tkinter import LEFT, RIGHT, BOTH, X, TOP, BOTTOM, W
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 try:
     import ttkbootstrap as ttk
@@ -17,18 +17,40 @@ except ImportError:
     from tkinter import ttk
     HAS_TTKBOOTSTRAP = False
 
+from src.core import furigana
+from src.core.furigana import RubySegment
+from src.ui.ruby_text import (CJK_FONT_FAMILY, RUBY_FG, RUBY_FONT_SIZE,
+                              RubyRow, WHEEL_UNITS)
+
 # Dictionary button colors (dark red)
 DICT_BUTTON_COLOR = "#822312"  # Dark red (main color)
 DICT_BUTTON_ACTIVE = '#9A3322'  # Lighter red (hover/active)
 DICT_BUTTON_PULSE_COLORS = ["#822312", '#923322', '#A24332', '#923322']  # Pulse animation
 
+# Word chip appearance
+WORD_FONT = ('Segoe UI', 11)
+WORD_BG = '#2b2b2b'
+WORD_FG = '#ffffff'
+WORD_SELECTED_BG = '#fd7e14'   # orange highlight
+RUBY_FONT = (CJK_FONT_FAMILY, RUBY_FONT_SIZE)
+RUBY_SELECTED_FG = '#ffffff'   # #80b8ff on orange is unreadable
+
 
 class WordLabel:
-    """Individual clickable word label that flows in text."""
+    """Individual clickable word label that flows in text.
+
+    A word with no reading stays a single `tk.Label`, exactly as before, so
+    non-Japanese dictionary mode is untouched. When the word has furigana the
+    chip becomes a two-row grid instead - readings on top, bases below, one
+    column per segment - which keeps the bases on one line however many
+    readings the word carries (取り消し needs two).
+    """
 
     def __init__(self, parent_text: tk.Text, word: str, index: int,
                  on_click: Callable, on_drag_enter: Callable,
-                 on_right_click: Optional[Callable] = None):
+                 on_right_click: Optional[Callable] = None,
+                 segments: Optional[Sequence[RubySegment]] = None,
+                 on_wheel: Optional[Callable] = None):
         """Initialize word label.
 
         Args:
@@ -38,6 +60,10 @@ class WordLabel:
             on_click: Callback when clicked (index, event)
             on_drag_enter: Callback when mouse drags over (index)
             on_right_click: Callback when right-clicked for drag-to-box (word, event)
+            segments: Annotated segments for this word; falsy or reading-free
+                segments produce the plain single-label chip.
+            on_wheel: Wheel handler; an embedded widget swallows <MouseWheel>,
+                which would leave a scroll dead zone over every word.
         """
         self.word = word
         self.index = index
@@ -47,19 +73,44 @@ class WordLabel:
         self.on_right_click = on_right_click
         self.parent_text = parent_text
 
-        # Create label (will be embedded in Text widget)
-        self.label = tk.Label(
-            parent_text, text=word,
-            font=('Segoe UI', 11),
-            bg='#2b2b2b', fg='#ffffff',
-            padx=2, pady=1, cursor='hand2'
-        )
+        self.segments = tuple(segments or ())
+        self.row: Optional[RubyRow] = None
 
-        # Bind events
-        self.label.bind('<Button-1>', self._handle_click)
-        self.label.bind('<Button-3>', self._handle_right_click)
-        self.label.bind('<Enter>', self._handle_enter)
-        self.label.bind('<Leave>', self._handle_leave)
+        if self.segments and any(seg.ruby for seg in self.segments):
+            self.row = RubyRow(parent_text, self.segments,
+                               base_font=WORD_FONT, ruby_font=RUBY_FONT,
+                               bg=WORD_BG, base_fg=WORD_FG, ruby_fg=RUBY_FG,
+                               cursor='hand2')
+            self.widget = self.row.frame
+            self._bases = self.row.bases
+            self._parts = self.row.widgets
+        else:
+            # Unchanged single-label chip, so non-Japanese dictionary mode is
+            # exactly what it was.
+            self.widget = tk.Label(
+                parent_text, text=word,
+                font=WORD_FONT,
+                bg=WORD_BG, fg=WORD_FG,
+                padx=2, pady=1, cursor='hand2'
+            )
+            self._bases = [self.widget]
+            self._parts = [self.widget]
+
+        # The base label stays exposed under its historical name.
+        self.label = self._bases[0]
+
+        for widget in self._parts:
+            widget.bind('<Button-1>', self._handle_click)
+            widget.bind('<Button-3>', self._handle_right_click)
+            widget.bind('<Enter>', self._handle_enter)
+            widget.bind('<Leave>', self._handle_leave)
+            if on_wheel:
+                widget.bind('<MouseWheel>', on_wheel)
+
+    @property
+    def has_ruby(self) -> bool:
+        """True when this chip displays at least one reading."""
+        return bool(self.row and self.row.has_ruby)
 
     def _handle_click(self, event):
         """Handle mouse click on word."""
@@ -77,26 +128,32 @@ class WordLabel:
             self.on_drag_enter(self.index)
         elif not self.selected:
             # Hover effect - underline
-            self.label.configure(font=('Segoe UI', 11, 'underline'))
+            self._set_base_font(WORD_FONT + ('underline',))
 
     def _handle_leave(self, event):
         """Handle mouse leaving word area."""
         if not self.selected:
-            self.label.configure(font=('Segoe UI', 11))
+            self._set_base_font(WORD_FONT)
+
+    def _set_base_font(self, spec):
+        for label in self._bases:
+            label.configure(font=spec)
 
     def set_selected(self, selected: bool):
         """Set selection state with visual feedback."""
         self.selected = selected
-        if selected:
-            self.label.configure(bg='#fd7e14', fg='#ffffff',
-                               font=('Segoe UI', 11, 'bold'))  # Orange highlight
+        background = WORD_SELECTED_BG if selected else WORD_BG
+        base_font = (WORD_FONT + ('bold',)) if selected else WORD_FONT
+        if self.row:
+            self.row.set_colors(
+                bg=background, base_fg=WORD_FG, base_font=base_font,
+                ruby_fg=RUBY_SELECTED_FG if selected else RUBY_FG)
         else:
-            self.label.configure(bg='#2b2b2b', fg='#ffffff',
-                               font=('Segoe UI', 11))  # Default
+            self.widget.configure(bg=background, fg=WORD_FG, font=base_font)
 
     def destroy(self):
-        """Destroy the label widget."""
-        self.label.destroy()
+        """Destroy the chip widget (its children go with it)."""
+        self.widget.destroy()
 
 
 class WordButtonFrame:
@@ -110,7 +167,8 @@ class WordButtonFrame:
                  on_lookup: Optional[Callable[[str], None]] = None,
                  on_expand: Optional[Callable[[], None]] = None,
                  on_no_selection: Optional[Callable[[], None]] = None,
-                 language: Optional[str] = None):
+                 language: Optional[str] = None,
+                 furigana_enabled: bool = True):
         """Initialize word button frame.
 
         Args:
@@ -121,6 +179,7 @@ class WordButtonFrame:
             on_expand: Callback when expand button is clicked
             on_no_selection: Callback when lookup clicked but no words selected
             language: Language for NLP tokenization (e.g., "Vietnamese", "Japanese")
+            furigana_enabled: Show readings above kanji (Settings toggle)
         """
         self.parent = parent
         self.on_selection_change = on_selection_change
@@ -128,6 +187,7 @@ class WordButtonFrame:
         self.on_expand = on_expand
         self.on_no_selection = on_no_selection
         self.language = language
+        self.furigana_enabled = furigana_enabled
         self.word_labels: list[WordLabel] = []
         self.selected_indices: set[int] = set()
         self.anchor_index: Optional[int] = None
@@ -164,6 +224,7 @@ class WordButtonFrame:
 
         # Make text widget read-only but allow selection via embedded labels
         self.text_widget.configure(state='disabled')
+        self.text_widget.bind('<MouseWheel>', self._on_wheel)
 
         # Parse text and create word labels
         self._create_word_labels(text)
@@ -250,6 +311,12 @@ class WordButtonFrame:
             # Tokenize each line separately using NLP
             words = self._tokenize_text(line)
 
+            # Readings come from the whole line, not from each token: this
+            # tokenizer splits 日本語 into 日本 + 語, and 日本 alone reads
+            # にっぽん where the compound is にほん. annotate_tokens() leaves a
+            # token blank rather than give it a reading cut from a compound.
+            readings = self._token_readings(words, line)
+
             # Create a label for each word and embed in text widget
             # Punctuation/symbol-only tokens are shown as plain text (non-clickable)
             for i, word in enumerate(words):
@@ -264,10 +331,16 @@ class WordButtonFrame:
                         self.text_widget, word, len(self.word_labels),
                         on_click=self._on_word_click,
                         on_drag_enter=self._on_word_drag_enter,
-                        on_right_click=self._start_drag_to_box
+                        on_right_click=self._start_drag_to_box,
+                        segments=readings[i] if readings else None,
+                        on_wheel=self._on_wheel
                     )
                     self.word_labels.append(label)
-                    self.text_widget.window_create(tk.END, window=label.label)
+                    # align='baseline', not Tk's default 'center': a chip with a
+                    # reading is taller, and centring it lifts the plain chips
+                    # 7px off its baseline (measured).
+                    self.text_widget.window_create(tk.END, window=label.widget,
+                                                   align='baseline')
                 else:
                     # Punctuation/symbol: insert as plain text (visible but not clickable)
                     self.text_widget.insert(tk.END, word)
@@ -278,6 +351,34 @@ class WordButtonFrame:
 
         # Disable text widget again
         self.text_widget.configure(state='disabled')
+
+    def _token_readings(self, words: list, line: str):
+        """Per-token readings for one line, or None when furigana is off.
+
+        Returns a list parallel to `words`, so the caller can index it directly.
+        """
+        if not self.furigana_enabled or not words:
+            return None
+        try:
+            return list(furigana.annotate_tokens(words, line, self.language))
+        except Exception as e:      # never let a reading break the word area
+            import logging
+            logging.error(f"[DICT_FURIGANA] annotate_tokens failed: {e}")
+            return None
+
+    def _on_wheel(self, event):
+        """Scroll the word area, including when the pointer is over a chip.
+
+        Every chip is an embedded widget, and an embedded widget swallows
+        <MouseWheel> - without this the wheel is dead over the words themselves,
+        which is most of the area.
+        """
+        try:
+            self.text_widget.yview_scroll(
+                int(-WHEEL_UNITS * (event.delta / 120)), 'units')
+        except tk.TclError:
+            pass
+        return 'break'
 
     def _tokenize_text(self, text: str) -> list:
         """Tokenize text using NLP or fallback to simple split.
@@ -545,14 +646,30 @@ class WordButtonFrame:
         self._drag_ghost = tk.Toplevel(self.frame)
         self._drag_ghost.overrideredirect(True)
         self._drag_ghost.attributes('-topmost', True)
-        ghost_label = tk.Label(
-            self._drag_ghost, text=word,
-            font=('Segoe UI', 11, 'bold'),
-            bg='#fd7e14', fg='#ffffff',
-            padx=4, pady=2
-        )
-        ghost_label.pack()
+        # The ghost previews the chip, so it carries the same readings - built
+        # from the same segments, never from a concatenated reading string
+        # (取り消し would become the nonsense とけ).
+        segments = self._segments_of(word)
+        if segments:
+            RubyRow(self._drag_ghost, segments,
+                    base_font=WORD_FONT + ('bold',), ruby_font=RUBY_FONT,
+                    bg=WORD_SELECTED_BG, base_fg=WORD_FG,
+                    ruby_fg=RUBY_SELECTED_FG, padx=4, pady=2).frame.pack()
+        else:
+            tk.Label(
+                self._drag_ghost, text=word,
+                font=('Segoe UI', 11, 'bold'),
+                bg='#fd7e14', fg='#ffffff',
+                padx=4, pady=2
+            ).pack()
         self._drag_ghost.geometry(f"+{event.x_root + 12}+{event.y_root + 8}")
+
+    def _segments_of(self, word: str):
+        """The annotated segments the chip for `word` is showing, if any."""
+        for label in self.word_labels:
+            if label.word == word and label.has_ruby:
+                return label.segments
+        return None
 
         self.frame.bind_all('<B3-Motion>', self._drag_motion)
         self.frame.bind_all('<ButtonRelease-3>', self._end_drag)
