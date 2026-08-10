@@ -19,7 +19,9 @@ except ImportError:
     from tkinter import ttk
     HAS_TTKBOOTSTRAP = False
 
+from src.core.furigana import RubySegment
 from src.core.nlp_manager import nlp_manager
+from src.ui.dictionary_render import overhead_px, split_dictionary_text
 from src.ui.ruby_text import (RubyText, estimate_notation_px,
                               estimate_ruby_overhead_px, insert_output)
 from src.ui.toast import ToastManager
@@ -31,6 +33,10 @@ HORIZONTAL_PADDING = 50  # frame(30) + scrollbar(20)
 # Height taken by the rule drawn between the furigana block and the
 # translation: 1px line plus its 8px padding above and below.
 FURIGANA_SEPARATOR_PX = 17
+
+# Dictionary result window font. Monospace is load-bearing: _align_dictionary_text
+# pads the labels with spaces so every value starts at the same column.
+DICT_RESULT_FONT = ('Consolas', 10)
 
 # Dictionary button colors (dark red) - consistent with dictionary_mode.py
 DICT_BUTTON_COLOR = "#822312"  # Dark red (main color)
@@ -1678,9 +1684,18 @@ class QuickTranslateManager:
         # Align dictionary fields for clean column display
         display_text = _align_dictionary_text(result)
 
+        # Decide furigana and word highlighting up front: the window is sized
+        # before the widget exists, and an annotated word can no longer be found
+        # by Text.search() afterwards (an embedded window has no characters).
+        runs = split_dictionary_text(display_text, target_lang, looked_up_words,
+                                     HIGHLIGHT_COLORS,
+                                     annotate=self._ruby_enabled())
+
         # Calculate size based on result text (MIN_HEIGHT already in calculate_size)
         width, height = self.calculate_size(display_text)
         height = height + 30  # Title bar compensation for Toplevel window
+        height += overhead_px(runs, width - HORIZONTAL_PADDING,
+                              base_font=DICT_RESULT_FONT, line_spacing=0)
 
         # Create SEPARATE dictionary result window
         dict_result = tk.Toplevel(self.root)
@@ -1777,7 +1792,7 @@ class QuickTranslateManager:
 
         # Result text with monospace font for aligned columns
         try:
-            ui_font = font.Font(family='Consolas', size=10)
+            ui_font = font.Font(family=DICT_RESULT_FONT[0], size=DICT_RESULT_FONT[1])
             base_line_height = ui_font.metrics("linespace")
             avg_char_width = ui_font.measure("m")
         except tk.TclError:
@@ -1789,37 +1804,34 @@ class QuickTranslateManager:
         text_height = max(1, (height - VERTICAL_PADDING) // LINE_HEIGHT)
         text_width = max(30, width // avg_char_width)
 
-        result_text = tk.Text(main_frame, wrap=tk.WORD,
-                              bg='#2b2b2b', fg='#ffffff',
-                              font=('Consolas', 10), relief='flat',
-                              width=text_width, height=text_height,
-                              borderwidth=0, highlightthickness=0)
-        result_text.insert('1.0', display_text)
+        result_text = RubyText(main_frame, wrap=tk.WORD,
+                               bg='#2b2b2b', base_fg='#ffffff',
+                               kanji_fg='#ffffff',
+                               base_font=DICT_RESULT_FONT, relief='flat',
+                               spacing1=0, spacing3=0, cursor='xterm',
+                               width=text_width, height=text_height,
+                               borderwidth=0, highlightthickness=0)
 
-        # Highlight looked-up words with distinct colors
-        if looked_up_words:
-            for i, word in enumerate(looked_up_words):
-                if not word:
-                    continue
-                color = HIGHLIGHT_COLORS[i % len(HIGHLIGHT_COLORS)]
-                tag_name = f"lookup_word_{i}"
-                result_text.tag_configure(tag_name, foreground=color,
-                                          font=('Consolas', 10, 'bold'))
-                start_idx = "1.0"
-                while True:
-                    pos = result_text.search(word, start_idx, stopindex="end", nocase=True)
-                    if not pos:
-                        break
-                    end_pos = f"{pos}+{len(word)}c"
-                    result_text.tag_add(tag_name, pos, end_pos)
-                    start_idx = end_pos
+        # One pass: each run already knows its reading and its highlight colour,
+        # so a colour-coded word keeps its colour even when annotated.
+        bold_font = (DICT_RESULT_FONT[0], DICT_RESULT_FONT[1], 'bold')
+        for run in runs:
+            tag = None
+            if run.color:
+                tag = f"lookup_{run.color.lstrip('#')}"
+                result_text.tag_configure(tag, foreground=run.color,
+                                          font=bold_font)
+            if run.ruby:
+                result_text.insert_segments(tk.END,
+                                           (RubySegment(run.base, run.ruby),),
+                                           tag, kanji_fg=run.color)
+            else:
+                result_text.insert_plain(tk.END, run.base, tag)
 
         result_text.config(state='disabled')
         result_text.pack(side=TOP, fill=BOTH, expand=True)
-
-        # Mouse wheel scroll
-        result_text.bind('<MouseWheel>',
-                        lambda e: result_text.yview_scroll(int(-3 * (e.delta / 120)), "units"))
+        # RubyText binds the wheel itself, including over the ruby frames that
+        # would otherwise swallow the event.
 
         # Close on Escape
         dict_result.bind('<Escape>', lambda e: dict_result.destroy())

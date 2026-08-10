@@ -66,6 +66,7 @@ self.screenshot_handler.configure_callbacks(
 | Furigana readings (generation) | `src/core/furigana.py` |
 | Furigana rendering (any surface) | `src/ui/ruby_text.py` (`RubyText`) |
 | Dictionary mode | `src/core/nlp_manager.py` + `src/ui/dictionary_mode.py` + `src/ui/custom_word_boxes.py` + `src/core/translation.py` (prompt) |
+| Dictionary result rendering (furigana + highlight) | `src/ui/dictionary_render.py` + `show_dictionary_result()` in `src/ui/quick_translate.py` |
 | Update system | `src/utils/updates.py` + `src/ui/settings/update_manager.py` |
 
 ## Auto-Update System (Important)
@@ -541,6 +542,7 @@ display rather than receiving pre-annotated strings through the queue.
 | Expanded view | `target_language` arg | read-only since F3; a disabled `tk.Text` still selects and copies |
 | Main window input (`original_text`) | — | editable, so it stays plain (I3) forever; its readings live in the Reading pane below |
 | Reading pane (`_reading_text`) | none | mirrors the input box; source language unknown, so kanji-only input stays plain |
+| Dictionary result window | `target_lang` for Translation/Definition, the result's own **Source Language** field elsewhere | monospace columns preserved; Pronunciation never annotated. See below |
 
 All result text goes through `ruby_text.insert_output(widget, index, text, lang_hint, enabled)`,
 so the toggle is honored in one place. Read every one of these boxes with `get_plain()`.
@@ -562,13 +564,38 @@ Read-only `RubyText` under `original_text`, **shown by default** and collapsible
   and it would re-insert a pasted 50 000-character document on every edit.
 - The pane grows with the content up to `READING_PANE_MAX_ROWS`, then scrolls.
 
+### Dictionary result window (F5)
+`src/ui/dictionary_render.py` decides everything before insertion and returns
+`DictRun(base, ruby, color)` items covering the text exactly once
+(`''.join(run.base)` == the input, I1 again). `show_dictionary_result()` just inserts them.
+
+- **Annotate the line, then paint the colours — never the reverse.** Splitting a line at the
+  looked-up word first hands the tokenizer isolated fragments, and an all-kanji fragment (which is
+  what a looked-up word usually is: 勉強, 東京) cannot be annotated at all. A plain run may be split
+  anywhere; a ruby pair is coloured whole through `kanji_fg`.
+- **Highlighting cannot use `Text.search()` any more.** An annotated word has no characters left to
+  find, so the colour would vanish exactly where a reading appears. It travels on the run instead.
+- **Monospace is load-bearing.** `base_font=DICT_RESULT_FONT` (`Consolas 10`); labels are never
+  annotated, which is what keeps `_align_dictionary_text()`'s value column aligned.
+- **Pronunciation (field 5) is never annotated** — IPA plus a target-language phonetic; hiragana
+  over katakana is redundant. Matched by label *and* number, since models renumber.
+- **The result names its own source language** (`**Source Language**: Japanese`), used as the hint
+  for source-language fields, resolved **per `## [Word]` entry**. This is the one surface where
+  kanji-only text does get readings.
+- Known pre-existing quirk: the window is ~154 px taller than its content because
+  `calculate_size()` measures with Segoe UI 11 while this window renders Consolas 10. The furigana
+  part of the budget (`overhead_px`) is exact.
+
 ### Files involved:
 - `src/core/furigana.py` - engine: detection, provider chain, aligner, notation
 - `src/ui/ruby_text.py` - `RubyText` widget: rendering, `get_plain()`, sizing, wheel
+- `src/ui/dictionary_render.py` - dictionary result run model: `split_dictionary_text()`,
+  `field_policy()`, `source_language_hint()`, `overhead_px()`
 - `src/core/translation.py` - `generate_furigana()` / `_is_japanese_text()` delegate to the
   engine; queue integration in `do_translation()` (5-item tuple)
 - `src/ui/quick_translate.py` - `_render_furigana()` (delegate), `show()` height budget,
-  `_ruby_enabled()` / `_ruby_hint()`, replace preview, custom-prompt flattening
+  `_ruby_enabled()` / `_ruby_hint()`, replace preview, custom-prompt flattening,
+  `show_dictionary_result()` (RubyText + run insertion), `DICT_RESULT_FONT`
 - `src/app.py` - `_create_translation_box()`, `_ruby_enabled()`, `_update_grammar_result()`,
   `_update_translation_with_original()`, `_copy_translation()`, `_open_expanded_translation()`;
   Reading pane: `_create_reading_pane()`, `_refresh_reading_pane()`,
@@ -580,7 +607,8 @@ Read-only `RubyText` under `original_text`, **shown by default** and collapsible
 - `src/ui/settings/hotkey_tab.py` - Furigana toggle checkbox
 - `tests/test_furigana_core.py` (engine, headless), `tests/test_ruby_text.py` (widget),
   `tests/test_popup_ruby.py` (popup), `tests/test_main_window_ruby.py` (main window + expanded
-  view), `tests/test_reading_pane.py` (input Reading pane) — the last two build `TranslatorApp`
+  view), `tests/test_reading_pane.py` (input Reading pane),
+  `tests/test_dictionary_ruby.py` (dictionary run model + result window) — the middle two build `TranslatorApp`
   via `__new__` to avoid starting hotkeys/tray; the widget tests use the `tk_root` fixture in
   `tests/conftest.py`, which skips without a display
 

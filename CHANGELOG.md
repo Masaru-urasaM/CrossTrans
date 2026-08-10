@@ -4,6 +4,58 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase F5 — Dictionary result window (2026-08-10)
+
+Sixth phase of "furigana everywhere". The dictionary result window now shows readings on the
+Japanese it displays — the entry headers, definitions, synonyms and example sentences — while the
+aligned label columns and the colour-coded lookup words are preserved exactly.
+
+**Added**
+- `src/ui/dictionary_render.py` — the render model for this window. `split_dictionary_text()`
+  returns `DictRun(base, ruby, color)` items covering the text exactly once, so
+  `''.join(run.base)` is the input string (the engine's I1 guarantee, extended to the renderer).
+  Plus `field_policy()`, `source_language_hint()`, `runs_to_segments()`, `overhead_px()`.
+- `tests/test_dictionary_ruby.py` — 45 tests (headless run model + the real window), every one
+  mutation-checked.
+
+**Changed**
+- The result widget is a `RubyText` with `base_font=('Consolas', 10)` — monospace is load-bearing,
+  `_align_dictionary_text()` aligns the value column with space padding. Verified: all 12 value
+  columns still start at exactly the same pixel.
+- Its manual `<MouseWheel>` binding is gone; `RubyText` binds the wheel itself, which also removes
+  the dead zone over a ruby frame.
+- `DICT_RESULT_FONT` replaces the three separate `('Consolas', 10)` literals.
+
+**Fixed during implementation**
+- **Word highlighting would have broken silently.** Colours were applied *after* insertion with
+  `Text.search()`, and an annotated word contributes no characters, so every looked-up word would
+  have lost its colour precisely where a reading appeared. Highlighting is now decided before
+  insertion and travels on the run, so a word is coloured *and* annotated.
+- **Highlight-first splitting destroyed the readings** (caught by a test, then by inspection): if
+  the line is cut at the looked-up word before annotating, the tokenizer receives isolated
+  fragments and an all-kanji fragment — which is exactly what a looked-up word usually is (勉強,
+  東京) — cannot be annotated at all. The order is now annotate the whole line, then paint the
+  colours onto the segments: plain runs split at colour boundaries, a ruby pair is coloured whole.
+
+**Design notes**
+- **Pronunciation (field 5) is never annotated.** It holds IPA plus a target-language phonetic
+  (`/həˈloʊ/, /ハロー/`); hiragana above katakana is redundant and invites reading it as a
+  different word. Matched by label *and* by number, because models renumber.
+- **The result declares its own source language**, so `**Source Language**: Japanese` is used as
+  the annotation hint for the source-language fields. This closes the kanji-only gap where it
+  matters most: a dictionary lookup is usually a bare kanji word (犬, 東京, 勉強), which has no kana
+  and is otherwise indistinguishable from Chinese. Resolved **per `## [Word]` entry**, since a
+  multi-word lookup can mix source languages. An unrecognized value degrades to no hint.
+- **Target-language fields** (Translation, Definition) use the target language as hint, so a
+  kanji-only translation such as 犬 gets a reading too.
+
+**Pre-existing, not changed** (reported, per Rule 3): the window has ~154 px of unused height
+whether or not furigana is on, because `calculate_size()` measures with Segoe UI 11 while this
+window renders Consolas 10 and adds a one-line buffer. The furigana budget itself is exact —
+measured 51 px added against 51 px of real extra content.
+
+**Tests**: 331 → 376 passed / 0 failed (+45).
+
 ### Phase F4 — Reading pane under the input box (2026-08-07)
 
 Fifth phase of "furigana everywhere". The main window's **input box** now has a read-only

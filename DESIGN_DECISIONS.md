@@ -7,8 +7,8 @@ approaches. Newest first.
 
 ### Decision 8 — Furigana everywhere: annotate at render time, structured segments, fail-safe readings
 
-**Date**: 2026-08-04 (Phase 1 addendum 2026-08-05, Phase 4 addendum 2026-08-07)
-**Status**: RESOLVED (Phases 0-4 implemented; Phases 5-7 planned)
+**Date**: 2026-08-04 (addenda: Phase 1 2026-08-05, Phase 4 2026-08-07, Phase 5 2026-08-10)
+**Status**: RESOLVED (Phases 0-5 implemented; Phases 6-7 planned)
 
 **Problem**: Furigana had to appear on **every** surface that displays Japanese, not just the
 Quick Translate popup's source block. The shipped design could not get there: readings were
@@ -92,6 +92,24 @@ detected (the alternative offered to the user, who chose always-visible): a pane
 disappears moves everything below it and is undiscoverable before the first Japanese input. With
 nothing to annotate it shows a dim one-line placeholder — **not** a mirror of the box above, which
 would be visual noise *and* would re-insert a pasted 50 000-character document on every edit.
+
+**Phase 5 addendum — annotate the line, then paint the colours.** The dictionary result colour-codes
+each looked-up word, and the obvious implementation is to split the line at those words and render
+the pieces. It is wrong twice over: the tokenizer then sees isolated fragments (worse readings), and
+an **all-kanji fragment cannot be annotated at all** — which is exactly what a looked-up word
+usually is (勉強, 東京). So the whole line is annotated in one pass and the colours are painted onto
+the resulting segments: a plain run can be split anywhere, and a ruby pair is coloured whole via
+`kanji_fg`. The old post-insert `Text.search()` highlighting could not survive this at all — an
+embedded window contributes no characters, so an annotated word is unfindable — which is why the
+decision moved ahead of insertion into `DictRun`.
+
+The same phase found a **hint that was already in the data**: the result's own
+`**Source Language**: Japanese` field. Using it lifts the kanji-only restriction for the fields
+written in the source language, and a dictionary lookup is the case where it matters most, since the
+looked-up word is typically bare kanji. It is resolved **per `## [Word]` entry** (a multi-word
+lookup can mix source languages) and any unrecognized value degrades to no hint. Field 5
+(Pronunciation) is excluded from annotation entirely: it holds IPA plus a target-language phonetic,
+and hiragana over katakana is redundant and invites misreading — confirmed by the user.
 
 The Phase 0 fail-safe that suppressed ruby for source text containing `\ { } |` was **removed**
 in Phase 1: it existed only because the old regex renderer ignored escapes, and `RubyText`
