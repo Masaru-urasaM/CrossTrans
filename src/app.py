@@ -38,7 +38,9 @@ except ImportError:
     HAS_WINDND = False
 
 from config import Config
-from src.constants import VERSION, LANGUAGES, FEEDBACK_URL
+from src.constants import (VERSION, LANGUAGES, FEEDBACK_URL,
+                           FURIGANA_READING_PANE_DEBOUNCE_MS,
+                           FURIGANA_READING_PANE_MAX_ROWS)
 from src.core.translation import TranslationService
 from src.core.api_manager import AIAPIManager
 from src.core.hotkey import HotkeyManager
@@ -72,8 +74,8 @@ from src.ui.dictionary_popup import DictionaryPopup
 # The input box itself must stay plain (an embedded ruby frame cannot survive
 # edit_undo, and typing between two frames is unpredictable), so the readings
 # for what the user typed live in a read-only pane below it.
-READING_PANE_DEBOUNCE_MS = 350      # keystroke burst absorbed before annotating
-READING_PANE_MAX_ROWS = 4           # taller than this and the pane scrolls
+READING_PANE_DEBOUNCE_MS = FURIGANA_READING_PANE_DEBOUNCE_MS
+READING_PANE_MAX_ROWS = FURIGANA_READING_PANE_MAX_ROWS
 READING_PANE_PLACEHOLDER = "Readings appear here when the text above contains Japanese."
 READING_PANE_PLACEHOLDER_FG = '#666666'
 READING_PANE_PLACEHOLDER_TAG = 'reading_placeholder'
@@ -1858,9 +1860,19 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         tray_thread = threading.Thread(target=run_tray_safe, daemon=True)
         tray_thread.start()
 
-        # Pre-warm NLP manager in background (non-blocking)
-        # This populates cache so Dictionary tab opens instantly
-        def prewarm_nlp():
+        # Pre-warm in background (non-blocking): the reading engine so the first
+        # furigana render does not load dictionaries on the UI thread, and the
+        # NLP manager so the Dictionary tab opens instantly.
+        def prewarm_background():
+            try:
+                # Skipped when the feature is off - nothing would ever annotate,
+                # so the dictionary read would be pure startup disk I/O.
+                if self._ruby_enabled():
+                    furigana.prewarm()
+                    logging.info("Furigana pre-warming complete")
+            except Exception as e:
+                logging.debug(f"Furigana prewarm failed (non-critical): {e}")
+
             try:
                 from src.core.nlp_manager import nlp_manager
                 languages = nlp_manager.get_installed_languages()
@@ -1868,7 +1880,7 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
             except Exception as e:
                 logging.debug(f"NLP prewarm failed (non-critical): {e}")
 
-        prewarm_thread = threading.Thread(target=prewarm_nlp, daemon=True, name="NLPPrewarm")
+        prewarm_thread = threading.Thread(target=prewarm_background, daemon=True, name="Prewarm")
         prewarm_thread.start()
 
         # Note: Update check is already triggered in __init__ via _startup_update_check()

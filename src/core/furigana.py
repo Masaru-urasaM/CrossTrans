@@ -23,6 +23,9 @@ import threading
 from functools import lru_cache
 from typing import List, NamedTuple, Optional, Protocol, Sequence, Tuple
 
+from src.constants import (FURIGANA_MAX_RUBY_PAIRS as MAX_RUBY_PAIRS,
+                           FURIGANA_PREWARM_SAMPLE)
+
 # --------------------------------------------------------------------------- #
 # Character classes
 # --------------------------------------------------------------------------- #
@@ -42,11 +45,6 @@ NUMERAL_POS2 = '数詞'
 # Whitespace runs are annotated around, never through: tokenizers normalize them
 # away, which would silently drop newlines from a multi-line translation.
 WHITESPACE_RE = re.compile(r'(\s+)')
-
-# Rendering cost guard. Measured on Tk 8.6: 200 ruby pairs ~124 ms to build and
-# lay out, 500 ~400 ms, 1000 ~626 ms. Above the cap we return plain text so a
-# pasted document can never freeze the UI thread.
-MAX_RUBY_PAIRS = 400
 
 # Notation delimiters, kept only for backward compatibility with the legacy
 # {kanji|reading} string format still consumed by the popup renderer.
@@ -309,7 +307,14 @@ class FugashiProvider:
         if tagger is None:
             return None
         try:
-            words = list(tagger(text))
+            # Serialized: annotation runs on the UI thread (render time), on the
+            # translation worker (generate_furigana) and on the startup prewarm
+            # thread, and a MeCab tagger is not documented thread-safe. The lock
+            # is the same one the constructors take, so a call arriving mid-build
+            # waits for the dictionary instead of racing it. Costs nothing
+            # measurable: tokenizing is ~0.3 ms.
+            with _lock:
+                words = list(tagger(text))
         except Exception as e:
             logging.warning(f"Furigana: fugashi tokenize failed: {e}")
             return None
@@ -377,7 +382,9 @@ class KakasiProvider:
         if kks is None:
             return None
         try:
-            return [(item['orig'], item.get('hira')) for item in kks.convert(text)]
+            # Serialized for the same reason as the fugashi tagger above.
+            with _lock:
+                return [(item['orig'], item.get('hira')) for item in kks.convert(text)]
         except Exception as e:
             logging.warning(f"Furigana: pykakasi convert failed: {e}")
             return None
@@ -475,11 +482,19 @@ def prewarm() -> None:
 
     Call from the app's background startup path so the first annotation does not
     pay dictionary-load cost on the Tk main loop.
+
+    Annotates a real sample rather than probing availability. Probing stops at
+    the FIRST available provider, but _refine_compounds() consults pykakasi on
+    every annotation even when fugashi is the active one, so a probe leaves the
+    kakasi() construction - the larger half of the cost - on the first render.
+    Measured cold, fugashi installed: probe 315 ms, and the first annotation
+    after it still 407 ms. Annotating covers both, plus the aligner.
+
+    No error handling here on purpose: annotate() already swallows everything and
+    falls back to plain text, so a try/except would be unreachable and would
+    suggest a second failure mode that does not exist.
     """
-    try:
-        active_provider_name()
-    except Exception as e:
-        logging.debug(f"Furigana prewarm failed: {e}")
+    annotate(FURIGANA_PREWARM_SAMPLE)
 
 
 # --------------------------------------------------------------------------- #

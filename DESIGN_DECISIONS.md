@@ -7,8 +7,9 @@ approaches. Newest first.
 
 ### Decision 8 — Furigana everywhere: annotate at render time, structured segments, fail-safe readings
 
-**Date**: 2026-08-04 (addenda: Phase 1 2026-08-05, Phase 4 2026-08-07, Phases 5-6 2026-08-10)
-**Status**: RESOLVED (Phases 0-6 implemented; Phase 7 planned)
+**Date**: 2026-08-04 (addenda: Phase 1 2026-08-05, Phase 4 2026-08-07, Phases 5-6 2026-08-10,
+Phase 7 2026-08-17)
+**Status**: RESOLVED (Phases 0-7 implemented; feature complete)
 
 **Problem**: Furigana had to appear on **every** surface that displays Japanese, not just the
 Quick Translate popup's source block. The shipped design could not get there: readings were
@@ -110,6 +111,38 @@ looked-up word is typically bare kanji. It is resolved **per `## [Word]` entry**
 lookup can mix source languages) and any unrecognized value degrades to no hint. Field 5
 (Pronunciation) is excluded from annotation entirely: it holds IPA plus a target-language phonetic,
 and hiragana over katakana is redundant and invites misreading — confirmed by the user.
+
+**Phase 7 addendum — prewarming has to do the work, not ask whether it can.** `prewarm()` was
+written in Phase 0 and never called by anything, so the dictionary load had been landing on the
+UI thread at the first Japanese render for the whole feature's life. Wiring it up was not enough:
+the obvious body — probe `active_provider_name()` — stops at the **first** available provider,
+but `_refine_compounds()` consults pykakasi on *every* annotation even when fugashi is active, so
+the larger half of the cost stayed where it was. Measured cold, fugashi installed: probe 315 ms,
+and the first annotation after it still 407 ms. It therefore annotates a real sample. The sample
+must contain kanji **and** kana, because `should_annotate()` rejects kanji-only text without a
+language hint and prewarm passes none — a wrong sample would make the whole thing a silent no-op,
+which is why a test pins it. Result: first UI-thread annotation 217.7 ms → 0.6 ms.
+
+Moving work to a thread meant admitting what was already true: `annotate()` is reached from the
+UI thread at render time *and* from the translation worker via `generate_furigana()`, and a MeCab
+tagger is not documented thread-safe. The providers now serialize on the lock their constructors
+already held. Prewarm carries no error handling of its own — `annotate()` already swallows
+everything and falls back to plain text, so a local `try` would be unreachable code implying a
+failure mode that does not exist.
+
+The tuning knobs moved to `src/constants.py` under a `FURIGANA_` prefix and are aliased back to
+their local names, so a value has exactly one definition and no call site changed. Equality tests
+alone would not catch a literal pasted back in, so a second test asserts the modules do not
+re-declare the names at all.
+
+The build guard exists because this feature's failure mode is **silence**: without
+`kanwadict4.db` the provider logs a `FileNotFoundError` and renders plain text, so an EXE with no
+furigana in it looks like a successful build — and pykakasi is the only provider a fresh install
+has, since fugashi/UniDic arrives later and only if the user installs the Japanese pack. It
+checks twice, because the two failures are different: the environment can be missing the file
+(pre-flight, aborts) or the spec can fail to bundle it (post-build, warns). The post-build check
+reads PyInstaller's own `CArchiveReader` TOC rather than searching the binary for the filename,
+so it cannot be satisfied by the name appearing in some unrelated blob.
 
 **Phase 6 addendum — whose tokenization wins.** The word chips are already tokenized, by
 `nlp_manager`, and the obvious move is to annotate each chip. Measurement killed that: this

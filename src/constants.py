@@ -18,6 +18,47 @@ REMOTE_CONFIG_CACHE_TTL = 86400  # 24 hours in seconds
 # ============== TIMING ==============
 COOLDOWN = 2.0  # Translation cooldown in seconds
 
+# ============== FURIGANA ==============
+# Every tuning knob for the Japanese reading guides, in one place. The engine
+# (src/core/furigana.py), the renderer (src/ui/ruby_text.py) and the main
+# window's Reading pane (src/app.py) alias these to their own short names, so a
+# value is changed here and nowhere else.
+
+# Cost guards. Both bound work that happens on the UI thread.
+# Measured on Tk 8.6: 200 ruby pairs ~124 ms to build and lay out, 500 ~400 ms,
+# 1000 ~626 ms. Above the pair cap the engine returns plain text; above the
+# character cap the renderer skips annotation entirely (that one also bounds the
+# tokenizer, which the pair cap cannot, since counting pairs means running it).
+FURIGANA_MAX_RUBY_PAIRS = 400
+FURIGANA_MAX_ANNOTATE_CHARS = 3000
+
+# Text annotated by prewarm() to build the reading engine off the UI thread.
+# It MUST contain kanji AND kana or should_annotate() rejects it and the prewarm
+# silently does nothing; the all-kanji compound is what pulls in the pykakasi
+# dictionary that _refine_compounds needs on every annotation.
+FURIGANA_PREWARM_SAMPLE = "日本語を読む"
+
+# Appearance. Yu Gothic renders kana at 7pt legibly; a Latin UI font does not.
+FURIGANA_FONT_FAMILY = 'Yu Gothic'
+FURIGANA_BASE_FONT_SIZE = 11
+FURIGANA_RUBY_FONT_SIZE = 7
+
+FURIGANA_DEFAULT_BG = '#2b2b2b'      # popup background
+FURIGANA_BASE_FG = '#cccccc'         # plain (unannotated) runs
+FURIGANA_KANJI_FG = '#ffffff'        # base characters under a reading
+FURIGANA_RUBY_FG = '#80b8ff'         # the reading itself
+FURIGANA_RUBY_BG = '#363636'         # subtle plate behind a ruby pair
+
+FURIGANA_LINE_SPACING = 4            # spacing1 == spacing3 on the Text widget
+FURIGANA_RUBY_PAD_X = 2              # per side, on both ruby labels
+FURIGANA_RUBY_PAD_Y = 1              # outer padding above reading / below base
+FURIGANA_WHEEL_UNITS = 3             # lines scrolled per wheel notch
+FURIGANA_DEFAULT_MAX_ROWS = 12       # rows a RubyText grows to before scrolling
+
+# Reading pane under the main window's input box.
+FURIGANA_READING_PANE_DEBOUNCE_MS = 350  # keystroke burst absorbed before annotating
+FURIGANA_READING_PANE_MAX_ROWS = 4       # taller than this and the pane scrolls
+
 # ============== AVAILABLE LANGUAGES ==============
 # Format: (English name, ISO code, Native name)
 LANGUAGES = [

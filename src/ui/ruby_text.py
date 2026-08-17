@@ -50,32 +50,26 @@ except ImportError:
     NO_AUTOSTYLE = {}
 
 # --------------------------------------------------------------------------- #
-# Appearance - identical to the original popup renderer
+# Appearance - identical to the original popup renderer.
+# Values live in src/constants.py (the FURIGANA section, alongside the engine's
+# caps) and are aliased here to the short names this module reads best with.
 # --------------------------------------------------------------------------- #
-CJK_FONT_FAMILY = 'Yu Gothic'
-BASE_FONT_SIZE = 11
-RUBY_FONT_SIZE = 7
-
-DEFAULT_BG = '#2b2b2b'      # popup background
-BASE_FG = '#cccccc'         # plain (unannotated) runs
-KANJI_FG = '#ffffff'        # base characters under a reading
-RUBY_FG = '#80b8ff'         # the reading itself
-RUBY_BG = '#363636'         # subtle plate behind a ruby pair
-
-LINE_SPACING = 4            # spacing1 == spacing3 on the Text widget
-RUBY_PAD_X = 2              # per side, on both ruby labels
-RUBY_PAD_Y = 1              # outer padding above reading / below base
-WHEEL_UNITS = 3             # lines scrolled per wheel notch
-
-# Rows scrolled into view before the widget stops growing. Beyond this the
-# content scrolls; without a cap a long annotated document would ask for a
-# window taller than the screen.
-DEFAULT_MAX_ROWS = 12
-
-# Sync-render budget. Annotation plus frame construction happens on the UI
-# thread, so above this length we insert plain text instead of ruby. The engine
-# has its own MAX_RUBY_PAIRS cap; this one bounds the tokenizer work as well.
-MAX_ANNOTATE_CHARS = 3000
+from src.constants import (  # noqa: E402  (grouped with the names it defines)
+    FURIGANA_BASE_FG as BASE_FG,
+    FURIGANA_BASE_FONT_SIZE as BASE_FONT_SIZE,
+    FURIGANA_DEFAULT_BG as DEFAULT_BG,
+    FURIGANA_DEFAULT_MAX_ROWS as DEFAULT_MAX_ROWS,
+    FURIGANA_FONT_FAMILY as CJK_FONT_FAMILY,
+    FURIGANA_KANJI_FG as KANJI_FG,
+    FURIGANA_LINE_SPACING as LINE_SPACING,
+    FURIGANA_MAX_ANNOTATE_CHARS as MAX_ANNOTATE_CHARS,
+    FURIGANA_RUBY_BG as RUBY_BG,
+    FURIGANA_RUBY_FG as RUBY_FG,
+    FURIGANA_RUBY_FONT_SIZE as RUBY_FONT_SIZE,
+    FURIGANA_RUBY_PAD_X as RUBY_PAD_X,
+    FURIGANA_RUBY_PAD_Y as RUBY_PAD_Y,
+    FURIGANA_WHEEL_UNITS as WHEEL_UNITS,
+)
 
 
 class LayoutModel(NamedTuple):

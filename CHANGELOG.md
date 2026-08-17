@@ -4,6 +4,55 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase F7 — Furigana hardening (2026-08-17)
+
+Final phase of "furigana everywhere". No new surface and no visible change — this one is about
+the three ways the feature could degrade without anybody noticing: a startup stutter, a tuning
+value that exists in two places, and an EXE that ships without the reading dictionary.
+
+**Added**
+- `src/constants.py` — a `FURIGANA` section holding every tuning knob: the two cost caps, the
+  prewarm sample, the fonts and palette, and the Reading pane's debounce and row cap.
+  `furigana.py`, `ruby_text.py` and `app.py` alias them to their existing local names, so no
+  call site anywhere else changed.
+- `tools/verify_furigana_bundle.py` — build guard. `--source` checks the environment can supply
+  `kanwadict4.db` before PyInstaller runs; `--exe PATH` reads the built archive's own TOC (via
+  `CArchiveReader`, not a byte search) to confirm it actually got in.
+- `build_exe.bat` — runs both checks. A failed pre-flight **aborts** the build; a failed
+  post-build check prints a "do not release it" warning as the last thing on screen.
+- `tests/test_furigana_hardening.py` (28 tests), all mutation-checked — 21/21 mutations caught,
+  including four planted in `build_exe.bat` itself.
+
+**Changed**
+- `furigana.prewarm()` now annotates a sample instead of probing availability, and `app.run()`
+  actually calls it (on the existing background thread, gated on the Settings toggle).
+- `FugashiProvider.tokens()` / `KakasiProvider.tokens()` serialize on the existing module lock.
+
+**Fixed during implementation**
+- **`prewarm()` was dead code** — defined in Phase F0, never called by anything. The whole
+  dictionary load has been happening on the UI thread at the first Japanese render since then.
+- **Probing availability would not have fixed it.** `active_provider_name()` stops at the first
+  available provider, but `_refine_compounds()` calls pykakasi on *every* annotation even when
+  fugashi is active — so the ~215 ms `kakasi()` construction stayed on the UI thread regardless.
+  Measured over four fresh processes: first UI-thread annotation **217.7 ms → 0.6 ms**, with the
+  cost moved to a background thread that finishes long before the user can press a hotkey.
+- **Concurrent annotation was unsynchronized.** `annotate()` is reached from the UI thread at
+  render time and from the translation worker via `generate_furigana()`; a MeCab tagger is not
+  documented thread-safe, and prewarm added a third caller. The providers now serialize on the
+  lock their constructors already used (~0.3 ms per tokenize, so no measurable cost).
+- **`prewarm()`'s try/except was unreachable** — `annotate()` already swallows everything and
+  falls back to plain text. Removed; the test now guards that contract instead.
+- **`build_exe.bat` verified nothing.** A missing `kanwadict4.db` does not crash anything: the
+  provider logs the `FileNotFoundError` and renders plain text, so an EXE with no furigana at
+  all looks like a successful build. It is also the *only* provider a fresh install has —
+  fugashi/UniDic arrives later, if the user installs the Japanese pack.
+- **cmd.exe cannot parse a `::` comment as the last line of a parenthesised block** — it dies
+  with "`)` was unexpected at this time" and the build never runs. Hit while writing this phase;
+  there is now a test asserting no such line exists in the script.
+
+**Tests**: 422 → 450 (+28). No regressions. Both build-script paths and the pre-flight abort
+were run end-to-end against a real 94 MB EXE and a deliberately broken one.
+
 ### Phase F6 — Dictionary word chips and custom-box tags (2026-08-10)
 
 Seventh phase of "furigana everywhere". The clickable word chips in Dictionary mode and the

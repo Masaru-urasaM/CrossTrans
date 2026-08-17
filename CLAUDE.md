@@ -192,9 +192,19 @@ Hardcoded values in `constants.py` serve as fallback defaults.
 # Using batch script (recommended)
 build_exe.bat
 
-# Or manually
+# Or manually - note this SKIPS the furigana bundle guard below
 python -m PyInstaller CrossTrans.spec --clean --noconfirm
 ```
+
+`build_exe.bat` verifies that pykakasi's `kanwadict4.db` is available before building and
+actually bundled afterwards (`tools/verify_furigana_bundle.py`). Without it furigana silently
+renders as plain text — nothing crashes — and pykakasi is the only reading provider a fresh
+install has. A failed pre-flight aborts the build; a failed post-build check warns loudly.
+
+**Editing `build_exe.bat`**: cmd.exe cannot parse a `::` comment as the last line inside a
+parenthesised block — it dies with "`)` was unexpected at this time" and nothing builds. Use
+`rem`, or move the comment. Consecutive `::` lines inside a block also print a spurious "The
+system cannot find the drive specified." Both measured; a test guards the first.
 
 ## Test
 
@@ -461,10 +471,9 @@ of newly installed subpackages.
 
 ## Furigana System (Japanese Reading Guides)
 
-Displays Japanese text with hiragana readings above kanji characters.
-Being rolled out to every surface that can show Japanese — see `ROADMAP.md` rows F0–F7.
-**Engine (F0), renderer (F1), Quick Translate popup (F2), main window + expanded view (F3) are
-done**; the remaining phases add the input Reading pane, the dictionary result and word chips.
+Displays Japanese text with hiragana readings above kanji characters, on **every surface that can
+show Japanese**. Complete — phases F0–F7, archived in `ROADMAP_DONE.md`. See Decision 8 for the
+measured reasoning behind each choice.
 
 ### Architecture: annotate at render time
 ```
@@ -491,7 +500,13 @@ display rather than receiving pre-annotated strings through the queue.
 - Two measured suppression rules: digit + counter pairs (`2日` would read as a bare fragment)
   and all-kanji compound refinement (`日本語` would read にっぽんご because UniDic tags 日本 as a
   proper noun).
-- `MAX_RUBY_PAIRS = 400`, `lru_cache` on annotation, `prewarm()` to load the dictionary.
+- `MAX_RUBY_PAIRS = 400`, `lru_cache` on annotation, `prewarm()` to load the dictionaries.
+  **`prewarm()` annotates a sample; it must never go back to probing availability** —
+  `_refine_compounds()` needs pykakasi on every annotation even when fugashi is the active
+  provider, so a probe leaves ~215 ms of its construction on the first render. It is called from
+  the background thread in `app.run()`, gated on the Settings toggle. Provider `tokens()` calls
+  serialize on `_lock`: annotation runs on the UI thread, the translation worker and that
+  prewarm thread, and a MeCab tagger is not documented thread-safe.
 - Legacy `{kanji|reading}` notation (`to_notation` / `parse_notation` / `generate_notation`)
   still carries furigana through the translation queue. It escapes `\ { } |`, so source text
   containing a delimiter round-trips as text. New code should use segments.
@@ -524,6 +539,10 @@ display rather than receiving pre-annotated strings through the queue.
   `base_font=('Segoe UI', 11)` to keep Latin translations looking exactly as before.
 - **Fonts/colors** (defaults): Yu Gothic 11pt base (`#ffffff` under a reading, `#cccccc` plain),
   Yu Gothic 7pt reading (`#80b8ff`), ruby plate `#363636`
+- **Every tuning knob lives in `src/constants.py`** under the `FURIGANA_` prefix — the two cost
+  caps, the prewarm sample, the fonts and palette, the Reading pane's debounce and row cap. The
+  engine, `ruby_text.py` and `app.py` alias them to their local names; change a value there and
+  nowhere else, and do not re-declare one locally (a test asserts this).
 - **Offline only** — no API call is involved in generating readings
 - **Toggle**: Settings → Hotkeys → "Enable Furigana" checkbox. It gates **render-time
   annotation**, so it governs every surface, not just the pipeline's notation string.
@@ -627,7 +646,10 @@ had, which is why non-Japanese Dictionary mode is unchanged.
   `_update_translation_with_original()`, `_copy_translation()`, `_open_expanded_translation()`;
   Reading pane: `_create_reading_pane()`, `_refresh_reading_pane()`,
   `_apply_reading_pane_state()`, `_toggle_reading_pane()`, `_on_input_modified()`,
-  `_reading_pane_alive()`, `READING_PANE_*` constants
+  `_reading_pane_alive()`, `READING_PANE_*` constants; `prewarm_background()` in `run()`
+- `src/constants.py` - the `FURIGANA` section: every tuning knob, aliased by the modules above
+- `tools/verify_furigana_bundle.py` + `build_exe.bat` - build guard asserting `kanwadict4.db` is
+  present before the build and bundled after it
 - `src/ui/expanded_window.py` - read-only `RubyText`, `get_plain()` for Copy and the counter
 - `config.py` - `get_furigana_enabled()` / `set_furigana_enabled()`,
   `get_furigana_reading_pane()` / `set_furigana_reading_pane()`
@@ -640,9 +662,10 @@ had, which is why non-Japanese Dictionary mode is unchanged.
   `tests/test_popup_ruby.py` (popup), `tests/test_main_window_ruby.py` (main window + expanded
   view), `tests/test_reading_pane.py` (input Reading pane),
   `tests/test_dictionary_ruby.py` (dictionary run model + result window),
-  `tests/test_word_chips_ruby.py` (word chips, custom-box tags, drag and drop) — the middle two build `TranslatorApp`
-  via `__new__` to avoid starting hotkeys/tray; the widget tests use the `tk_root` fixture in
-  `tests/conftest.py`, which skips without a display
+  `tests/test_word_chips_ruby.py` (word chips, custom-box tags, drag and drop),
+  `tests/test_furigana_hardening.py` (prewarm, centralized constants, build guard) — the middle
+  two build `TranslatorApp` via `__new__` to avoid starting hotkeys/tray; the widget tests use
+  the `tk_root` fixture in `tests/conftest.py`, which skips without a display
 
 ## Vision Detection System
 
