@@ -4,6 +4,26 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [1.9.19] - Furigana everywhere (2026-08-18)
+
+Japanese text now shows **hiragana readings above its kanji on every surface that can display
+it** — the quick-translate popup (both the source block and the translation), the main window,
+the expanded view, a new Reading pane under the input box, the dictionary result window, and the
+dictionary word chips and custom lookup tags. Detection is automatic; the toggle is
+Settings → Hotkeys → "Enable Furigana".
+
+Readings are generated **offline** — no API call, no extra latency, no quota. Accuracy comes from
+fugashi/UniDic when the Japanese language pack is installed, and from the bundled pykakasi
+otherwise. When a reading cannot be mapped onto its kanji with certainty it is **left blank
+rather than guessed**: an absent reading is visibly absent, a wrong one is not.
+
+Also in this release: the storage identity rename to CrossTrans (see its section below —
+**it is a breaking change for existing installs**).
+
+Built as eight phases, F0–F7, documented below.
+
 ### Phase F7 — Furigana hardening (2026-08-17)
 
 Final phase of "furigana everywhere". No new surface and no visible change — this one is about
@@ -464,7 +484,7 @@ re-annotating Chinese.
 assertions in `test_translate_or_fix.py`, `test_fix_grammar.py` and `test_freeform_prompt.py`
 all still hold.
 
-## [Unreleased] — Storage identity renamed to CrossTrans (2026-07-01)
+### Storage identity renamed to CrossTrans (2026-07-01)
 
 The app's internal **storage identity** — the `%APPDATA%` config folder, the model-config cache folder, the Windows auto-start registry value, and the DPAPI encryption entropy/description — was renamed from the legacy product name to **`CrossTrans`**, matching the user-facing name already in `src/constants.py`. A fresh install now uses `%APPDATA%\CrossTrans\` throughout.
 

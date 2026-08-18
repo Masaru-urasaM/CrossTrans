@@ -5,7 +5,7 @@
 
 ---
 
-## F0–F7 — Furigana Everywhere — ✅ Done (2026-08-04 → 2026-08-17) [Unreleased]
+## F0–F7 — Furigana Everywhere — ✅ Done (2026-08-04 → 2026-08-17) [1.9.19]
 
 **Goal:** wherever the app displays Japanese, show hiragana readings above the kanji, with the
 language detected automatically. Before this, furigana existed only in the Quick Translate

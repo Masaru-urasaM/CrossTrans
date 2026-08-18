@@ -24,7 +24,7 @@ other blob.
 
 Usage:
     python tools/verify_furigana_bundle.py --source
-    python tools/verify_furigana_bundle.py --exe dist/CrossTrans_v1.9.18.exe
+    python tools/verify_furigana_bundle.py --exe dist/CrossTrans_v1.9.19.exe
 """
 import argparse
 import os
