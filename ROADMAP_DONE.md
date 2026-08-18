@@ -71,6 +71,83 @@ mutation-checked. See Decision 8.
 
 ---
 
+## Rename — Storage Identity Aligned to CrossTrans — ✅ Done (2026-07-02) [1.9.19]
+
+**Goal:** the app's internal **storage identity** still carried the legacy product name, while
+the user-facing name in `src/constants.py` was already CrossTrans. Align them.
+
+**Delivered:** the `%APPDATA%` config folder, the model-config cache folder, the Windows
+auto-start registry value, and the DPAPI encryption entropy/description all renamed to
+`CrossTrans`. A fresh install uses `%APPDATA%\CrossTrans\` throughout.
+
+**⚠️ Breaking for existing installs, by design:**
+- **Saved API keys must be re-entered** — the DPAPI entropy changed, so keys stored by an older
+  build cannot be decrypted and are cleared on load.
+- **Settings and history do not carry over**; the old folder is a harmless leftover.
+- **Auto-start needs a one-time manual cleanup** for anyone who had it enabled: the old registry
+  entry still launches the app, but the Settings toggle now manages the `CrossTrans` value only,
+  so it reads OFF and cannot remove the stale one. Remove it via Task Manager → Startup apps.
+- **No migration was implemented — deliberately.** The user chose a total rename (no trace of the
+  old name anywhere) and a migration cannot coexist with that requirement. See Decision 7; do not
+  re-propose migration.
+
+**Verified:** a full-repo case-insensitive search for the old name returns **zero** matches
+outside `.git`. 124 passed / 0 failed, no regressions.
+
+**Files:** `config.py`, `src/core/crypto.py`, `src/core/remote_config.py`, `src/utils/updates.py`,
+plus docs. See Decision 7.
+
+---
+
+## G2 — Merged Translate-or-Fix on the Language Hotkeys — ✅ Done (2026-07-01) [1.9.18]
+
+**Goal:** pressing a language hotkey on text *already in that language* produced a pointless
+"translation". Make it fix the grammar instead — without a dedicated hotkey, sidestepping the
+Xbox Game Bar (`Win+Alt+G`) and Feedback Hub (`Win+Alt+F`) collisions entirely.
+
+**Delivered:**
+- `translate_or_fix()` sends **one merged prompt** and lets the model decide: same language →
+  correct grammar/spelling/punctuation only, minimal change; otherwise → translate. Covers every
+  language hotkey, defaults and custom, because `_on_hotkey_translate`'s normal branch handles
+  all non-special language values.
+- **Both branches uncensored and meaning-preserving.** The no-censor rule was also added to the
+  plain `translate_text` prompts and the screenshot/OCR vision prompt, so offensive words survive
+  every translation path, not just the merged one.
+- **Separate cache namespace `'merged'`** — `find_cached()` gained a `source_type` param so a
+  minimal-change fix is never cross-served as a plain rephrase translation, or vice versa.
+- `Win+Alt+G` split from its button: the button stays ON by default, the global hotkey is now
+  **OFF** by default (`fix_grammar_hotkey_enabled`).
+
+**Known limits, documented not fixed:** uncensored output is best-effort and model-dependent
+(hard content filters may still refuse or mask, and the explicit no-censor line can itself raise
+refusals on benign text); the popup's Re-translate button re-runs the plain prompt, not the
+merged one.
+
+**Tests:** 100 → 124 (+24 `test_translate_or_fix.py`, +2 wiring guards), 0 regressions.
+See Decision 6.
+
+---
+
+## G1 — Fix Grammar — ✅ Done (2026-06-30) [1.9.17]
+
+**Goal:** correct the grammar of selected text **in place** — no translation, no rephrasing, no
+censoring. Same text, same language, only grammar/spelling/punctuation changed.
+
+**Delivered:** a `Win+Alt+G` hotkey, a "Fix Grammar" button in the main window, a Settings →
+Hotkeys section (toggle + rebindable hotkey with duplicate validation), and a tray entry.
+`fix_grammar()` builds a strict correction prompt; results are **not** written to history.
+`do_grammar_fix()` queues a 6-tuple with `is_grammar=True`, which makes the popup hide the
+translation-only buttons and keep Copy / Replace.
+
+**Known collision, handled not avoided:** `Win+Alt+G` is Xbox Game Bar's "Record that".
+Registration fails gracefully (error 1409) if Game Bar holds it, the hotkey is rebindable, and
+the button always works. `Win+Alt+F` is the recommended conflict-free alternative. The default
+was kept per the original spec.
+
+**Tests:** 87 → 100 (+13 `test_fix_grammar.py`), 0 regressions. See Decision 5.
+
+---
+
 ## R1 — Translation Result Cache + Re-translate Button — ✅ Done (1.9.16)
 
 **Goal:** When the same source text is translated again with the same settings, return the

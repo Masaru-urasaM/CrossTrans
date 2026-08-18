@@ -1,6 +1,6 @@
 # CrossTrans
 
-![Version](https://img.shields.io/badge/version-1.9.16-blue.svg)
+![Version](https://img.shields.io/badge/version-1.9.19-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-yellow.svg)
 ![License](https://img.shields.io/badge/license-AGPL%20v3-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-informational.svg)
@@ -33,7 +33,7 @@
 - **Zero Context Switching** — Translation popup appears right at your cursor, in-place. No need to open a browser tab, copy-paste, or switch windows
 - **Replace in Source** — One-click replace selected text with the translation, right in the source app
 - **Dictionary Mode** — Click words for definitions, pronunciation, synonyms, antonyms, examples
-- **Furigana** — Japanese reading guides: hiragana displayed above kanji to help learn pronunciation
+- **Furigana Everywhere** — Japanese reading guides: hiragana above kanji on every surface that shows Japanese, generated offline
 - **Free Trial Mode** — Daily free translations without API key
 - **15 AI Providers** — Google, OpenAI, Anthropic, DeepSeek, Groq, and more (many offer free tiers)
 - **File Processing** — Translate documents (.docx, .txt, .srt, .pdf) and images
@@ -122,8 +122,17 @@ CrossTrans is designed for people who work across multiple platforms and need in
 - **Gear icon (⚙)**: Quick access to replace mode settings
 
 ### Furigana (Japanese Reading Guides)
-- **Hiragana above kanji** — When translating Japanese text, the original text is displayed with furigana readings above each kanji
-- **Offline processing** — Uses pykakasi for local kanji-to-hiragana conversion (no extra API call)
+- **Hiragana above kanji, everywhere Japanese appears** — the quick-translate popup (both the
+  original text *and* the translation), the main window, the expanded view, the dictionary
+  result, and the clickable word chips in Dictionary mode. Translating *into* Japanese shows
+  readings too, not just translating out of it.
+- **Reading pane** — the main window's input box gets a collapsible read-only pane underneath
+  showing the readings for whatever you type or paste, so the box you edit stays plain text
+- **Offline processing** — no extra API call, no added latency. Readings come from fugashi/UniDic
+  when the Japanese language pack is installed (Settings → Dictionary), which reads homographs
+  correctly in context — 今日 as きょう, not こんにち — and from the bundled pykakasi otherwise
+- **Never guesses** — when a reading cannot be matched to its kanji with certainty, the word is
+  shown with no reading rather than a wrong one. A missing reading is obvious; a wrong one is not.
 - **Toggle on/off** — Settings → Hotkeys → "Enable Furigana" checkbox
 - Helps you learn to read Japanese while translating
 

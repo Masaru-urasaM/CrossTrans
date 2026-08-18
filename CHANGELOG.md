@@ -24,6 +24,11 @@ Also in this release: the storage identity rename to CrossTrans (see its section
 
 Built as eight phases, F0–F7, documented below.
 
+**Release verification**: `CrossTrans_v1.9.19.exe` built from this tree (65,877,976 bytes) with
+the new build guard confirming `pykakasi/data/kanwadict4.db` is present in the packaged archive —
+the reading dictionary a fresh install depends on, and whose absence would have degraded furigana
+to plain text without any error. Suite: 450 passed / 0 failed.
+
 ### Phase F7 — Furigana hardening (2026-08-17)
 
 Final phase of "furigana everywhere". No new surface and no visible change — this one is about
