@@ -131,3 +131,24 @@ def mock_anthropic_response(mock_urllib_response):
             }
         ]
     })
+
+
+@pytest.fixture(scope="session")
+def tk_root():
+    """A hidden Tk root for widget tests, skipped when there is no display.
+
+    Session-scoped because creating and tearing down interpreters repeatedly is
+    slow and leaks Tcl state; individual tests should build their widgets in
+    their own frame and destroy it.
+    """
+    tkinter = pytest.importorskip("tkinter")
+    try:
+        root = tkinter.Tk()
+    except Exception as e:  # TclError, or no display at all
+        pytest.skip(f"no usable Tk display: {e}")
+    root.withdraw()
+    yield root
+    try:
+        root.destroy()
+    except Exception:
+        pass

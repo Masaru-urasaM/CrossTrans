@@ -249,10 +249,13 @@ class HotkeyTabMixin:
         info = ttk.Frame(parent)
         info.pack(fill=X, pady=(0, 5), padx=5)
         ttk.Label(info,
-                  text="OFF = Normal translation only",
+                  text="OFF = Japanese is shown without readings",
                   font=('Segoe UI', 8), foreground='#888888').pack(anchor=W)
         ttk.Label(info,
-                  text="ON = Shows original Japanese text with furigana readings + translation",
+                  text="ON = Hiragana readings above kanji everywhere Japanese appears: quick "
+                       "translate popup, main window, expanded view, and the Reading pane "
+                       "under the input box",
+                  wraplength=560, justify=LEFT,
                   font=('Segoe UI', 8), foreground='#888888').pack(anchor=W)
 
     def _on_furigana_toggle(self):

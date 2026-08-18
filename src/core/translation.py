@@ -11,6 +11,7 @@ from typing import Optional, Callable, Tuple, Any, Dict
 import keyboard
 
 from src.constants import COOLDOWN, TRIAL_MODE_ENABLED, TRIAL_PROXY_URL
+from src.core import furigana
 from src.core.clipboard import ClipboardManager
 from src.core.api_manager import AIAPIManager
 from src.core.history import HistoryManager
@@ -171,55 +172,26 @@ class TranslationService:
     @staticmethod
     def _is_japanese_text(text: str) -> bool:
         """Check if text contains Japanese characters (hiragana, katakana, or kanji)."""
-        return bool(re.search(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]', text))
+        return furigana.is_japanese(text)
 
     @staticmethod
-    def generate_furigana(text: str) -> Optional[str]:
-        """Generate furigana annotations for Japanese text using pykakasi (offline).
+    def generate_furigana(text: str, lang_hint: Optional[str] = None) -> Optional[str]:
+        """Generate furigana annotations for Japanese text (offline).
+
+        Delegates to src.core.furigana, which aligns each reading onto the kanji
+        runs inside its token (so okurigana is never covered by the ruby) and
+        suppresses any reading it cannot map deterministically.
+
+        Args:
+            text: Source text to annotate.
+            lang_hint: Language name the caller already knows, e.g. "Japanese".
+                Needed for kanji-only text, which has no kana to prove it is
+                Japanese rather than Chinese.
 
         Returns:
-            String with {kanji|reading} notation, or None if pykakasi unavailable.
+            String with {kanji|reading} notation, or None when no ruby applies.
         """
-        try:
-            from pykakasi import kakasi
-        except ImportError:
-            logging.warning("pykakasi not installed, furigana unavailable")
-            return None
-
-        try:
-            kks = kakasi()
-            result = kks.convert(text)
-            output = []
-
-            for item in result:
-                orig = item['orig']
-                hira = item['hira']
-                has_kanji = bool(re.search(r'[\u4E00-\u9FFF\u3400-\u4DBF]', orig))
-
-                if has_kanji and orig != hira:
-                    # Split kanji prefix from trailing hiragana suffix
-                    # e.g., "選択さ" -> kanji="選択", suffix="さ"
-                    i = len(orig)
-                    while i > 0 and not re.match(r'[\u4E00-\u9FFF\u3400-\u4DBF]', orig[i - 1]):
-                        i -= 1
-                    kanji_part = orig[:i]
-                    plain_suffix = orig[i:]
-
-                    if plain_suffix and hira.endswith(plain_suffix):
-                        kanji_reading = hira[:-len(plain_suffix)]
-                    else:
-                        kanji_reading = hira
-
-                    output.append(f'{{{kanji_part}|{kanji_reading}}}')
-                    if plain_suffix:
-                        output.append(plain_suffix)
-                else:
-                    output.append(orig)
-
-            return ''.join(output)
-        except Exception as e:
-            logging.error(f"Furigana generation failed: {e}")
-            return None
+        return furigana.generate_notation(text, lang_hint)
 
     def _strip_thinking_tags(self, text: str) -> str:
         """Remove AI thinking/reasoning tags from response.

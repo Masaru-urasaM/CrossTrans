@@ -5,6 +5,196 @@ approaches. Newest first.
 
 ---
 
+### Decision 8 — Furigana everywhere: annotate at render time, structured segments, fail-safe readings
+
+**Date**: 2026-08-04 (addenda: Phase 1 2026-08-05, Phase 4 2026-08-07, Phases 5-6 2026-08-10,
+Phase 7 2026-08-17)
+**Status**: RESOLVED (Phases 0-7 implemented; feature complete)
+
+**Problem**: Furigana had to appear on **every** surface that displays Japanese, not just the
+Quick Translate popup's source block. The shipped design could not get there: readings were
+generated *inside the translation pipeline* (`translation.py` `do_translation` /
+`do_translate_or_fix` / `redo_translation`), hand-carried as a `{kanji|reading}` string in the
+5th queue element, and rendered by exactly one method. The main window had **never** shown
+furigana at all — `translation_queue`'s only consumer routes solely to the popup — and clicking
+"Open Translator" from a furigana popup silently dropped the readings. The queue could not be
+extended either: **arity is the discriminator** in `_check_queue`, so a 7th positional field
+falls into the `else` branch, raises `ValueError`, and is swallowed by a bare `except` that
+aborts the whole drain loop (the user would see no popup at all).
+
+Measurement also showed the existing feature was wrong in several ways: the ruby covered
+okurigana (`取り消し` → `{取り消|とりけ}し`), homographs were misread (`今日は` → こんにち),
+`kakasi()` was reconstructed on every call (~175 ms vs ~0.3 ms to convert), literal `{a|b}` in
+the source was re-parsed as a real ruby pair, and Tk's `Text.get()` **silently deletes**
+embedded ruby content (`日本語を勉強しています` reads back as `をしています`).
+
+**Options considered**:
+1. **Extend the pipeline per surface** — Pros: no new module. Cons: every surface needs its own
+   plumbing; cannot extend the tuple safely; leaves generation coupled to translation, so
+   screenshot/OCR, dictionary and freeform paths stay unannotated forever.
+2. **Annotate at render time behind a shared widget** — Pros: any surface that adopts the widget
+   gains furigana with zero pipeline change; the queue contract is untouched; one place to fix
+   rendering. Cons: needs a plain-text shadow model so nothing reads ruby back out of a widget.
+3. **Ask the AI model to return furigana** — Pros: no new dependency, context-aware. Cons: costs
+   tokens and latency on every translation, does not work offline, unusable for the input-box
+   preview (no API call yet), and quality varies across 15 providers.
+
+**Resolution**: **Option 2.** Generation moves to render time behind two modules —
+`src/core/furigana.py` (pure logic) and, from Phase 1, `src/ui/ruby_text.py` (the only place ruby
+is drawn). Four invariants govern it:
+
+- **I1 — annotation never alters text.** `''.join(seg.base) == source`, asserted at runtime.
+  This kills the injection class structurally instead of by careful escaping.
+- **I2 — the model owns the string.** Every read goes through `get_plain()`; no `.get()` on a
+  ruby-capable widget, ever. Non-negotiable because `Text.get()` drops embedded windows with
+  **zero visible trace** (verified: 0 characters contributed, but 1 index consumed each), so a
+  Copy would put kanji-stripped text into the user's document.
+- **I3 — editable implies plain.** A widget the user types into never holds ruby; `edit_undo()`
+  does not restore destroyed embedded windows.
+- **I4 — render-time and idempotent.** The queue tuple shapes stay frozen.
+
+Readings come from a **provider chain**: fugashi/UniDic (the Japanese NLP pack already defined
+in `nlp_manager.py`) preferred, pykakasi (bundled, verified working in the frozen EXE) as
+fallback. The aligner is **fail-safe** — it returns `None` rather than emit a reading it cannot
+map deterministically, because for a learner a wrong reading is worse than a blank one: it is
+unfalsifiable at the point of use.
+
+Two refinements were added only after measurement, not by assumption:
+- **Counters after digits are suppressed.** `2日` is *futsuka*; the digit holds part of the
+  reading and cannot take ruby, so カ over 日 alone invites "ni-ka". This also removes genuine
+  errors (`2人` is *futari*, not ni-**nin**).
+- **All-kanji compounds keep their compound reading.** UniDic splits `日本語` into 日本
+  (proper noun, ニッポン) + 語, giving にっぽんご. Where the fallback dictionary holds a single
+  all-kanji entry spanning two or more tokens, its compound reading wins.
+
+**Phase 1 addendum — how ruby height is determined.** A window must be sized before the widget
+that fills it exists: the popup is an `overrideredirect` Toplevel whose `geometry()` is set once,
+and calling `update_idletasks()` mid-build to measure a realized widget would flash it at the
+wrong position first. So height is **derived from font metrics** and a `wrap='char'` simulation
+(`ruby row = ruby linespace + base linespace + 2·pad + base descent`, `spacing1 + spacing3`
+charged once per *logical* line, not per wrapped row). Predictions match
+`Text.count(..., 'ypixels')` exactly on every case measured, which is what exposed the
+per-logical-line spacing rule — a per-display-row model over-estimated by 4 px per wrapped row.
+Rejected alternative: render off-screen and measure, which doubles the frame construction cost
+on the UI thread for content that is already capped at `MAX_ANNOTATE_CHARS`.
+
+**Phase 4 addendum — how the Reading pane learns the text changed.** The pane could have been
+refreshed from each site that writes to the input box (the plan named
+`_update_translation_with_original` and `_load_history_item`) plus a `<KeyRelease>` binding. A
+single debounced `<<Modified>>` binding replaces all of it: Tk raises it for typing, paste of any
+kind, drag-and-drop, undo/redo *and* programmatic `insert`/`delete`, so no future write site can
+forget to refresh. Its one quirk is that it fires only on a False→True flip, and clearing the flag
+inside the handler fires it a second time; the debounce that keeps UI-thread annotation off the
+keystroke path also collapses that pair into one render. Measured: focus and caret stay in the
+input box across a refresh, and `edit_undo()` still works with the pane following the undo.
+
+The pane is **always present** while furigana is on, rather than appearing when Japanese is
+detected (the alternative offered to the user, who chose always-visible): a pane that appears and
+disappears moves everything below it and is undiscoverable before the first Japanese input. With
+nothing to annotate it shows a dim one-line placeholder — **not** a mirror of the box above, which
+would be visual noise *and* would re-insert a pasted 50 000-character document on every edit.
+
+**Phase 5 addendum — annotate the line, then paint the colours.** The dictionary result colour-codes
+each looked-up word, and the obvious implementation is to split the line at those words and render
+the pieces. It is wrong twice over: the tokenizer then sees isolated fragments (worse readings), and
+an **all-kanji fragment cannot be annotated at all** — which is exactly what a looked-up word
+usually is (勉強, 東京). So the whole line is annotated in one pass and the colours are painted onto
+the resulting segments: a plain run can be split anywhere, and a ruby pair is coloured whole via
+`kanji_fg`. The old post-insert `Text.search()` highlighting could not survive this at all — an
+embedded window contributes no characters, so an annotated word is unfindable — which is why the
+decision moved ahead of insertion into `DictRun`.
+
+The same phase found a **hint that was already in the data**: the result's own
+`**Source Language**: Japanese` field. Using it lifts the kanji-only restriction for the fields
+written in the source language, and a dictionary lookup is the case where it matters most, since the
+looked-up word is typically bare kanji. It is resolved **per `## [Word]` entry** (a multi-word
+lookup can mix source languages) and any unrecognized value degrades to no hint. Field 5
+(Pronunciation) is excluded from annotation entirely: it holds IPA plus a target-language phonetic,
+and hiragana over katakana is redundant and invites misreading — confirmed by the user.
+
+**Phase 7 addendum — prewarming has to do the work, not ask whether it can.** `prewarm()` was
+written in Phase 0 and never called by anything, so the dictionary load had been landing on the
+UI thread at the first Japanese render for the whole feature's life. Wiring it up was not enough:
+the obvious body — probe `active_provider_name()` — stops at the **first** available provider,
+but `_refine_compounds()` consults pykakasi on *every* annotation even when fugashi is active, so
+the larger half of the cost stayed where it was. Measured cold, fugashi installed: probe 315 ms,
+and the first annotation after it still 407 ms. It therefore annotates a real sample. The sample
+must contain kanji **and** kana, because `should_annotate()` rejects kanji-only text without a
+language hint and prewarm passes none — a wrong sample would make the whole thing a silent no-op,
+which is why a test pins it. Result: first UI-thread annotation 217.7 ms → 0.6 ms.
+
+Moving work to a thread meant admitting what was already true: `annotate()` is reached from the
+UI thread at render time *and* from the translation worker via `generate_furigana()`, and a MeCab
+tagger is not documented thread-safe. The providers now serialize on the lock their constructors
+already held. Prewarm carries no error handling of its own — `annotate()` already swallows
+everything and falls back to plain text, so a local `try` would be unreachable code implying a
+failure mode that does not exist.
+
+The tuning knobs moved to `src/constants.py` under a `FURIGANA_` prefix and are aliased back to
+their local names, so a value has exactly one definition and no call site changed. Equality tests
+alone would not catch a literal pasted back in, so a second test asserts the modules do not
+re-declare the names at all.
+
+The build guard exists because this feature's failure mode is **silence**: without
+`kanwadict4.db` the provider logs a `FileNotFoundError` and renders plain text, so an EXE with no
+furigana in it looks like a successful build — and pykakasi is the only provider a fresh install
+has, since fugashi/UniDic arrives later and only if the user installs the Japanese pack. It
+checks twice, because the two failures are different: the environment can be missing the file
+(pre-flight, aborts) or the spec can fail to bundle it (post-build, warns). The post-build check
+reads PyInstaller's own `CArchiveReader` TOC rather than searching the binary for the filename,
+so it cannot be satisfied by the name appearing in some unrelated blob.
+
+**Phase 6 addendum — whose tokenization wins.** The word chips are already tokenized, by
+`nlp_manager`, and the obvious move is to annotate each chip. Measurement killed that: this
+tokenizer splits 日本語 into 日本 + 語, and 日本 annotated alone reads **にっぽん** where the
+compound is にほん — so per-chip annotation prints a wrong reading on exactly the words a learner
+is looking up. `annotate_tokens()` therefore annotates the **line** and hands the readings out,
+leaving a token bare when it cuts through one. The decision is a single join check — the per-token
+form of I1 — rather than a boundary guard: a ruby run is never clipped, so an overhanging run
+cannot produce a string equal to the token. A plain run *is* clipped, because splitting text that
+carries no reading cannot make it wrong, and that is what lets 会い keep 会[あ].
+
+Two measured layout facts came with it. `window_create` defaults to `align='center'`, which lifts
+the plain chips **7 px** off an annotated chip's baseline; `align='baseline'` brings both to within
+1 px. And `CustomWordBox(height=1)` clips its own tags, because `height` counts base-font rows —
+the same unit confusion as Phase 1, in a second place — so the row count is derived from font
+metrics instead.
+
+Chips and tags differ deliberately: a **chip** is a fragment of a sentence and takes its reading
+from that sentence; a **tag** is one lookup phrase the user typed or composed, with no larger
+context, so it is annotated on its own.
+
+The Phase 0 fail-safe that suppressed ruby for source text containing `\ { } |` was **removed**
+in Phase 1: it existed only because the old regex renderer ignored escapes, and `RubyText`
+parses through `parse_notation()`, which honors them. Keeping it would have cost every reading
+in any sentence containing a pipe.
+
+**Rejected**:
+- **Cross-provider disagreement as a wrongness signal** — measured 4/10 sentences disagree, and
+  fugashi is *right* in half of those (今日→きょう, 3時→じ) and wrong in the other half. Blanket
+  suppression on disagreement would delete ruby from ~40% of sentences for no accuracy gain.
+  The all-kanji compound rule is the narrow, targeted version that survives.
+- **Ruby inline in the main input box** — would corrupt the three `original_text.get()` reads that
+  feed the API (`app.py:955` / `1127` / `1452`: it would receive particle-only text, and
+  `find_cached` would then poison history with the stripped key) and the popup-reuse check
+  (`app.py:560`: an all-kanji input reads back as `""`, so the popup is destroyed and rebuilt
+  empty, losing everything the user typed). Replaced by a read-only Reading pane beneath it
+  (implemented in Phase 4); these `get()` calls stay correct precisely because I3 holds there.
+- **A "Copy with readings" command** — considered and declined by the user; every Copy/Replace
+  emits the plain shadow string only.
+- **Ruby in toasts and the history list** — explicit non-goals. Toasts are `tk.Label` (no
+  embedded widgets possible) and history rows are 60-character truncations where readings do not
+  fit; converting those rows would also break click-to-load, since
+  `history_dialog.py` walks `winfo_children()` non-recursively.
+
+**References**: `src/core/furigana.py`, `tests/test_furigana_core.py`,
+`src/ui/ruby_text.py`, `tests/test_ruby_text.py`,
+`src/core/translation.py` (`_is_japanese_text`, `generate_furigana` delegates),
+`CrossTrans.spec:15` (pykakasi data payload), `src/core/nlp_manager.py:324-332` (Japanese pack),
+CHANGELOG "Phase 0 — Furigana engine" and "Phase F1 — RubyText primitive".
+
+---
+
 ### Decision 7 — Storage-identity rename to CrossTrans: clean rename, no data migration
 
 **Date**: 2026-07-02

@@ -19,8 +19,24 @@ except ImportError:
     from tkinter import ttk
     HAS_TTKBOOTSTRAP = False
 
+from src.core.furigana import RubySegment
 from src.core.nlp_manager import nlp_manager
+from src.ui.dictionary_render import overhead_px, split_dictionary_text
+from src.ui.ruby_text import (RubyText, estimate_notation_px,
+                              estimate_ruby_overhead_px, insert_output)
 from src.ui.toast import ToastManager
+
+# Popup padding - SINGLE SOURCE OF TRUTH, shared by calculate_size() and the
+# furigana height estimate (both need the same wrap width).
+HORIZONTAL_PADDING = 50  # frame(30) + scrollbar(20)
+
+# Height taken by the rule drawn between the furigana block and the
+# translation: 1px line plus its 8px padding above and below.
+FURIGANA_SEPARATOR_PX = 17
+
+# Dictionary result window font. Monospace is load-bearing: _align_dictionary_text
+# pads the labels with spaces so every value starts at the same column.
+DICT_RESULT_FONT = ('Consolas', 10)
 
 # Dictionary button colors (dark red) - consistent with dictionary_mode.py
 DICT_BUTTON_COLOR = "#822312"  # Dark red (main color)
@@ -177,7 +193,8 @@ class QuickTranslateManager:
         self.root = root
         self.config = config
         self.popup: Optional[tk.Toplevel] = None
-        self.popup_text: Optional[tk.Text] = None
+        self.popup_text: Optional[RubyText] = None  # Read with get_plain(), not get()
+        self.popup_furigana: Optional[RubyText] = None  # Read-only reading guide
         self.popup_copy_btn: Optional[ttk.Button] = None
         self.popup_dict_btn: Optional[ttk.Button] = None
         self.toast = ToastManager(root)  # For shake notifications
@@ -390,8 +407,8 @@ class QuickTranslateManager:
         else:
             MAX_HEIGHT = self.root.winfo_screenheight() - 80
 
-        # Padding - SINGLE SOURCE OF TRUTH
-        HORIZONTAL_PADDING = 50  # frame(30) + scrollbar(20)
+        # Padding - HORIZONTAL_PADDING lives at module scope (shared with the
+        # furigana height estimate)
         VERTICAL_PADDING = 100   # header + footer + margins
 
         # Font with 20% safety margin for cross-machine compatibility
@@ -457,10 +474,20 @@ class QuickTranslateManager:
         if trial_info and trial_info.get('is_trial') and not is_error:
             height += 35  # Extra space for trial header row
 
-        # Add extra height for furigana section (2 lines per paragraph: reading + text)
+        # Add extra height for the furigana section. Measured from real font
+        # metrics at the wrap width the block will actually get: an annotated
+        # display row is far taller than a plain one (47px vs 28px on Tk 8.6),
+        # so a per-paragraph guess clips multi-line Japanese.
         if furigana_text and not is_error:
-            furigana_paragraphs = furigana_text.count('\n') + 1
-            height += furigana_paragraphs * 38 + 30  # 38px per pair (reading + text) + separator
+            height += estimate_notation_px(furigana_text, width - HORIZONTAL_PADDING)
+            height += FURIGANA_SEPARATOR_PX
+
+        # Same for the translation box, which now carries readings too.
+        if not is_error and self._ruby_enabled():
+            height += estimate_ruby_overhead_px(
+                translated, width - HORIZONTAL_PADDING,
+                lang_hint=self._ruby_hint(target_lang, is_grammar),
+                base_font=('Segoe UI', 11), line_spacing=0)
 
         # Create popup window
         self.popup = tk.Toplevel(self.root)
@@ -682,7 +709,8 @@ class QuickTranslateManager:
 
         # Furigana section (if available)
         if furigana_text and not is_error:
-            self._render_furigana(main_frame, furigana_text)
+            self._render_furigana(main_frame, furigana_text,
+                                  width - HORIZONTAL_PADDING)
             # Separator between furigana and translation
             sep_frame = tk.Frame(main_frame, bg='#555555', height=1)
             sep_frame.pack(fill=X, pady=(8, 8))
@@ -705,19 +733,30 @@ class QuickTranslateManager:
         text_height = max(1, (height - VERTICAL_PADDING) // LINE_HEIGHT)
         text_width = max(30, width // avg_char_width)
 
-        self.popup_text = tk.Text(main_frame, wrap=tk.WORD,
+        self.popup_text = RubyText(main_frame, wrap=tk.WORD,
                                     bg='#3d1f1f' if is_error else '#2b2b2b',
-                                    fg=text_fg,
-                                    font=('Segoe UI', 11), relief='flat',
-                                    width=text_width, height=text_height,
-                                    borderwidth=0, highlightthickness=0)
-        self.popup_text.insert('1.0', translated)
+                                    base_fg=text_fg, kanji_fg=text_fg,
+                                    base_font=('Segoe UI', 11),
+                                    spacing1=0, spacing3=0, cursor='xterm',
+                                    width=text_width, height=text_height)
+        # Readings on the translation itself, not just the source block. The
+        # target language is a reliable hint here, so a kanji-only translation
+        # ("東京都") annotates where the source block cannot.
+        # Error text is excluded, matching the height budget above: a diagnostic
+        # needs no readings, and annotating it would overflow the box.
+        insert_output(self.popup_text, '1.0', translated,
+                      lang_hint=self._ruby_hint(target_lang, is_grammar),
+                      enabled=self._ruby_enabled() and not is_error)
         self.popup_text.config(state='disabled')
         self.popup_text.pack(side=TOP, fill=BOTH, expand=True)
 
-        # Mouse wheel scroll
-        self.popup_text.bind('<MouseWheel>',
-                               lambda e: self.popup_text.yview_scroll(int(-3 * (e.delta / 120)), "units"))
+        # Grow the box for the taller annotated rows, but never below the row
+        # count calculate_size() derived from word wrap.
+        if self.popup_text.has_ruby:
+            self.popup_text.fit_height(width - HORIZONTAL_PADDING,
+                                       min_rows=text_height)
+
+        # Mouse wheel scroll is bound by RubyText, including over ruby frames
 
         # Position near mouse
         x, y, height = self._calculate_position(width, height)
@@ -726,77 +765,43 @@ class QuickTranslateManager:
         # Bindings
         self.popup.bind('<Escape>', lambda e: on_popup_close())
 
-    def _render_furigana(self, parent, furigana_text: str):
-        """Render furigana using embedded frames for perfect alignment.
+    def _ruby_enabled(self) -> bool:
+        """Whether popup output should carry readings.
 
-        Each kanji+reading pair becomes a small inline frame:
-        - Top: hiragana reading (small, blue)
-        - Bottom: kanji text (normal, white)
-        Plain text is inserted inline. align='baseline' keeps kanji
-        level with surrounding text regardless of font size differences.
+        The Settings toggle now governs every annotated surface, because the
+        popup annotates at render time instead of relying on the pipeline
+        having shipped a notation string.
+        """
+        return bool(self.config and self.config.get_furigana_enabled())
+
+    @staticmethod
+    def _ruby_hint(target_lang: str, is_grammar: bool = False) -> Optional[str]:
+        """Language hint for annotating output text, or None when unknown.
+
+        The target language is authoritative for a translation. A grammar fix
+        returns the *source* language, which nobody in this class knows, so it
+        gets no hint - Japanese with kana still annotates on its own evidence,
+        and kanji-only output stays plain rather than guessing.
+        """
+        return None if is_grammar else target_lang
+
+    def _render_furigana(self, parent, furigana_text: str, available_px: int):
+        """Render the read-only furigana guide above the translation.
+
+        RubyText owns the ruby layout, the plain-text readback and the wheel
+        handling; the notation escapes are honored, so source text containing
+        a literal "{a|b}" shows as itself instead of a fake reading.
 
         Args:
             parent: Parent frame to pack into
             furigana_text: Text with {kanji|reading} notation
+            available_px: Content width the block wraps at, used for sizing
         """
-        bg_color = '#2b2b2b'
-        ruby_bg = '#363636'
-        cjk_font = 'Yu Gothic'
-        text_font = (cjk_font, 11)
-        reading_font = (cjk_font, 7)
-
-        furigana_widget = tk.Text(parent, wrap=tk.CHAR, bg=bg_color,
-                                  relief='flat', borderwidth=0, highlightthickness=0,
-                                  cursor='arrow', spacing1=4, spacing3=4)
-
-        furigana_widget.tag_configure('text', font=text_font, foreground='#cccccc')
-
-        pattern = re.compile(r'\{([^|]+)\|([^}]+)\}')
-
-        lines = furigana_text.split('\n')
-        for line_idx, line in enumerate(lines):
-            last_end = 0
-
-            for match in pattern.finditer(line):
-                plain = line[last_end:match.start()]
-                if plain:
-                    furigana_widget.insert(tk.END, plain, 'text')
-
-                kanji = match.group(1)
-                reading = match.group(2)
-
-                # Embedded frame: reading on top, kanji on bottom, subtle bg
-                frame = tk.Frame(furigana_widget, bg=ruby_bg, bd=0,
-                                 highlightthickness=0, padx=0, pady=0)
-                tk.Label(frame, text=reading, font=reading_font,
-                         fg='#80b8ff', bg=ruby_bg, bd=0,
-                         padx=2, pady=0, anchor='center').pack(side='top', fill='x', pady=(1, 0))
-                tk.Label(frame, text=kanji, font=text_font,
-                         fg='#ffffff', bg=ruby_bg, bd=0,
-                         padx=2, pady=0, anchor='center').pack(side='top', fill='x', pady=(0, 1))
-
-                furigana_widget.window_create(tk.END, window=frame, align='baseline')
-                last_end = match.end()
-
-            remaining = line[last_end:]
-            if remaining:
-                furigana_widget.insert(tk.END, remaining, 'text')
-
-            if line_idx < len(lines) - 1:
-                furigana_widget.insert(tk.END, '\n', 'text')
-
-        # Each line with ruby pairs is taller; use enough height
-        total_lines = len(lines) + 1
-        furigana_widget.config(height=min(total_lines, 12))
-
-        furigana_widget.config(state='disabled')
-        furigana_widget.pack(side=TOP, fill=BOTH, expand=True, pady=(0, 0))
-
-        # Horizontal + vertical scroll
-        furigana_widget.bind('<MouseWheel>',
-                             lambda e: furigana_widget.yview_scroll(int(-3 * (e.delta / 120)), "units"))
-        furigana_widget.bind('<Shift-MouseWheel>',
-                             lambda e: furigana_widget.xview_scroll(int(-3 * (e.delta / 120)), "units"))
+        self.popup_furigana = RubyText(parent, bg='#2b2b2b')
+        self.popup_furigana.insert_notation(tk.END, furigana_text)
+        self.popup_furigana.config(state='disabled')
+        self.popup_furigana.fit_height(available_px)
+        self.popup_furigana.pack(side=TOP, fill=BOTH, expand=True, pady=(0, 0))
 
     def _calculate_position(self, width: int, height: int) -> Tuple[int, int, int]:
         """Calculate popup position and adjust height if needed.
@@ -937,6 +942,13 @@ class QuickTranslateManager:
         if not self.popup_text or not self._btn_frame:
             return
 
+        # I3 - an editable widget never holds ruby. edit_undo() cannot restore a
+        # destroyed embedded window, and typing next to one would leave the
+        # readings describing text the user has already changed. The source
+        # block above the box keeps its readings.
+        if self.popup_text.has_ruby:
+            self.popup_text.set_plain(self.popup_text.get_plain())
+
         # Make the box editable and visually mark edit mode (teal border).
         self.popup_text.config(state='normal',
                                highlightthickness=1,
@@ -999,7 +1011,11 @@ class QuickTranslateManager:
         """Read the entire edit-box content and dispatch it as a freeform prompt."""
         if not self.popup_text:
             return
-        content = self.popup_text.get('1.0', 'end-1c')
+        # get_plain(), never get(): an embedded ruby frame contributes no
+        # characters to get(), so the model would receive text with every
+        # annotated word deleted. Editing already flattened the box, but this
+        # must stay correct regardless of how the content got there.
+        content = self.popup_text.get_plain()
         if self._on_custom_prompt_send:
             self._on_custom_prompt_send(content)
 
@@ -1018,8 +1034,9 @@ class QuickTranslateManager:
             return
 
         # --- Update text content ---
-        self.popup_text.config(state='normal')
-        self.popup_text.delete('1.0', tk.END)
+        # clear() rather than delete(): it also drops the ruby bookkeeping, so a
+        # later get_plain() cannot resurrect words from the previous content.
+        self.popup_text.clear()
 
         # Configure tags
         self.popup_text.tag_configure('strikethrough',
@@ -1032,10 +1049,15 @@ class QuickTranslateManager:
                                          font=('Segoe UI', 11),
                                          foreground='#4ec9b0')
 
-        # Insert: strikethrough original → translated
-        self.popup_text.insert('1.0', original, 'strikethrough')
-        self.popup_text.insert(tk.END, '\n\n→\n\n', 'arrow')
-        self.popup_text.insert(tk.END, translated, 'translated')
+        # Insert: strikethrough original → translated.
+        # The original stays plain: it is being discarded, and Tk cannot strike
+        # through an embedded frame, so ruby there would render un-struck.
+        self.popup_text.insert_plain('1.0', original, 'strikethrough')
+        self.popup_text.insert_plain(tk.END, '\n\n→\n\n', 'arrow')
+        insert_output(
+            self.popup_text, tk.END, translated,
+            lang_hint=self._ruby_hint(self._current_target_lang, self._is_grammar),
+            enabled=self._ruby_enabled(), tags='translated', kanji_fg='#4ec9b0')
 
         self.popup_text.config(state='disabled')
 
@@ -1085,6 +1107,13 @@ class QuickTranslateManager:
         combined_text = original + '\n\n\u2192\n\n' + translated
         new_width, new_height = self.calculate_size(combined_text)
 
+        # Room for the readings on the translated half, if it has any.
+        if self.popup_text.has_ruby:
+            new_height += estimate_ruby_overhead_px(
+                translated, new_width - HORIZONTAL_PADDING,
+                lang_hint=self._ruby_hint(self._current_target_lang, self._is_grammar),
+                base_font=('Segoe UI', 11), line_spacing=0)
+
         if self.popup:
             current_geo = self.popup.geometry()
             parts = current_geo.split('+')
@@ -1100,7 +1129,11 @@ class QuickTranslateManager:
                 line_height = 20
             VERTICAL_PADDING = 100
             new_text_height = max(1, (final_height - VERTICAL_PADDING) // line_height)
-            self.popup_text.config(height=new_text_height)
+            if self.popup_text.has_ruby:
+                self.popup_text.fit_height(final_width - HORIZONTAL_PADDING,
+                                           min_rows=new_text_height)
+            else:
+                self.popup_text.config(height=new_text_height)
 
             # Reposition to stay within screen
             x, y, adjusted_height = self._calculate_position(final_width, final_height)
@@ -1552,14 +1585,17 @@ class QuickTranslateManager:
             on_lookup=on_lookup,
             on_expand=expand_dictionary,
             on_no_selection=on_no_selection,
-            language=language  # Pass language for NLP tokenization
+            language=language,  # Pass language for NLP tokenization
+            furigana_enabled=self._ruby_enabled()
         )
         dict_frame.set_exit_callback(dict_popup.destroy)
         dict_frame.pack(fill=BOTH, expand=True)
 
         # Custom word boxes (between text area and action buttons)
         from src.ui.custom_word_boxes import CustomWordBoxesFrame
-        custom_boxes = CustomWordBoxesFrame(dict_frame.frame)
+        custom_boxes = CustomWordBoxesFrame(
+            dict_frame.frame, language=language,
+            furigana_enabled=self._ruby_enabled())
         dict_frame.insert_custom_widget(custom_boxes.frame)
         dict_frame.set_drop_target(custom_boxes)
 
@@ -1610,6 +1646,7 @@ class QuickTranslateManager:
                 pass
             self.popup = None
             self.popup_text = None
+            self.popup_furigana = None
             self.popup_copy_btn = None
             self.popup_replace_btn = None
             self._replace_gear_btn = None
@@ -1650,9 +1687,18 @@ class QuickTranslateManager:
         # Align dictionary fields for clean column display
         display_text = _align_dictionary_text(result)
 
+        # Decide furigana and word highlighting up front: the window is sized
+        # before the widget exists, and an annotated word can no longer be found
+        # by Text.search() afterwards (an embedded window has no characters).
+        runs = split_dictionary_text(display_text, target_lang, looked_up_words,
+                                     HIGHLIGHT_COLORS,
+                                     annotate=self._ruby_enabled())
+
         # Calculate size based on result text (MIN_HEIGHT already in calculate_size)
         width, height = self.calculate_size(display_text)
         height = height + 30  # Title bar compensation for Toplevel window
+        height += overhead_px(runs, width - HORIZONTAL_PADDING,
+                              base_font=DICT_RESULT_FONT, line_spacing=0)
 
         # Create SEPARATE dictionary result window
         dict_result = tk.Toplevel(self.root)
@@ -1749,7 +1795,7 @@ class QuickTranslateManager:
 
         # Result text with monospace font for aligned columns
         try:
-            ui_font = font.Font(family='Consolas', size=10)
+            ui_font = font.Font(family=DICT_RESULT_FONT[0], size=DICT_RESULT_FONT[1])
             base_line_height = ui_font.metrics("linespace")
             avg_char_width = ui_font.measure("m")
         except tk.TclError:
@@ -1761,37 +1807,34 @@ class QuickTranslateManager:
         text_height = max(1, (height - VERTICAL_PADDING) // LINE_HEIGHT)
         text_width = max(30, width // avg_char_width)
 
-        result_text = tk.Text(main_frame, wrap=tk.WORD,
-                              bg='#2b2b2b', fg='#ffffff',
-                              font=('Consolas', 10), relief='flat',
-                              width=text_width, height=text_height,
-                              borderwidth=0, highlightthickness=0)
-        result_text.insert('1.0', display_text)
+        result_text = RubyText(main_frame, wrap=tk.WORD,
+                               bg='#2b2b2b', base_fg='#ffffff',
+                               kanji_fg='#ffffff',
+                               base_font=DICT_RESULT_FONT, relief='flat',
+                               spacing1=0, spacing3=0, cursor='xterm',
+                               width=text_width, height=text_height,
+                               borderwidth=0, highlightthickness=0)
 
-        # Highlight looked-up words with distinct colors
-        if looked_up_words:
-            for i, word in enumerate(looked_up_words):
-                if not word:
-                    continue
-                color = HIGHLIGHT_COLORS[i % len(HIGHLIGHT_COLORS)]
-                tag_name = f"lookup_word_{i}"
-                result_text.tag_configure(tag_name, foreground=color,
-                                          font=('Consolas', 10, 'bold'))
-                start_idx = "1.0"
-                while True:
-                    pos = result_text.search(word, start_idx, stopindex="end", nocase=True)
-                    if not pos:
-                        break
-                    end_pos = f"{pos}+{len(word)}c"
-                    result_text.tag_add(tag_name, pos, end_pos)
-                    start_idx = end_pos
+        # One pass: each run already knows its reading and its highlight colour,
+        # so a colour-coded word keeps its colour even when annotated.
+        bold_font = (DICT_RESULT_FONT[0], DICT_RESULT_FONT[1], 'bold')
+        for run in runs:
+            tag = None
+            if run.color:
+                tag = f"lookup_{run.color.lstrip('#')}"
+                result_text.tag_configure(tag, foreground=run.color,
+                                          font=bold_font)
+            if run.ruby:
+                result_text.insert_segments(tk.END,
+                                           (RubySegment(run.base, run.ruby),),
+                                           tag, kanji_fg=run.color)
+            else:
+                result_text.insert_plain(tk.END, run.base, tag)
 
         result_text.config(state='disabled')
         result_text.pack(side=TOP, fill=BOTH, expand=True)
-
-        # Mouse wheel scroll
-        result_text.bind('<MouseWheel>',
-                        lambda e: result_text.yview_scroll(int(-3 * (e.delta / 120)), "units"))
+        # RubyText binds the wheel itself, including over the ruby frames that
+        # would otherwise swallow the event.
 
         # Close on Escape
         dict_result.bind('<Escape>', lambda e: dict_result.destroy())

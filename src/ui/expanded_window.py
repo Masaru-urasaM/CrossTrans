@@ -16,6 +16,7 @@ except ImportError:
     from tkinter import ttk
     HAS_TTKBOOTSTRAP = False
 
+from src.ui.ruby_text import RubyText, insert_output
 from src.utils.ui_helpers import set_dark_title_bar
 
 
@@ -28,17 +29,20 @@ class ExpandedTranslationWindow:
     - Copy button with visual feedback
     - Character/word/line count status bar
     - Keyboard shortcuts (Esc to close, Ctrl+C to copy)
+    - Furigana for Japanese results (read-only, so I3 holds by construction)
     """
 
-    def __init__(self, root: tk.Tk, toast_manager):
+    def __init__(self, root: tk.Tk, toast_manager, config=None):
         """Initialize the expanded window manager.
 
         Args:
             root: Root Tk window
             toast_manager: ToastManager instance for notifications
+            config: Config object, read for the furigana toggle
         """
         self.root = root
         self.toast = toast_manager
+        self.config = config
 
     def show(self, translated: str, target_language: str) -> None:
         """Show the expanded translation window.
@@ -109,7 +113,10 @@ class ExpandedTranslationWindow:
 
         # Copy button
         def copy_expanded():
-            text = expanded_text.get('1.0', tk.END).strip()
+            # get_plain(), never get(): an embedded ruby frame contributes no
+            # characters to get(), so the clipboard would lose every annotated
+            # word.
+            text = expanded_text.get_plain().strip()
             if text:
                 pyperclip.copy(text)
                 copy_exp_btn.configure(text="✓ Copied!")
@@ -132,20 +139,28 @@ class ExpandedTranslationWindow:
         text_frame = ttk.Frame(main_frame)
         text_frame.pack(fill=BOTH, expand=True)
 
-        # Text widget - editable for selection/copy
-        expanded_text = tk.Text(text_frame, wrap=tk.WORD,
-                                bg='#2b2b2b', fg='#ffffff',
-                                font=('Segoe UI', 14), relief='flat',
-                                padx=20, pady=20,
-                                insertbackground='white',
-                                selectbackground='#0d6efd',
-                                selectforeground='white')
-        expanded_text.insert('1.0', translated)
+        # Text widget - read-only. A disabled tk.Text still supports mouse
+        # selection and Ctrl+C (verified), so nothing is lost, and read-only is
+        # what lets the box hold furigana: typing beside a reading would leave
+        # it describing text the user has already changed, and edit_undo()
+        # cannot restore a destroyed embedded window.
+        expanded_text = RubyText(text_frame, wrap=tk.WORD,
+                                 bg='#2b2b2b', base_fg='#ffffff',
+                                 kanji_fg='#ffffff',
+                                 base_font=('Segoe UI', 14), relief='flat',
+                                 spacing1=0, spacing3=0, cursor='xterm',
+                                 padx=20, pady=20,
+                                 insertbackground='white',
+                                 selectbackground='#0d6efd',
+                                 selectforeground='white')
+        insert_output(expanded_text, '1.0', translated,
+                      lang_hint=target_language,
+                      enabled=bool(self.config
+                                   and self.config.get_furigana_enabled()))
+        expanded_text.config(state='disabled')
         expanded_text.pack(fill=BOTH, expand=True)
 
-        # Mouse wheel scroll only
-        expanded_text.bind('<MouseWheel>',
-            lambda e: expanded_text.yview_scroll(int(-3*(e.delta/120)), "units"))
+        # Mouse wheel scroll is bound by RubyText, including over ruby frames
 
         # Keyboard shortcuts
         expanded.bind('<Escape>', lambda e: expanded.destroy())
@@ -156,9 +171,10 @@ class ExpandedTranslationWindow:
         status_frame = ttk.Frame(main_frame)
         status_frame.pack(fill=X, pady=(10, 0))
 
-        # Character/word count
+        # Character/word count. Counted from get_plain(), so the numbers
+        # describe the real text rather than the gaps ruby leaves in get().
         def update_status(*args):
-            text = expanded_text.get('1.0', 'end-1c')
+            text = expanded_text.get_plain()
             chars = len(text)
             words = len(text.split())
             lines = text.count('\n') + 1
@@ -172,8 +188,8 @@ class ExpandedTranslationWindow:
         ttk.Label(status_frame, text="F11: Fullscreen | Esc: Close | Ctrl+C: Copy",
                   font=('Segoe UI', 9), foreground='#888888').pack(side=tk.RIGHT)
 
-        # Update status on text change
-        expanded_text.bind('<KeyRelease>', update_status)
+        # No <KeyRelease> refresh: the box is read-only, so the counts computed
+        # above cannot go stale.
 
         # Bring window to front and focus it
         expanded.lift()

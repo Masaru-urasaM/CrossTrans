@@ -2,6 +2,468 @@
 
 All notable changes to CrossTrans are documented here.
 
+## [Unreleased]
+
+### Phase F7 — Furigana hardening (2026-08-17)
+
+Final phase of "furigana everywhere". No new surface and no visible change — this one is about
+the three ways the feature could degrade without anybody noticing: a startup stutter, a tuning
+value that exists in two places, and an EXE that ships without the reading dictionary.
+
+**Added**
+- `src/constants.py` — a `FURIGANA` section holding every tuning knob: the two cost caps, the
+  prewarm sample, the fonts and palette, and the Reading pane's debounce and row cap.
+  `furigana.py`, `ruby_text.py` and `app.py` alias them to their existing local names, so no
+  call site anywhere else changed.
+- `tools/verify_furigana_bundle.py` — build guard. `--source` checks the environment can supply
+  `kanwadict4.db` before PyInstaller runs; `--exe PATH` reads the built archive's own TOC (via
+  `CArchiveReader`, not a byte search) to confirm it actually got in.
+- `build_exe.bat` — runs both checks. A failed pre-flight **aborts** the build; a failed
+  post-build check prints a "do not release it" warning as the last thing on screen.
+- `tests/test_furigana_hardening.py` (28 tests), all mutation-checked — 21/21 mutations caught,
+  including four planted in `build_exe.bat` itself.
+
+**Changed**
+- `furigana.prewarm()` now annotates a sample instead of probing availability, and `app.run()`
+  actually calls it (on the existing background thread, gated on the Settings toggle).
+- `FugashiProvider.tokens()` / `KakasiProvider.tokens()` serialize on the existing module lock.
+
+**Fixed during implementation**
+- **`prewarm()` was dead code** — defined in Phase F0, never called by anything. The whole
+  dictionary load has been happening on the UI thread at the first Japanese render since then.
+- **Probing availability would not have fixed it.** `active_provider_name()` stops at the first
+  available provider, but `_refine_compounds()` calls pykakasi on *every* annotation even when
+  fugashi is active — so the ~215 ms `kakasi()` construction stayed on the UI thread regardless.
+  Measured over four fresh processes: first UI-thread annotation **217.7 ms → 0.6 ms**, with the
+  cost moved to a background thread that finishes long before the user can press a hotkey.
+- **Concurrent annotation was unsynchronized.** `annotate()` is reached from the UI thread at
+  render time and from the translation worker via `generate_furigana()`; a MeCab tagger is not
+  documented thread-safe, and prewarm added a third caller. The providers now serialize on the
+  lock their constructors already used (~0.3 ms per tokenize, so no measurable cost).
+- **`prewarm()`'s try/except was unreachable** — `annotate()` already swallows everything and
+  falls back to plain text. Removed; the test now guards that contract instead.
+- **`build_exe.bat` verified nothing.** A missing `kanwadict4.db` does not crash anything: the
+  provider logs the `FileNotFoundError` and renders plain text, so an EXE with no furigana at
+  all looks like a successful build. It is also the *only* provider a fresh install has —
+  fugashi/UniDic arrives later, if the user installs the Japanese pack.
+- **cmd.exe cannot parse a `::` comment as the last line of a parenthesised block** — it dies
+  with "`)` was unexpected at this time" and the build never runs. Hit while writing this phase;
+  there is now a test asserting no such line exists in the script.
+
+**Tests**: 422 → 450 (+28). No regressions. Both build-script paths and the pre-flight abort
+were run end-to-end against a real 94 MB EXE and a deliberately broken one.
+
+### Phase F6 — Dictionary word chips and custom-box tags (2026-08-10)
+
+Seventh phase of "furigana everywhere". The clickable word chips in Dictionary mode and the
+orange tags in Custom lookup now carry readings. These are embedded widgets with their own
+click, hover, selection and right-click-drag behaviour, so most of the work was keeping that
+behaviour intact around a chip that is suddenly two rows tall.
+
+**Added**
+- `src/core/furigana.py` `annotate_tokens(tokens, text, lang_hint)` — readings for a
+  tokenization, generated from the **whole line** and then handed to the tokens. Each token's
+  segments concatenate back to that token (I1, per token).
+- `src/ui/ruby_text.py` `RubyRow` — a standalone two-row ruby chip (grid: readings above, bases
+  below) for surfaces that are not a `Text` widget. Used by the chips, the tags and both drag
+  ghosts. `NO_AUTOSTYLE` is now public so every module uses the same ttkbootstrap workaround.
+- `WordButtonFrame(..., furigana_enabled=)` and `CustomWordBoxesFrame(..., language=,
+  furigana_enabled=)`; both dictionary-mode call sites pass the Settings toggle.
+- `WordTag.set_dimmed()` — the drag-dim now covers the reading, which the caller poking at
+  `tag.frame/label/close_btn` could not.
+- `tests/test_word_chips_ruby.py` (36 tests) + `TestAnnotateTokens` in `tests/test_furigana_core.py`
+  (11 tests). All mutation-checked, including the drag paths.
+
+**Fixed during implementation**
+- **A wrong reading on split compounds, found by measurement.** The dictionary tokenizer splits
+  日本語 into 日本 + 語, and 日本 annotated on its own reads **にっぽん** where the compound is
+  にほん. Per-chip annotation would therefore print a wrong reading on exactly the words a
+  learner is looking up. Readings now come from the line, and a token that cuts through a
+  reading is left bare — the chips for 日本 and 語 show nothing rather than something wrong.
+  A plain run *is* clipped to the token (splitting text with no reading cannot make it wrong),
+  which is what lets 会い keep 会[あ].
+- **Chips were 7 px out of alignment** (measured): `window_create` defaults to `align='center'`,
+  so a taller annotated chip lifted the plain chips off its baseline. Both the chips and the tags
+  now insert with `align='baseline'`.
+- **The custom box clipped its own tags.** `height=1` counts rows of the *base* font, and a tag
+  with a reading is taller than one — the F1 height-unit bug again. The box now derives the row
+  count from real font metrics, growing when a reading appears and shrinking when it goes.
+- **The wheel was dead over every chip** (pre-existing): an embedded widget swallows
+  `<MouseWheel>`, and chips cover nearly all of the word area, so a long text could not be
+  scrolled at all. Bound on the area and on every chip part.
+- **`_show_drop_line` could raise inside a live motion handler**: an unmapped box reports height
+  1, making the geometry string `3x-3+...`, which is a `TclError`. Clamped.
+
+**Design notes**
+- A word with no reading keeps the **single-label chip it always had**, so non-Japanese
+  Dictionary mode is unchanged.
+- A tag is annotated **on its own**, unlike a chip: a tag is one lookup phrase the user typed or
+  composed, and there is no larger context to read it in.
+- Readings switch to white on the orange selection/highlight — `#80b8ff` on `#fd7e14` is
+  unreadable.
+- Ghosts are built from the same segments as the chip, never from a concatenated reading string:
+  取り消し would otherwise preview as the nonsense とけ.
+
+**Tests**: 376 → 422 passed / 0 failed (+46).
+
+### Phase F5 — Dictionary result window (2026-08-10)
+
+Sixth phase of "furigana everywhere". The dictionary result window now shows readings on the
+Japanese it displays — the entry headers, definitions, synonyms and example sentences — while the
+aligned label columns and the colour-coded lookup words are preserved exactly.
+
+**Added**
+- `src/ui/dictionary_render.py` — the render model for this window. `split_dictionary_text()`
+  returns `DictRun(base, ruby, color)` items covering the text exactly once, so
+  `''.join(run.base)` is the input string (the engine's I1 guarantee, extended to the renderer).
+  Plus `field_policy()`, `source_language_hint()`, `runs_to_segments()`, `overhead_px()`.
+- `tests/test_dictionary_ruby.py` — 45 tests (headless run model + the real window), every one
+  mutation-checked.
+
+**Changed**
+- The result widget is a `RubyText` with `base_font=('Consolas', 10)` — monospace is load-bearing,
+  `_align_dictionary_text()` aligns the value column with space padding. Verified: all 12 value
+  columns still start at exactly the same pixel.
+- Its manual `<MouseWheel>` binding is gone; `RubyText` binds the wheel itself, which also removes
+  the dead zone over a ruby frame.
+- `DICT_RESULT_FONT` replaces the three separate `('Consolas', 10)` literals.
+
+**Fixed during implementation**
+- **Word highlighting would have broken silently.** Colours were applied *after* insertion with
+  `Text.search()`, and an annotated word contributes no characters, so every looked-up word would
+  have lost its colour precisely where a reading appeared. Highlighting is now decided before
+  insertion and travels on the run, so a word is coloured *and* annotated.
+- **Highlight-first splitting destroyed the readings** (caught by a test, then by inspection): if
+  the line is cut at the looked-up word before annotating, the tokenizer receives isolated
+  fragments and an all-kanji fragment — which is exactly what a looked-up word usually is (勉強,
+  東京) — cannot be annotated at all. The order is now annotate the whole line, then paint the
+  colours onto the segments: plain runs split at colour boundaries, a ruby pair is coloured whole.
+
+**Design notes**
+- **Pronunciation (field 5) is never annotated.** It holds IPA plus a target-language phonetic
+  (`/həˈloʊ/, /ハロー/`); hiragana above katakana is redundant and invites reading it as a
+  different word. Matched by label *and* by number, because models renumber.
+- **The result declares its own source language**, so `**Source Language**: Japanese` is used as
+  the annotation hint for the source-language fields. This closes the kanji-only gap where it
+  matters most: a dictionary lookup is usually a bare kanji word (犬, 東京, 勉強), which has no kana
+  and is otherwise indistinguishable from Chinese. Resolved **per `## [Word]` entry**, since a
+  multi-word lookup can mix source languages. An unrecognized value degrades to no hint.
+- **Target-language fields** (Translation, Definition) use the target language as hint, so a
+  kanji-only translation such as 犬 gets a reading too.
+
+**Pre-existing, not changed** (reported, per Rule 3): the window has ~154 px of unused height
+whether or not furigana is on, because `calculate_size()` measures with Segoe UI 11 while this
+window renders Consolas 10 and adds a one-line buffer. The furigana budget itself is exact —
+measured 51 px added against 51 px of real extra content.
+
+**Tests**: 331 → 376 passed / 0 failed (+45).
+
+### Phase F4 — Reading pane under the input box (2026-08-07)
+
+Fifth phase of "furigana everywhere". The main window's **input box** now has a read-only
+Reading pane beneath it that shows what you typed with hiragana above the kanji. The box itself
+stays plain: an embedded ruby frame cannot survive `edit_undo()`, and a caret moving between
+embedded windows behaves unpredictably, so the readings live in a separate widget instead of
+inline (invariant I3 — editable implies plain).
+
+**Added**
+- `src/app.py` `_create_reading_pane()`, `_refresh_reading_pane()`, `_apply_reading_pane_state()`,
+  `_toggle_reading_pane()`, `_on_input_modified()`, `_reading_pane_alive()`, plus the
+  `READING_PANE_*` constants. The input box and its pane share one container frame, so the gap
+  before the language selector is the same whether the pane is showing or collapsed.
+- `config.py` `get/set_furigana_reading_pane()` (default `True`) — remembers a manual collapse.
+  It is a collapse state, not a second feature switch: the pane exists whenever furigana is on.
+- `tests/test_reading_pane.py` — 24 tests: construction, content rules, refresh wiring, the
+  collapse toggle, and that the input box is never a `RubyText`.
+
+**Changed**
+- `src/ui/settings/hotkey_tab.py` — the Furigana toggle's description said "shows original
+  Japanese text with furigana readings + translation", which described the old pipeline-only
+  behaviour. It now names the surfaces the toggle actually governs.
+
+**Design notes**
+- **Always present, not shown-on-detection.** The pane's position never shifts and the feature is
+  discoverable before any Japanese is typed. When there is nothing to annotate it shows a dim
+  one-line placeholder rather than mirroring the box above, which would be noise — and would
+  also mean re-inserting a pasted 50 000-character document on every edit.
+- **One `<<Modified>>` binding, not per-call-site refreshes.** It fires for typing, paste,
+  drag-and-drop, undo/redo *and* the programmatic rewrites in
+  `_update_translation_with_original()` / `_load_history_item()`, so those call sites needed no
+  changes (the plan had them patched individually). Tk only re-fires after the flag is cleared,
+  and clearing it fires the event a second time; a 350 ms debounce collapses the pair into one
+  render, which also keeps UI-thread annotation off the keystroke path.
+- **No `lang_hint`.** The source language is unknown here, so kanji-only input stays plain rather
+  than being guessed at — the same rule as the popup's source block.
+
+**Verified empirically**: focus and caret stay in the input box across a refresh, `edit_undo()`
+still works (and the pane follows the undo), and the pane's predicted height matches
+`Text.count(..., 'ypixels')`.
+
+**Tests**: 307 → 331 passed / 0 failed (+24). Each new test was mutation-checked: breaking the
+annotation, the sizing, the `<<Modified>>` binding, the collapse persistence, the collapse state
+or the placeholder all make the suite fail.
+
+### Phase F3 — Main window and expanded view (2026-08-07)
+
+Fourth phase of "furigana everywhere". The **main translator window's output box** and the
+**expanded fullscreen view** now render furigana. The main window had never shown readings at
+all — `translation_queue`'s only consumer routes to the popup — so "Open Translator" from an
+annotated popup used to drop them silently. It no longer can: annotation happens where the text
+is drawn, so anything that reaches the box is annotated.
+
+**Added**
+- `src/ui/ruby_text.py` `insert_output(widget, index, text, lang_hint, enabled, ...)` — the one
+  place every surface routes result text through, so the Settings toggle behaves identically
+  everywhere and no call site repeats the branch. `enabled` stays the caller's decision: only it
+  knows whether the widget is showing a result, an error, or something about to be edited.
+- `src/app.py` `_create_translation_box()` — extracted from `show_popup()` so the output box can
+  be built and asserted on without starting the application (which registers global hotkeys,
+  builds a tray icon and takes the single-instance lock).
+- `tests/test_main_window_ruby.py` — 20 tests covering the main-window box, its update paths and
+  the expanded window.
+
+**Fixed during implementation**
+- **Measurements ignored the widget's real line spacing.** `LayoutModel` hard-coded this
+  module's own `spacing1 + spacing3`, but the popup and main-window boxes are built with
+  spacing 0, so every logical line was mis-measured by 8 px. The model now reads the widget's
+  actual values; a test asserts pixel-exact predictions for spacing 0, 6/2 and the popup's real
+  configuration.
+- **Copy and Expand from the main window would have handed over kanji-stripped text**
+  (`app.py` `_copy_translation` / `_open_expanded_translation` read the box with `.get()`), as
+  would the expanded window's own Copy button and its character counter. All now use
+  `get_plain()`.
+
+**Changed**
+- The expanded view's text box is **read-only**. It was editable "for selection/copy", but a
+  disabled `tk.Text` still supports mouse selection and Ctrl+C (verified empirically), so
+  nothing is lost — and read-only is what lets it hold ruby without violating I3. Nothing
+  consumed its edits. The now-pointless `<KeyRelease>` status refresh is gone with it.
+- `ExpandedTranslationWindow.__init__` takes `config` so it can read the furigana toggle.
+- `_update_translation_with_original()` and `_update_grammar_result()` replace their
+  delete/insert pairs with `clear()` + `insert_output()`; `RubyText` restores the disabled state
+  itself, so the manual state juggling is gone.
+
+**Known limitation** (unchanged from F0): the *source* text still cannot be annotated when it is
+kanji-only, because the source language is auto-detected and kanji-only strings are
+indistinguishable from Chinese. Output text has no such problem — the target language is known.
+
+**Tests**: 286 → 307 passed / 0 failed (+21).
+
+### Phase F2 — Readings on the translation itself, not just the source (2026-08-06)
+
+Third phase of "furigana everywhere". The Quick Translate popup's **output** box is now a
+`RubyText`, so a Japanese translation carries readings — previously only the Japanese *source*
+block did, which meant translating **into** Japanese (Win+Alt+J, the main use for a learner)
+produced no readings at all. Screenshot/OCR, grammar-fix and merged translate-or-fix results
+inherit this for free, because they all render through the same popup.
+
+**Added**
+- `src/ui/ruby_text.py`
+  - `estimate_ruby_overhead_px()` — the extra pixels annotation needs beyond plain text, so a
+    caller that already sized its window for plain text adds room instead of re-deriving the
+    whole height with a different wrap model.
+  - `set_plain()` — flatten a widget before handing it to the user for typing (I3).
+  - `fit_height(min_rows=...)` — the popup measures **word** wrap while this class simulates
+    **character** wrap, so its row count is a floor, not a replacement.
+  - `insert_ruby(..., kanji_fg=...)` — base-character colour per insertion, for callers whose
+    own tag carries a foreground (the replace preview's teal).
+- `tests/test_popup_ruby.py` — 29 integration tests driving the real `show()`.
+
+**Fixed during implementation**
+- **Custom Prompt sent the model a kanji-stripped prompt.** `_handle_custom_prompt_send()` read
+  the box with `.get()`, which returns nothing for an embedded ruby frame: measured **8 of 14
+  characters** on a normal Japanese sentence. Now `get_plain()`. Entering edit mode also
+  flattens the box first, per I3.
+- **Phase 0's kanji-only gap is closed for output text.** `東京都` had no kana, so it was
+  indistinguishable from Chinese and stayed plain. The popup knows the *target* language, which
+  is authoritative for a translation, so kanji-only Japanese output annotates again — while a
+  kanji-only result with a Chinese target still, correctly, does not.
+- **ttkbootstrap was discarding the ruby colours.** It re-themes standard `tk` widgets at
+  construction and drops explicit colour kwargs unless `autostyle=False` (measured: a
+  `tk.Label` asked for `fg='#80b8ff'` comes back `#ffffff`, `bg='#363636'` comes back
+  `#222222`). So the blue reading colour that has been in the code and the docs all along
+  **never actually shipped** — readings rendered white. This predates this work; the old
+  renderer had the same problem. ⚠️ **Visible change**: readings are now blue (`#80b8ff`) on a
+  `#363636` plate. The `RubyText` widget itself deliberately stays themed so it keeps matching
+  the frame around it. (This also means the "pixel-identical" screenshot in Phase F1 was taken
+  under plain Tk, where colours are not overridden: the geometry parity it proved holds, the
+  colours in it were the intended ones rather than the shipped ones.)
+- **`config.get_furigana_enabled()` fell back to `False`** while `DEFAULT_CONFIG` documents
+  `True`, so any config file written before the key existed had the feature silently off. Was
+  scheduled for F4; fixed here because it gates everything this phase adds.
+- **Error text was annotated but not budgeted for.** The height calculation excluded error
+  messages while the insertion did not, so a provider error containing Japanese could overflow
+  the box. Found by a test written for this phase.
+
+**Changed**
+- The Settings → Hotkeys "Enable Furigana" toggle now governs **render-time annotation**, not
+  just whether the pipeline generates a notation string. One switch, every surface.
+- Replace preview: the translated half is annotated in the matching teal; the struck-through
+  original stays plain, because Tk cannot strike through an embedded frame and the text is
+  being discarded anyway.
+
+**Verified**
+- Screenshots of the popup and the replace preview; ruby label colours asserted numerically
+  (base and reading foreground per frame), not judged by eye.
+- Audited every read of a ruby-capable widget: no `.get()` remains (I2). Copy and Replace take
+  `app.current_translated`, a plain string, so they were never affected.
+
+**Tests**: 257 → 286 passed / 0 failed (+29).
+
+### Phase F1 — RubyText primitive: one renderer, correct sizing (2026-08-05)
+
+Second phase of "furigana everywhere". The ruby drawing code moves out of the Quick Translate
+popup into a reusable widget, so the later phases add surfaces instead of copying a renderer.
+**The popup renders pixel-for-pixel identically** (verified with a side-by-side screenshot of
+the old and new renderers) — every change below is either a bug fix or new capability.
+
+**Added**
+- **`src/ui/ruby_text.py`** — `RubyText`, a `tk.Text` subclass that owns ruby rendering.
+  - `insert_ruby(index, text, lang_hint)` annotates on the way in; `insert_notation()` consumes
+    the legacy `{kanji|reading}` string; `insert_plain()` skips annotation. All three work while
+    the widget is `state='disabled'`, so read-only surfaces need no state juggling.
+  - **`get_plain()`** — the readback that Copy / Replace / re-send paths need. `Text.get()`
+    contributes **zero characters** for an embedded window while still consuming one index, so
+    reading an annotated widget with `get()` silently deletes every annotated word. Measured on
+    the popup's own sample: `get()` returns 8 of 14 characters, `get_plain()` all 14.
+  - `LayoutModel` / `layout_rows()` / `measure_px()` — a `wrap='char'` simulation that predicts
+    the pixel height of annotated content. Row heights are **derived from font metrics**, not
+    guessed: `frame = ruby linespace + base linespace + 2·pad`, `ruby row = frame + base
+    descent`, plus `spacing1 + spacing3` once per logical line. Predictions match
+    `Text.count(..., 'ypixels')` **exactly** on every case tested (47 / 86 / 122 / 28 px).
+  - `estimate_notation_px()` — lets a caller size its window *before* creating the widget,
+    which the popup must do because an `overrideredirect` Toplevel gets its geometry once.
+  - `MAX_ANNOTATE_CHARS` (3000) — above this, text is inserted plain. Annotation and frame
+    construction run on the UI thread, so a pasted document cannot freeze it.
+- **`tests/test_ruby_text.py`** — 49 tests. The wrap arithmetic runs headless through an
+  injected `LayoutModel`; the widget tests use a new session-scoped `tk_root` fixture in
+  `tests/conftest.py` that skips itself when no display is available.
+
+**Fixed during implementation**
+- **Insertion order was reversed** (found by a render probe, not by reading the code): feeding
+  runs one at a time to a fixed index put each run *before* the previous one, so
+  `私は日本語を勉強しています。` rendered as `しています。勉強を日本語は私`. Insertion now walks
+  a right-gravity mark. This bug did not exist in the old renderer (it always appended to
+  `END`) — it was introduced and killed inside this phase, and is now covered by two tests.
+- **Height unit bug — multi-line ruby was clipped.** The `height` option counts rows of the
+  *base* font (28 px measured), but a row carrying ruby is 47 px. The old renderer asked for
+  one unit per logical line, so it under-allocated 19 px for every annotated row: fine for one
+  line, clipped from the second onwards. Height is now converted from the real pixel
+  requirement.
+- **Popup height estimate replaced.** `paragraphs * 38 + 30` ignored wrapping entirely; a
+  Japanese paragraph that wraps to two ruby rows was budgeted 68 px and needed 103 px. The
+  estimate now measures at the actual wrap width.
+- **Scroll dead zone over ruby.** An embedded frame swallows `<MouseWheel>`, so the wheel did
+  nothing precisely where the annotated text is. Measured: over a ruby label the old renderer
+  leaves `yview` at `0.0000`, `RubyText` scrolls to `0.1615`. Every frame and label created is
+  now bound to the same handler.
+- **Text containing `{`, `|` or `\` lost all its readings.** `generate_notation()` suppressed
+  ruby for those strings because the old regex renderer would have turned a literal `{A|B}`
+  into a fake pair. `RubyText` parses through `parse_notation()`, which honors the escapes, so
+  the guard is gone: `設定{A|B}テストを保存` now shows readings and reads back byte-identical.
+- Dead `<Shift-MouseWheel>` binding removed — `wrap='char'` has no horizontal view, so
+  `xview_scroll` could never do anything.
+- `ROADMAP.md` and the Phase 0 entry said "124 → 204 tests"; the real Phase 0 total was **208**.
+
+**Changed**
+- `src/ui/quick_translate.py` — `_render_furigana()` is now a five-line delegate and takes the
+  wrap width. `HORIZONTAL_PADDING` moved to module scope so `calculate_size()` and the furigana
+  estimate cannot drift apart; added `FURIGANA_SEPARATOR_PX`. New `popup_furigana` attribute
+  (reset in `close()`) exposes the widget to the later phases.
+
+**Verified**
+- Visual parity: old and new renderers drawn in one window and screenshotted — identical
+  glyph positions, colours, plate backgrounds and baselines.
+- `get_plain()` round-trips text holding `{`, `|` and `\` through the real popup path.
+- No circular imports: `src.ui.ruby_text` pulls in `src.core.furigana` only.
+
+**Tests**: 208 → 257 passed / 0 failed (+49). One Phase 0 test was rewritten
+(`test_generate_notation_suppresses_text_holding_delimiters` →
+`test_generate_notation_escapes_delimiters_in_the_source`) because the behaviour it pinned was
+the guard removed above.
+
+### Phase 0 — Furigana engine: structured segments, accurate readings (2026-08-04)
+
+First phase of "furigana everywhere". **Pure logic only — no UI file was touched**, so the
+Quick Translate popup looks and behaves exactly as before except that its readings are now
+correct. Groundwork for rendering ruby on every surface in later phases.
+
+**Added**
+- **`src/core/furigana.py`** — the furigana engine.
+  - `RubySegment(base, ruby)` — a structured segment model replacing the fragile
+    `{kanji|reading}` string as the internal contract.
+  - **Invariant I1**: `''.join(seg.base for seg in annotate(text)) == text`, asserted at
+    runtime and in tests. Annotation can no longer alter the text it describes.
+  - `should_annotate(text, lang_hint)` — requires kanji **plus** kana evidence, or an
+    explicit language hint. Chinese hanzi no longer qualifies for Japanese readings, while
+    kanji-only Japanese (`東京都`, `電源設定`) still annotates when the caller passes a hint.
+  - `align(surface, reading)` — maps a whole-token reading onto the kanji runs inside it by
+    anchoring on the kana already present. **Fail-safe**: returns `None` rather than guess,
+    so no wrong reading is ever drawn.
+  - Provider chain `FugashiProvider` → `KakasiProvider`, each built **once** and reused.
+  - `_refine_compounds()` — restores whole-compound readings that morphological splitting
+    destroys, restricted to all-kanji spans.
+  - `to_notation()` / `parse_notation()` with backslash escaping for `\ { } |`.
+- **`tests/test_furigana_core.py`** — 80 tests: detection matrix, aligner (incl. every
+  fail-safe branch), I1 over a 19-case corpus, notation escaping round-trip, whitespace
+  preservation, the pair cap, and the reading-quality regressions below.
+
+**Fixed**
+- **Okurigana covered by ruby** — `取り消し` produced `{取り消|とりけ}し`, the ruby spanning
+  the り, because the old code stripped only a *trailing* kana suffix. Now
+  `{取|と}り{消|け}し`. Same class fixed for `話し合い`, `申し込み`, `生き物`.
+- **Wrong homograph readings** — `今日は雨` gave こんにち; now きょう (morphological context).
+- **`kakasi()` rebuilt on every call** — measured ~175 ms to construct versus ~0.3 ms to
+  convert. Now a lock-guarded singleton, plus a 256-entry `lru_cache` on annotation.
+- **Notation injection** — source text containing a literal `{a|b}` was parsed back as a
+  real ruby pair and rendered as "a" with the reading "b". The segment model makes this
+  structurally impossible; until the renderer consumes segments (Phase 1), the legacy wire
+  format additionally suppresses ruby for any text holding `\ { } |`.
+- **Multi-line text lost all ruby** — tokenizers normalize whitespace away, which broke the
+  round-trip check. Annotation now runs on whitespace-free chunks and re-inserts separators
+  verbatim, so newlines, CRLF, tabs and blank lines survive.
+- **Misleading counter readings** — `2日` is *futsuka*: the digit carries part of the reading
+  and cannot take ruby, so drawing カ over 日 alone invited "ni-ka". Counters following a
+  digit are now suppressed, which also removes real errors (`2人` is *futari*, not ni-**nin**;
+  standalone `1月` reported ツキ instead of ガツ).
+- **Compound readings broken by splitting** — UniDic tags 日本 as a proper noun reading
+  ニッポン, so `日本語` came out にっぽんご and `日本人` にっぽんにん. Both correct now, and
+  `東京駅` → とうきょうえき, `中国語` → ちゅうごくご.
+- **Chinese text was given Japanese readings** — the pipeline gate matches U+4E00-U+9FFF, so
+  hanzi qualified. `你好世界` produced `{你|}{世界|せかい}` — note the **empty** reading on 你,
+  which would have rendered a blank ruby label. Both are gone.
+- **Misleading log message** — the old `"pykakasi not installed"` warning did not fire when
+  the package imported but its bundled dictionary data was missing, which is the likely
+  packaging regression. Provider failures now log the actual exception.
+
+**⚠️ One behaviour change: kanji-only source text no longer gets furigana from the hotkey path.**
+Ruby now requires kanji **plus** kana evidence, or an explicit language hint. A sentence
+(`今日は雨が降る`) is unaffected — it has kana. But a kanji-only selection (`電源設定`, `東京都`,
+`翻訳`) used to be annotated and now is not, because the pipeline calls
+`generate_furigana(selected_text)` with no hint and **cannot tell Japanese kanji from Chinese
+hanzi**: the same permissive check that annotated `東京都` is what annotated `你好世界`.
+This is the deliberate "blank beats a wrong reading" trade — a lost reading is visibly absent,
+whereas a wrong one is unfalsifiable at the point of use. Phase 2 closes the gap by threading
+the real source language from the surfaces that already know it (the popup, and the dictionary's
+`_open_with_language`), at which point kanji-only Japanese annotates again *without* also
+re-annotating Chinese.
+
+**Changed**
+- `src/core/translation.py` — `_is_japanese_text()` and `generate_furigana()` are now
+  two-line delegates onto the new module. `generate_furigana()` gained an optional
+  `lang_hint`. The queue tuple shapes are **unchanged** (arity is the discriminator in
+  `app.py:_check_queue`, so extending it positionally would abort the drain loop).
+
+**Verified**
+- Packaging: `collect_data_files('pykakasi')` at `CrossTrans.spec:15` is load-bearing and
+  sufficient — proven with two minimal one-file probe EXEs (with data: readings work in the
+  frozen EXE; without: `FileNotFoundError` on `kanwadict4.db`, swallowed into a silent
+  no-furigana state). No new packaging risk from this phase.
+
+**Tests**: 124 → 208 passed / 0 failed. No regressions; the pre-existing tuple-shape
+assertions in `test_translate_or_fix.py`, `test_fix_grammar.py` and `test_freeform_prompt.py`
+all still hold.
+
 ## [Unreleased] — Storage identity renamed to CrossTrans (2026-07-01)
 
 The app's internal **storage identity** — the `%APPDATA%` config folder, the model-config cache folder, the Windows auto-start registry value, and the DPAPI encryption entropy/description — was renamed from the legacy product name to **`CrossTrans`**, matching the user-facing name already in `src/constants.py`. A fresh install now uses `%APPDATA%\CrossTrans\` throughout.
