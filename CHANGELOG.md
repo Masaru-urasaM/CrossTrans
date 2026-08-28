@@ -24,10 +24,21 @@ Also in this release: the storage identity rename to CrossTrans (see its section
 
 Built as eight phases, F0–F7, documented below.
 
+> **Release history note** — 1.9.16 was the last version published to GitHub. **1.9.17 and 1.9.18
+> were never publicly released**: they exist in this changelog and in the code, but no user ever
+> received them. 1.9.19 is therefore the first public release since 1.9.16 and delivers all three
+> versions' features at once, which is why its release notes cover Fix Grammar and Merged
+> Translate-or-Fix as well as furigana. Do not assume a changelog entry here implies a shipped
+> release.
+
 **Release verification**: `CrossTrans_v1.9.19.exe` built from this tree (65,877,976 bytes) with
 the new build guard confirming `pykakasi/data/kanwadict4.db` is present in the packaged archive —
 the reading dictionary a fresh install depends on, and whose absence would have degraded furigana
 to plain text without any error. Suite: 450 passed / 0 failed.
+
+Published as tag `v1.9.19` on 2026-08-18 with the EXE attached. The auto-update endpoint was
+checked against the live release rather than assumed: `tag_name` `v1.9.19` parses to `1.9.19` and
+the `.exe` asset resolves, so 1.9.16 installs will be offered the update.
 
 ### Phase F7 — Furigana hardening (2026-08-17)
 
