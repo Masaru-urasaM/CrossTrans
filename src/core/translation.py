@@ -6,7 +6,7 @@ import re
 import time
 import queue
 import logging
-from typing import Optional, Callable, Tuple, Any, Dict
+from typing import Optional, Callable, Tuple, Dict
 
 import keyboard
 

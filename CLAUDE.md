@@ -603,9 +603,14 @@ Read-only `RubyText` under `original_text`, **shown by default** and collapsible
 - **The result names its own source language** (`**Source Language**: Japanese`), used as the hint
   for source-language fields, resolved **per `## [Word]` entry**. This is the one surface where
   kanji-only text does get readings.
-- Known pre-existing quirk: the window is ~154 px taller than its content because
-  `calculate_size()` measures with Segoe UI 11 while this window renders Consolas 10. The furigana
-  part of the budget (`overhead_px`) is exact.
+- **`calculate_size()` must be told the font and the chrome** (fixed 2026-08-28, was D1). It
+  defaults to the popup's Segoe UI 11 (20 px rows) and 100 px of chrome; this window renders
+  Consolas 10 (15 px rows) and has 71 px of chrome (`DICT_RESULT_CHROME_PX`), so it passes both.
+  Measuring it as a popup left 139 px of empty space under a 12-line result and 199 px under a
+  24-line one — the waste grew with the result. There is also **no title-bar compensation**:
+  `geometry()` sets the client area, so the old `height + 30` was pure padding. The two halves of
+  `show_dictionary_result()` (window height, then the box's row count) must subtract the *same*
+  constant — a test asserts it. The furigana part of the budget (`overhead_px`) was always exact.
 
 ### Word chips and custom-box tags (F6)
 Both are embedded widgets, not text, so they use `RubyRow` (a two-row grid: readings above, bases

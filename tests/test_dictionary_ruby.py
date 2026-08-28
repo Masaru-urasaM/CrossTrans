@@ -12,7 +12,9 @@ Two halves:
 
 The display half is skipped automatically without a display (`tk_root`).
 """
+import inspect
 import tkinter as tk
+from tkinter import font as tkfont
 
 import pytest
 
@@ -26,6 +28,7 @@ from src.ui.dictionary_render import (
     split_dictionary_text,
 )
 from src.ui.quick_translate import (
+    DICT_RESULT_CHROME_PX,
     DICT_RESULT_FONT,
     HIGHLIGHT_COLORS,
     QuickTranslateManager,
@@ -424,3 +427,82 @@ class TestWindow:
         _window, box = show_result(text, "French", ("dog",))
         assert box.has_ruby is False
         assert box.get_plain() == _align_dictionary_text(text)
+
+
+class TestWindowFitsItsContent:
+    """D1: the window used to be sized as if it rendered in the popup's font.
+
+    `calculate_size()` measured Segoe UI 11 (20px rows) while this window renders
+    DICT_RESULT_FONT (15px rows), and it reserved the popup's 100px of chrome plus
+    a 30px "title bar compensation" on a window whose chrome is 71px and whose
+    title bar is outside `geometry()` entirely. The result was a band of empty
+    space that grew with the result: 139px on a 12-line lookup, 199px on 24 lines.
+
+    What is left is the one spare row `calculate_size()` deliberately adds, so the
+    assertions are written in rows of the real font rather than raw pixels - a
+    machine with different metrics still gets a meaningful bound.
+    """
+
+    LONG = RESULT + "\n" + "\n".join(
+        f"   - example sentence number {i} with some length to it." for i in range(12)
+    )
+
+    @staticmethod
+    def _band(box, tk_root):
+        """Pixels of empty box below the last row of text."""
+        tk_root.update_idletasks()
+        content = box.count('1.0', 'end', 'ypixels')
+        if isinstance(content, tuple):
+            content = content[0]
+        return box.winfo_height() - content
+
+    @staticmethod
+    def _row_px():
+        return tkfont.Font(family=DICT_RESULT_FONT[0],
+                           size=DICT_RESULT_FONT[1]).metrics('linespace')
+
+    @pytest.mark.parametrize("furigana_enabled", [True, False])
+    @pytest.mark.parametrize("result", [RESULT, LONG], ids=["short", "long"])
+    def test_no_empty_band_below_the_text(self, show_result, tk_root,
+                                          result, furigana_enabled):
+        _window, box = show_result(result, furigana_enabled=furigana_enabled)
+        band = self._band(box, tk_root)
+        assert band >= 0, "content is taller than its box - the text is clipped"
+        assert band <= 3 * self._row_px(), (
+            f"{band}px of empty space below the text "
+            f"(more than three {DICT_RESULT_FONT} rows)"
+        )
+
+    def test_the_band_does_not_grow_with_the_result(self, show_result, tk_root):
+        """The old bug's signature: 12 lines wasted 139px, 24 lines wasted 199px."""
+        _w1, short_box = show_result(RESULT)
+        _w2, long_box = show_result(self.LONG)
+        assert self._band(long_box, tk_root) <= self._band(short_box, tk_root) + 1
+
+    def test_sizing_and_layout_agree_on_the_chrome(self):
+        """Both halves of show_dictionary_result() must subtract the same number.
+
+        One computes the window height, the other derives the box's row count
+        from it; if they disagree the box is sized for a window that was never
+        requested.
+        """
+        source = inspect.getsource(QuickTranslateManager.show_dictionary_result)
+        assert source.count("DICT_RESULT_CHROME_PX") == 2
+        assert "height + 30" not in source
+
+    def test_the_popup_default_is_untouched(self, tk_root):
+        """calculate_size() gained parameters; its old behaviour must be identical."""
+        mgr = QuickTranslateManager(tk_root, FakeConfig())
+        mgr._last_mouse_x, mgr._last_mouse_y = 500, 300
+        text = "A translated sentence that is long enough to wrap at least once. " * 3
+        assert mgr.calculate_size(text) == mgr.calculate_size(
+            text, base_font=('Segoe UI', 11), vertical_padding=100)
+
+    def test_dictionary_font_gives_a_shorter_window_than_the_popup_font(self, tk_root):
+        mgr = QuickTranslateManager(tk_root, FakeConfig())
+        mgr._last_mouse_x, mgr._last_mouse_y = 500, 300
+        as_popup = mgr.calculate_size(ALIGNED)[1]
+        as_dictionary = mgr.calculate_size(
+            ALIGNED, base_font=DICT_RESULT_FONT,
+            vertical_padding=DICT_RESULT_CHROME_PX)[1]
+        assert as_dictionary < as_popup

@@ -38,6 +38,12 @@ FURIGANA_SEPARATOR_PX = 17
 # pads the labels with spaces so every value starts at the same column.
 DICT_RESULT_FONT = ('Consolas', 10)
 
+# Everything in the dictionary result window that is not the text box: the main
+# frame's 15px padding top and bottom, plus the button row (29px) and the 12px
+# gap above it. Measured, and much smaller than the popup's 100px because this
+# window has no header, no furigana block and no second button row.
+DICT_RESULT_CHROME_PX = 71
+
 # Dictionary button colors (dark red) - consistent with dictionary_mode.py
 DICT_BUTTON_COLOR = "#822312"  # Dark red (main color)
 DICT_BUTTON_ACTIVE = '#9A3322'  # Lighter red (hover/active)
@@ -384,7 +390,8 @@ class QuickTranslateManager:
             # Widget destroyed
             self._loading_animation_running = False
 
-    def calculate_size(self, text: str) -> Tuple[int, int]:
+    def calculate_size(self, text: str, base_font: Tuple[str, int] = ('Segoe UI', 11),
+                       vertical_padding: int = 100) -> Tuple[int, int]:
         """Calculate optimal popup dimensions based on text content.
 
         Uses 20% safety margin on line height for cross-machine font rendering
@@ -392,6 +399,16 @@ class QuickTranslateManager:
 
         Args:
             text: The text to display
+            base_font: The font the text will actually be rendered in. The
+                defaults are the popup's own, so existing callers are unchanged;
+                a caller that renders in anything else MUST say so, or the row
+                height is measured against the wrong font. The dictionary result
+                window renders in DICT_RESULT_FONT, whose rows are 5px shorter
+                than Segoe UI 11's - it used to reserve a line's worth of empty
+                space per line because of exactly that.
+            vertical_padding: Pixels this window spends on everything that is not
+                the text box. The default describes the popup (header, furigana
+                block, button row); the dictionary window passes its own.
 
         Returns:
             Tuple of (width, height) in pixels
@@ -409,13 +426,13 @@ class QuickTranslateManager:
 
         # Padding - HORIZONTAL_PADDING lives at module scope (shared with the
         # furigana height estimate)
-        VERTICAL_PADDING = 100   # header + footer + margins
+        VERTICAL_PADDING = vertical_padding   # header + footer + margins
 
         # Font with 20% safety margin for cross-machine compatibility
         try:
-            ui_font = font.Font(family='Segoe UI', size=11)
+            ui_font = font.Font(family=base_font[0], size=base_font[1])
         except tk.TclError:
-            ui_font = font.Font(family='Arial', size=11)
+            ui_font = font.Font(family='Arial', size=base_font[1])
 
         base_line_height = ui_font.metrics("linespace")
         LINE_HEIGHT = int(base_line_height)
@@ -1694,9 +1711,14 @@ class QuickTranslateManager:
                                      HIGHLIGHT_COLORS,
                                      annotate=self._ruby_enabled())
 
-        # Calculate size based on result text (MIN_HEIGHT already in calculate_size)
-        width, height = self.calculate_size(display_text)
-        height = height + 30  # Title bar compensation for Toplevel window
+        # Calculate size based on result text (MIN_HEIGHT already in calculate_size).
+        # This window renders in DICT_RESULT_FONT and has far less chrome than the
+        # popup, so it must say so - measuring it as a popup reserved 139px of empty
+        # space on a 12-line result and 199px on a 24-line one. There is no title-bar
+        # compensation here: geometry() sets the client area, so the title bar is
+        # already outside the number.
+        width, height = self.calculate_size(display_text, base_font=DICT_RESULT_FONT,
+                                            vertical_padding=DICT_RESULT_CHROME_PX)
         height += overhead_px(runs, width - HORIZONTAL_PADDING,
                               base_font=DICT_RESULT_FONT, line_spacing=0)
 
@@ -1802,9 +1824,8 @@ class QuickTranslateManager:
             base_line_height = 18
             avg_char_width = 8
 
-        VERTICAL_PADDING = 100
         LINE_HEIGHT = int(base_line_height)
-        text_height = max(1, (height - VERTICAL_PADDING) // LINE_HEIGHT)
+        text_height = max(1, (height - DICT_RESULT_CHROME_PX) // LINE_HEIGHT)
         text_width = max(30, width // avg_char_width)
 
         result_text = RubyText(main_frame, wrap=tk.WORD,

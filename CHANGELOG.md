@@ -4,7 +4,40 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Deferred cleanup — D1 + D2 (2026-08-28)
+
+**Fixed**
+- **Dictionary result window no longer reserves a band of empty space.** `calculate_size()` sized
+  it as if it were the quick-translate popup: Segoe UI 11 rows (20 px) against a window that
+  renders `DICT_RESULT_FONT` (Consolas 10, 15 px rows), plus the popup's 100 px of chrome and a
+  30 px "title bar compensation" on a window whose chrome is 71 px and whose title bar sits
+  outside `geometry()` entirely. Measured on the real window: **139 px** of dead space under a
+  12-line lookup and **199 px** under a 24-line one — the waste grew with the result, which is
+  why `DEFERRED.md` recorded it as a flat "~154 px". Now **15 px** in every case, exactly the one
+  spare row `calculate_size()` deliberately adds.
+- Dead `Any` import in `src/core/translation.py` (D2), removed while its line was being touched
+  for the first time since it was flagged.
+
+**Changed**
+- `QuickTranslateManager.calculate_size(text, base_font=('Segoe UI', 11), vertical_padding=100)`
+  — the two things it had hard-coded are now parameters. The defaults are the popup's own values,
+  so both existing callers are unchanged byte-for-byte (a test asserts the equality). A caller
+  that renders in another font must now say so.
+- New `DICT_RESULT_CHROME_PX = 71` next to `DICT_RESULT_FONT`. Both halves of
+  `show_dictionary_result()` — the window height and the row count derived from it — subtract the
+  same constant; a source-level test asserts they cannot drift apart again.
+
+**Tests**: 450 → 458. New `TestWindowFitsItsContent` in `tests/test_dictionary_ruby.py`: the
+empty band is non-negative (nothing clipped) and under three rows, for short/long results ×
+furigana on/off; the band does not grow with the result; the popup default is untouched. Verified
+as real regression tests — 6 of the 8 fail against the previous sizing code.
+
+**Note on the fix's durability**: 71 px is measured on this machine's theme and DPI, like the 100
+it replaces. If it under-estimates on another setup the box is slightly short rather than
+over-tall, and `RubyText` binds the mouse wheel, so the text stays reachable — this window has no
+scrollbar. An exact alternative (build the widget hidden, measure `ypixels`, then set the
+geometry) was considered and rejected as too large a change for a cosmetic bug: it reorders window
+creation and makes `overhead_px()` redundant at this call site.
 
 ## [1.9.19] - Furigana everywhere (2026-08-18)
 

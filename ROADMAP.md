@@ -27,10 +27,9 @@ _No active items._ The next task has not been chosen yet.
 ## Backlog — identified, not scheduled
 
 Reviewed at this milestone start (post-1.9.19). Full context for each item is in `DEFERRED.md`;
-this table exists so nothing is silently forgotten when picking the next task.
+this table exists so nothing is silently forgotten when picking the next task. D1 (dictionary
+window height) and D2 (dead import) were fixed on 2026-08-28 and have left both files.
 
 | ID | Item | Effort | Status |
 |----|------|--------|--------|
-| D1 | Dictionary result window reserves ~154 px more height than its content (cosmetic, pre-dates furigana) | Small | 📋 Revisit when popup sizing is touched |
-| D2 | Dead import `Any` in `src/core/translation.py` | Trivial | 📋 Fold into the next edit of that import line |
 | D3 | Furigana reading colour — blue `#80b8ff` (what the code always asked for) vs the white users actually saw before F2 fixed the ttkbootstrap bug | Trivial | ⏸ **Blocked on a decision from the user** — do not change in either direction unilaterally |
