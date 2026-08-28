@@ -30,7 +30,8 @@ import math
 import tkinter as tk
 from contextlib import contextmanager
 from tkinter import font
-from typing import Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple
+from typing import (Callable, Dict, List, NamedTuple, Optional, Sequence,
+                    Set, Tuple)
 
 from src.core import furigana
 from src.core.furigana import RubySegment
@@ -88,17 +89,27 @@ class LayoutModel(NamedTuple):
         line_spacing: spacing1 + spacing3, added once per logical line.
         char_width: Pixel advance of a single base character.
         ruby_width: Pixel width of the embedded frame for (base, reading).
+        lift: Pixels plain text is raised on a logical line that carries ruby,
+            so its baseline meets the base characters inside the frames. A row
+            of lifted plain text is that much taller; a row that has ruby on it
+            is not, the frame already dominates its height.
     """
     content_plain: int
     content_ruby: int
     line_spacing: int
     char_width: Callable[[str], int]
     ruby_width: Callable[[str, str], int]
+    lift: int = 0
 
     @property
     def row_plain(self) -> int:
         """Height of one `height` unit - the Text option counts base-font rows."""
         return self.content_plain + self.line_spacing
+
+    @property
+    def content_lifted(self) -> int:
+        """Height of a plain display row that shares its line with ruby."""
+        return self.content_plain + self.lift
 
     @property
     def row_ruby(self) -> int:
@@ -107,20 +118,28 @@ class LayoutModel(NamedTuple):
 
 
 class RowCounts(NamedTuple):
-    """Display rows produced by a wrap simulation."""
+    """Display rows produced by a wrap simulation.
+
+    `lifted_rows` are plain rows that happen to sit on a logical line which
+    carries ruby somewhere else - a wrapped Japanese sentence whose tail lands
+    on its own row. They are taller than `plain_rows` by the model's lift.
+    """
     plain_rows: int
     ruby_rows: int
     logical_lines: int
+    lifted_rows: int = 0
 
 
 # Used when no Tk display is available (headless tests, early startup). The
 # numbers are the measured Yu Gothic 11/7 values.
 FALLBACK_LAYOUT = LayoutModel(
     content_plain=20,
-    content_ruby=39,
+    content_ruby=34,
     line_spacing=2 * LINE_SPACING,
     char_width=lambda ch: 11,
-    ruby_width=lambda base, ruby: max(len(base) * 20, len(ruby) * 8) + 4,
+    ruby_width=lambda base, ruby: (max(len(base) * 20, len(ruby) * 8)
+                                   + 2 * RUBY_PAD_X),
+    lift=5 + RUBY_PAD_Y,          # Yu Gothic 11 descent, measured
 )
 
 
@@ -149,12 +168,28 @@ def tk_layout_model(base_font=None, ruby_font=None,
             difference on every line.
 
     The row heights are derived, not guessed:
-        frame = ruby linespace + base linespace + 2 * RUBY_PAD_Y
-        ruby  = frame + base descent      (align='baseline' hangs it above)
-        plain = base linespace
+        frame  = ruby linespace + base linespace + 2 * RUBY_PAD_Y
+        ruby   = frame                     (align='baseline' hangs it above)
+        plain  = base linespace
+        lift   = base descent + RUBY_PAD_Y
+        lifted = plain + lift
     plus line_spacing once per logical line. Verified against Text.dlineinfo()
-    and Text.count(..., 'ypixels') on Tk 8.6: 47 px for a standalone ruby line,
-    28 px plain, 86 px for a ruby line wrapped across two display rows.
+    and Text.count(..., 'ypixels') on Tk 8.6: 42 px for a standalone ruby line,
+    28 px plain, 76 px for a ruby line wrapped across two display rows.
+
+    A ruby row is the bare frame, with nothing below the baseline. It used to be
+    `frame + base descent`: the plain text on the row hung its descent under the
+    baseline the frame was sitting on. Lifting that text removes the overhang,
+    which is why annotated lines came out 5px shorter when the lift landed.
+
+    `lift` is what `align='baseline'` costs. Tk puts the *bottom of the frame*
+    on the line's baseline, so the base characters inside it end up exactly one
+    descent (plus the frame's bottom padding) above the baseline that the plain
+    text around them sits on - measured at 6 px with Yu Gothic 11, and plainly
+    visible as text that does not line up. RubyText cancels it by raising the
+    plain runs on that line by the same amount, which makes those runs' rows
+    taller. A row that carries ruby absorbs it (the frame is taller anyway); a
+    row of plain text on the same logical line does not, hence content_lifted.
     """
     base_spec = _as_font_tuple(base_font, BASE_FONT_SIZE)
     ruby_spec = _as_font_tuple(ruby_font, RUBY_FONT_SIZE)
@@ -186,10 +221,11 @@ def tk_layout_model(base_font=None, ruby_font=None,
 
     return LayoutModel(
         content_plain=base_line,
-        content_ruby=frame_height + base_descent,
+        content_ruby=frame_height,
         line_spacing=line_spacing,
         char_width=char_width,
         ruby_width=ruby_width,
+        lift=base_descent + RUBY_PAD_Y,
     )
 
 
@@ -212,6 +248,8 @@ def layout_rows(segments: Sequence[RubySegment], available_px: int,
     available_px = max(int(available_px), 40)
 
     rows: List[bool] = []          # True when the row carries ruby
+    lifted = 0                     # plain rows sharing a line with ruby
+    line_rows: List[bool] = []     # rows of the logical line being built
     logical_lines = 1
     row_width = 0
     row_has_ruby = False
@@ -219,8 +257,20 @@ def layout_rows(segments: Sequence[RubySegment], available_px: int,
     def close_row() -> None:
         nonlocal row_width, row_has_ruby
         rows.append(row_has_ruby)
+        line_rows.append(row_has_ruby)
         row_width = 0
         row_has_ruby = False
+
+    def close_line() -> None:
+        """Charge the lift once the whole logical line is known.
+
+        It cannot be decided per row: the ruby may arrive after the plain run
+        that shares its line, and the lift is a property of the line.
+        """
+        nonlocal lifted
+        if any(line_rows):
+            lifted += sum(1 for has_ruby in line_rows if not has_ruby)
+        line_rows.clear()
 
     for base, ruby in segments:
         if ruby:
@@ -236,6 +286,7 @@ def layout_rows(segments: Sequence[RubySegment], available_px: int,
         for width, is_ruby in atoms:
             if width < 0:
                 close_row()
+                close_line()
                 logical_lines += 1
                 continue
             if row_width and row_width + width > available_px:
@@ -244,9 +295,11 @@ def layout_rows(segments: Sequence[RubySegment], available_px: int,
             row_has_ruby = row_has_ruby or is_ruby
 
     close_row()
+    close_line()
 
     ruby_rows = sum(1 for has_ruby in rows if has_ruby)
-    return RowCounts(len(rows) - ruby_rows, ruby_rows, logical_lines)
+    return RowCounts(len(rows) - ruby_rows - lifted, ruby_rows,
+                     logical_lines, lifted)
 
 
 def measure_px(segments: Sequence[RubySegment], available_px: int,
@@ -257,6 +310,7 @@ def measure_px(segments: Sequence[RubySegment], available_px: int,
         model = tk_layout_model(base_font, ruby_font)
     counts = layout_rows(segments, available_px, model)
     return (counts.plain_rows * model.content_plain
+            + counts.lifted_rows * model.content_lifted
             + counts.ruby_rows * model.content_ruby
             + counts.logical_lines * model.line_spacing)
 
@@ -410,19 +464,19 @@ class RubyText(tk.Text):
     """
 
     PLAIN_TAG = 'ruby_plain'
+    LIFT_TAG = 'ruby_lift'
     _INSERT_MARK = 'ruby_insert'
 
     def __init__(self, parent, *, base_font=None, ruby_font=None,
                  bg: str = DEFAULT_BG, base_fg: str = BASE_FG,
                  kanji_fg: str = KANJI_FG, ruby_fg: str = RUBY_FG,
-                 ruby_bg: str = RUBY_BG, wheel_units: int = WHEEL_UNITS,
+                 ruby_bg: Optional[str] = None, wheel_units: int = WHEEL_UNITS,
                  **kwargs):
         self.base_font = _as_font_tuple(base_font, BASE_FONT_SIZE)
         self.ruby_font = _as_font_tuple(ruby_font, RUBY_FONT_SIZE)
         self._base_fg = base_fg
         self._kanji_fg = kanji_fg
         self._ruby_fg = ruby_fg
-        self._ruby_bg = ruby_bg
         self._wheel_units = wheel_units
 
         kwargs.setdefault('wrap', tk.CHAR)
@@ -437,15 +491,34 @@ class RubyText(tk.Text):
 
         super().__init__(parent, bg=bg, **kwargs)
 
+        # A ruby pair carries no plate of its own: it takes the widget's real
+        # background, read back after construction so a ttkbootstrap re-theme is
+        # picked up too. That is the Word look - an annotated word is ordinary
+        # text with a reading over it, not a tinted chip. RUBY_BG remains the
+        # fallback, and a caller can still pass one to get a deliberate plate.
+        if ruby_bg is None:
+            try:
+                ruby_bg = str(self.cget('bg'))
+            except tk.TclError:
+                ruby_bg = RUBY_BG
+        self._ruby_bg = ruby_bg
+
         self.tag_configure(self.PLAIN_TAG, font=self.base_font,
                            foreground=base_fg)
 
         self._segments: List[RubySegment] = []
         self._frames: List[tk.Frame] = []
         self._window_base: Dict[str, str] = {}
+        self._lifted_lines: Set[int] = set()
         self._layout: Optional[LayoutModel] = None
 
+        # Cancels what align='baseline' costs: see tk_layout_model. Applied to
+        # whole logical lines that carry ruby, never to the widget at large -
+        # lifting a line with no frames on it would only make it taller.
+        self.tag_configure(self.LIFT_TAG, offset=self.layout.lift)
+
         self.bind('<MouseWheel>', self._on_wheel)
+        self.bind('<<Copy>>', self._on_copy)
 
     # ------------------------------------------------------------------ #
     # Insertion
@@ -508,6 +581,7 @@ class RubyText(tk.Text):
                 if mark:
                     self.mark_unset(mark)
         self._segments.extend(segments)
+        self._refresh_lift()
 
     def _insert_pair(self, index, base: str, ruby: str,
                      kanji_fg: Optional[str] = None) -> None:
@@ -532,6 +606,35 @@ class RubyText(tk.Text):
         self.window_create(index, window=frame, align='baseline')
         self._frames.append(frame)
         self._window_base[str(frame)] = base
+
+        # An embedded window can be addressed by its path name, so this is the
+        # frame's real line rather than a guess from the insertion index.
+        try:
+            self._lifted_lines.add(int(str(self.index(frame)).split('.')[0]))
+        except (tk.TclError, ValueError):      # pragma: no cover - defensive
+            pass
+
+    def _refresh_lift(self) -> None:
+        """Re-apply the baseline lift to every logical line that carries ruby.
+
+        Re-applied rather than applied once, because a Tk tag does not grow into
+        text inserted after its range: the dictionary window builds a line one
+        run at a time, and a plain run added after the ruby would otherwise keep
+        the unlifted baseline and sit 6px low next to the word before it.
+
+        Line numbers are recorded when a frame is embedded. Every call site
+        appends, so they stay valid; a line that has gone away is dropped.
+        """
+        for line in tuple(self._lifted_lines):
+            try:
+                # '+1c' takes in the newline that ends the line. It is a
+                # character like any other: left unlifted it keeps its full
+                # descent below the baseline and adds it to whichever display
+                # row it lands on, which is the last one - measured as 5px of
+                # slack under the final row of every annotated paragraph.
+                self.tag_add(self.LIFT_TAG, f'{line}.0', f'{line}.end +1c')
+            except tk.TclError:                # pragma: no cover - defensive
+                self._lifted_lines.discard(line)
 
     def insert_ruby(self, index, text: str, lang_hint: Optional[str] = None,
                     tags=None, kanji_fg: Optional[str] = None) -> None:
@@ -566,6 +669,7 @@ class RubyText(tk.Text):
         with self._editable():
             self.insert(index, text, tags)
         self._segments.append(RubySegment(text, None))
+        self._refresh_lift()
 
     def set_ruby(self, text: str, lang_hint: Optional[str] = None,
                  tags=None) -> None:
@@ -595,6 +699,7 @@ class RubyText(tk.Text):
         self._segments.clear()
         self._frames.clear()
         self._window_base.clear()
+        self._lifted_lines.clear()
 
     # ------------------------------------------------------------------ #
     # Readback
@@ -617,6 +722,30 @@ class RubyText(tk.Text):
             elif key == 'window':
                 parts.append(self._window_base.get(value, ''))
         return ''.join(parts)
+
+    def _on_copy(self, _event=None):
+        """Put the selection on the clipboard with its annotated words intact.
+
+        Tk's own <<Copy>> exports the selected *characters*, and an embedded
+        window has none - so every word carrying a reading silently vanished
+        from anything the user selected and copied by hand, while the Copy
+        buttons (which go through get_plain) were fine. Readings are left out
+        on purpose: what is copied is the text, 日本語, not 日本語(にほんご).
+        """
+        try:
+            first, last = self.index('sel.first'), self.index('sel.last')
+        except tk.TclError:
+            return None                        # nothing selected - let Tk be
+        text = self.get_plain(first, last)
+        if not text:
+            return None
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(text)
+        except tk.TclError as e:               # pragma: no cover - defensive
+            logging.debug(f"RubyText copy failed: {e}")
+            return None
+        return 'break'
 
     # ------------------------------------------------------------------ #
     # Sizing

@@ -47,11 +47,13 @@ FURIGANA_DEFAULT_BG = '#2b2b2b'      # popup background
 FURIGANA_BASE_FG = '#cccccc'         # plain (unannotated) runs
 FURIGANA_KANJI_FG = '#ffffff'        # base characters under a reading
 FURIGANA_RUBY_FG = '#80b8ff'         # the reading itself
-FURIGANA_RUBY_BG = '#363636'         # subtle plate behind a ruby pair
+FURIGANA_RUBY_BG = '#363636'         # opt-in plate; RubyText matches its own bg instead
 
 FURIGANA_LINE_SPACING = 4            # spacing1 == spacing3 on the Text widget
-FURIGANA_RUBY_PAD_X = 2              # per side, on both ruby labels
-FURIGANA_RUBY_PAD_Y = 1              # outer padding above reading / below base
+FURIGANA_RUBY_PAD_X = 0              # per side, on both ruby labels (0 = Word-like, no gap)
+FURIGANA_RUBY_PAD_Y = 1              # padding above the reading and below the base. The
+                                     # bottom half is charged back by the baseline lift, so
+                                     # changing it keeps the two in step - see ruby_text.
 FURIGANA_WHEEL_UNITS = 3             # lines scrolled per wheel notch
 FURIGANA_DEFAULT_MAX_ROWS = 12       # rows a RubyText grows to before scrolling
 

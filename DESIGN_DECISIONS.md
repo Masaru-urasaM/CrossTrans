@@ -5,6 +5,76 @@ approaches. Newest first.
 
 ---
 
+### Decision 10 — Word-like ruby: lift the plain text, drop the plate
+
+**Date**: 2026-08-28
+**Status**: RESOLVED
+
+**Problem**: two defects reported together. (1) Selecting annotated text and pressing Ctrl+C put
+only the *unannotated* characters on the clipboard — every word carrying a reading vanished.
+(2) Plain text and annotated words on the same line did not sit on the same baseline, so a
+Japanese sentence read as a jumble instead of a line. The ask was Word's behaviour: base
+characters level and evenly spaced, readings above them.
+
+**Measured cause**: `Text.get()` returns zero characters for an embedded window, and Tk's default
+`<<Copy>>` exports the selected characters. Separately, `window_create(align='baseline')` aligns
+the *bottom of the window* with the line's baseline, so the base characters inside the frame end
+up one descent + the frame's bottom padding above it — 6 px with Yu Gothic 11. All four `align`
+values were measured; none produces a shared baseline.
+
+**Options considered**:
+1. **Clip the frame at the base label's baseline** — Pros: no compensation anywhere else. Cons:
+   the descent has to go somewhere; a Frame clips its children, so glyphs get their bottoms cut.
+   Rejected outright.
+2. **Lift the plain text of every widget that has any ruby** — Pros: one flag, no per-line
+   bookkeeping. Cons: every plain row in that widget grows 5 px. In the dictionary result window
+   that is ~20 rows — it would silently grow back most of the ~150 px D1 had just removed.
+3. **Lift only the logical lines that carry ruby** (chosen) — Pros: a ruby line barely changes
+   height (47 → 42 px, it actually *shrinks*, because the plain text no longer hangs below the
+   frame's baseline); plain paragraphs are untouched. Cons: `layout_rows()` needs a third row
+   kind for plain rows that share a line with ruby, and the tag must be re-applied after each
+   insertion since a Tk tag does not grow into text appended after its range.
+4. **Measure the built widget instead of modelling it** — Pros: exact. Cons: the popup sizes its
+   `overrideredirect` Toplevel before the widget exists; the model is not optional.
+
+**Resolution**: option 3, plus the `<<Copy>>` override (`get_plain()` over the selection, bases
+only — 日本語, not 日本語(にほんご)), plus the Word look the user chose: the ruby pair takes the
+widget's own background instead of the `#363636` plate, and `FURIGANA_RUBY_PAD_X` drops to 0, so
+an annotated word is exactly as wide as its characters. Verified on real widgets: baseline delta
+0 px on every annotated word (was −6), frame width equal to the plain width of the same
+characters (was +4), Ctrl+C round-trips the source text exactly. `FURIGANA_RUBY_BG` is kept as
+the fallback and as an opt-in `ruby_bg=` for a deliberate plate; `RubyRow` chips are untouched.
+
+**References**: `src/ui/ruby_text.py` (`_on_copy`, `_refresh_lift`, `LIFT_TAG`,
+`tk_layout_model`, `layout_rows`); `src/constants.py` (`FURIGANA_RUBY_PAD_X`,
+`FURIGANA_RUBY_BG`); `tests/test_ruby_text.py` (`TestCopySelection`, `TestBaselineAlignment`,
+`TestWordLikeRhythm`); CLAUDE.md "Renderer: src/ui/ruby_text.py".
+
+### Decision 9 — Furigana readings stay blue (`#80b8ff`)
+
+**Date**: 2026-08-28
+**Status**: RESOLVED
+
+**Problem**: readings render blue. Before Phase F2 they rendered white — but not by choice.
+ttkbootstrap was silently discarding the explicit colour kwarg at widget construction, so the
+blue the code had always asked for never reached the screen. F2 fixed the mechanism
+(`NO_AUTOSTYLE`), which made the blue visible for the first time. So the question was never
+"should we change the colour" but "which of the two was ever intended".
+
+**Options considered**:
+1. **Keep blue `#80b8ff`** — Pros: what the code always specified; separates the reading from the
+   base character at a glance, which is the whole point of a reading; survives on the `#363636`
+   plate. Cons: less like print furigana, which is monochrome.
+2. **Revert to white `#ffffff`** — Pros: what users actually saw for two releases; closer to
+   Word/print. Cons: reinstates a bug's side effect as a design choice; a white reading over a
+   white base character is hard to tell apart at 7pt.
+
+**Resolution**: keep blue. Confirmed by the user on 2026-08-28. `FURIGANA_RUBY_FG` is unchanged —
+this decision exists so the question is not reopened from the white-was-intended angle again.
+
+**References**: `src/constants.py` (`FURIGANA_RUBY_FG`); CLAUDE.md Known Issues (the ttkbootstrap
+entry); `src/ui/ruby_text.py` (`NO_AUTOSTYLE`); was D3 in `DEFERRED.md`.
+
 ### Decision 8 — Furigana everywhere: annotate at render time, structured segments, fail-safe readings
 
 **Date**: 2026-08-04 (addenda: Phase 1 2026-08-05, Phase 4 2026-08-07, Phases 5-6 2026-08-10,

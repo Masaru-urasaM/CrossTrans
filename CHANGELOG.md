@@ -4,6 +4,55 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Furigana reads like Word — copy, baseline, plate (2026-08-28)
+
+**Fixed**
+- **Copying selected text no longer drops the annotated words.** Selecting Japanese in any
+  furigana surface and pressing Ctrl+C put only the unannotated characters on the clipboard:
+  `これは日本語を勉強しています。` came out as `これはしています。` — 日本語 and 勉強 gone. Tk's
+  own `<<Copy>>` exports the selected *characters*, and an embedded window has none. The Copy
+  *buttons* were never affected; they already went through `get_plain()`. `RubyText` now handles
+  `<<Copy>>` itself and copies the base text only — 日本語, never 日本語(にほんご) — which is
+  what was asked for. Partial selections and single annotated words work the same way.
+- **Base characters now share one baseline with the text around them.** `window_create`'s
+  `align='baseline'` aligns the *bottom of the frame* with the line's baseline, so every word
+  carrying a reading sat 6 px higher than the plain kana beside it (measured; all four `align`
+  values were tried and none aligns baselines). The plain runs of a ruby-carrying line are now
+  raised by the same amount, so the delta is 0 px.
+
+**Changed**
+- **The ruby plate is gone.** An annotated word takes the widget's own background instead of
+  `#363636`, so it reads as ordinary text with a reading over it rather than a tinted chip —
+  the way Word draws ruby. `FURIGANA_RUBY_BG` remains as the fallback and as an opt-in
+  (`ruby_bg=`), and the dictionary word chips are unaffected: they carry their own colours.
+- **`FURIGANA_RUBY_PAD_X` = 2 → 0.** An annotated word is now exactly as wide as its characters
+  unless its reading is wider, so a line of mixed plain and annotated text keeps an even
+  rhythm. Measured: frame width 45 px against 45 px of plain characters (was 49).
+- **A line carrying ruby got shorter**: 47 px → 42 px. With the plain text lifted, nothing on
+  that row hangs below the frame's baseline any more, so the row is the bare frame.
+- Readings stay blue (`#80b8ff`) — the last open deferred item, D3, resolved by the user. See
+  Decision 9. No code change; the colour the code always asked for was only ever hidden by the
+  ttkbootstrap bug F2 fixed.
+
+**Implementation notes**
+- The lift is applied per *logical line*, only to lines that actually carry ruby. Lifting every
+  plain line instead would have added ~5 px per row to the dictionary result window — most of
+  the ~150 px the D1 fix had just removed.
+- It is re-applied after every insertion: a Tk tag does not grow into text appended after its
+  range, and the dictionary window builds each line one run at a time.
+- The line's terminating newline is lifted with it. A newline is a character; left unlifted it
+  keeps its full descent and hands 5 px of slack to the last row of the paragraph.
+- `layout_rows()` gained a third row kind for plain rows that share a line with ruby, since
+  those *are* taller. `RowCounts` and `LayoutModel` grew defaulted trailing fields, so existing
+  callers and tests are unaffected.
+
+**Tests**: 460 → 476. `TestCopySelection`, `TestBaselineAlignment` and `TestWordLikeRhythm` in
+`tests/test_ruby_text.py`, plus a new `mapped_widget` fixture — the shared `tk_root` is
+withdrawn, so embedded frames are never mapped there and report `winfo_y() == 0` forever;
+anything measuring where a pair actually landed needs a real Toplevel. Verified as real
+regression tests: with the lift and the copy handler disabled, 5 of them fail with exactly the
+reported symptoms (33 vs 39 px, clipboard missing the annotated words).
+
 ### Deferred cleanup — D1 + D2 (2026-08-28)
 
 **Fixed**

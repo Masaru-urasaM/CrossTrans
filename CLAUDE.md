@@ -518,8 +518,14 @@ display rather than receiving pre-annotated strings through the queue.
   zero characters for an embedded window while consuming one index, so `get()` silently deletes
   every annotated word from Copy / Replace / re-send paths. `get_plain()` rebuilds the true
   text from `dump(text=True, window=True)`.
+- **`<<Copy>>` is overridden for the same reason** (`_on_copy`). Tk's own binding exports the
+  selected *characters*, so a hand-made selection + Ctrl+C used to drop every word carrying a
+  reading — the Copy buttons were fine, because they go through `get_plain()`. The handler
+  copies the bases only: 日本語, never 日本語(にほんご). It returns `'break'` (that is what stops
+  the default binding from putting the character-only version back), and `None` when nothing is
+  selected, so Tk keeps its normal behaviour.
 - **`fit_height(available_px)` — never set `height` from a line count.** The option counts rows
-  of the base font (28 px) but a row carrying ruby is 47 px. `layout_rows()` simulates the
+  of the base font (28 px) but a row carrying ruby is 42 px. `layout_rows()` simulates the
   `wrap='char'` layout and the pixel requirement is converted to `height` units. Row heights
   are derived from `font.metrics`, matching `Text.count(..., 'ypixels')` exactly.
 - `estimate_notation_px()` sizes a window *before* the widget exists — required for the popup,
@@ -531,14 +537,38 @@ display rather than receiving pre-annotated strings through the queue.
 
 ### Key details:
 - **Embedded frames, not monospace text** — each pair is a `tk.Frame` holding two `tk.Label`s,
-  inserted with `window_create(align='baseline')` so the base characters stay level with
-  surrounding text at any font size.
+  inserted with `window_create(align='baseline')`.
+- **`align='baseline'` does not actually align baselines — the lift does.** Tk puts the *bottom
+  of the frame* on the line's baseline, so the base characters inside it end up one base-font
+  descent (plus the frame's bottom padding) **above** the baseline the surrounding plain text
+  sits on: 6 px with Yu Gothic 11, measured, and plainly visible as text that does not line up.
+  None of `top` / `center` / `bottom` fixes it either (all four were measured). `RubyText`
+  cancels it by raising the plain runs of that line with `tag_configure(LIFT_TAG, offset=lift)`,
+  `lift = base descent + RUBY_PAD_Y`. Consequences, all load-bearing:
+  - **Only lines that carry ruby are lifted**, never the widget at large — lifting a plain line
+    just makes it 5 px taller, which is how the dictionary window would grow back the ~150 px
+    D1 removed.
+  - **The line's ending is lifted too** (`{line}.end +1c`). A newline is a character: left
+    unlifted it keeps its full descent and hands it to the last display row of the paragraph.
+  - **The lift is re-applied after every insertion** (`_refresh_lift`). A Tk tag does not grow
+    into text inserted after its range, and the dictionary window builds a line one run at a
+    time, so a plain run added after the ruby would keep the old baseline.
+  - **A ruby row lost the base descent**: 47 px → 42 px, because the plain text on it no longer
+    hangs below the frame's baseline. `content_ruby` is the bare frame now.
+  - **A plain row on a ruby-carrying line is taller** (`content_lifted`), which `layout_rows()`
+    counts separately — a wrapped Japanese sentence whose tail lands on its own row.
+- **No plate, no side padding — the Word look.** A ruby pair takes the widget's own background
+  (read back after construction, so a ttkbootstrap re-theme is picked up), and
+  `FURIGANA_RUBY_PAD_X = 0`, so an annotated word occupies exactly the width its characters
+  occupy unless its reading is wider. `FURIGANA_RUBY_BG` survives as the fallback and as an
+  opt-in: pass `ruby_bg=` to get a deliberate plate. The dictionary chips are unaffected —
+  `RubyRow` carries its own `padx`/`pady` and is always given an explicit colour.
 - **`autostyle=False` on the ruby frame and labels** — ttkbootstrap would otherwise repaint them
   (see Known Issues). The `RubyText` widget itself stays themed so it matches its parent frame.
 - **Word wrap**: `wrap=tk.CHAR` by default, but the popup's output box passes `wrap=tk.WORD` and
   `base_font=('Segoe UI', 11)` to keep Latin translations looking exactly as before.
 - **Fonts/colors** (defaults): Yu Gothic 11pt base (`#ffffff` under a reading, `#cccccc` plain),
-  Yu Gothic 7pt reading (`#80b8ff`), ruby plate `#363636`
+  Yu Gothic 7pt reading (`#80b8ff` — confirmed, see Decision 9), ruby background = the widget's
 - **Every tuning knob lives in `src/constants.py`** under the `FURIGANA_` prefix — the two cost
   caps, the prewarm sample, the fonts and palette, the Reading pane's debounce and row cap. The
   engine, `ruby_text.py` and `app.py` alias them to their local names; change a value there and
