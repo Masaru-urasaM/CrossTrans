@@ -360,16 +360,15 @@ def show_result(tk_root):
 
 
 def ruby_bases(box):
-    """Base text of every ruby pair in the widget, read off the labels."""
-    return [frame.winfo_children()[1].cget('text') for frame in box._frames]
+    """Base text of every ruby pair in the widget."""
+    return [box.pair_base_text(frame) for frame in box._frames]
 
 
 def ruby_color(box, base):
-    """Foreground of the base label of the ruby pair for `base`."""
+    """Foreground of the base characters of the ruby pair for `base`."""
     for frame in box._frames:
-        label = frame.winfo_children()[1]
-        if label.cget('text') == base:
-            return str(label.cget('fg'))
+        if box.pair_base_text(frame) == base:
+            return str(box.pair_labels(frame)[1][0].cget('fg'))
     return None
 
 

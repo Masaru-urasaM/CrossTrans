@@ -578,6 +578,13 @@ display rather than receiving pre-annotated strings through the queue.
   base (`#80b8ff` on the selection background is unreadable). The original colours are recorded
   at insert time, not read back later, so a caller's `kanji_fg` (the dictionary's highlight
   colours) survives a deselect.
+- **A reading wider than its base spreads the base characters** (`_distributes`, Word's
+  均等割り付け). Tk clips a child to its frame, so a reading can never overhang into the text
+  beside it the way Word's can — its width is a floor on the word's width. Each character gets
+  its own equally weighted grid column instead, which puts half a gap at each edge and a full gap
+  between characters. A narrow reading keeps the single packed label, and a one-character base is
+  never split. **Read a pair's labels with `pair_labels()` / `pair_base_text()`**, never
+  `frame.winfo_children()` — a spread pair holds one label per character.
 - **No plate, no side padding — the Word look.** A ruby pair takes the widget's own background
   (read back after construction, so a ttkbootstrap re-theme is picked up), and
   `FURIGANA_RUBY_PAD_X = 0`, so an annotated word occupies exactly the width its characters

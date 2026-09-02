@@ -318,27 +318,30 @@ class TestInsertion:
     def test_kanji_fg_override_colours_the_base(self, widget):
         widget.insert_notation(tk.END, NOTATION, tags='mine', kanji_fg='#4ec9b0')
         for frame in widget._frames:
-            _reading, base = frame.winfo_children()
-            assert str(base.cget('fg')) == '#4ec9b0'
+            _reading, bases = widget.pair_labels(frame)
+            assert bases
+            for label in bases:
+                assert str(label.cget('fg')) == '#4ec9b0'
 
     def test_default_ruby_colours_survive_the_theme(self, widget):
         # ttkbootstrap re-themes standard tk widgets and discards explicit
         # colours unless autostyle=False; the reading must stay distinguishable.
         widget.insert_notation(tk.END, NOTATION)
-        reading, base = widget._frames[0].winfo_children()
+        reading, bases = widget.pair_labels(widget._frames[0])
         assert str(reading.cget('fg')) == R.RUBY_FG
-        assert str(base.cget('fg')) == R.KANJI_FG
+        assert str(bases[0].cget('fg')) == R.KANJI_FG
 
     def test_a_ruby_pair_wears_the_widgets_background(self, widget):
         # No plate: an annotated word is ordinary text with a reading over it,
         # the way Word draws ruby - not a tinted chip on the line.
         widget.insert_notation(tk.END, NOTATION)
         frame = widget._frames[0]
-        reading, base = frame.winfo_children()
+        reading, bases = widget.pair_labels(frame)
         expected = str(widget.cget('bg'))
         assert str(frame.cget('bg')) == expected
         assert str(reading.cget('bg')) == expected
-        assert str(base.cget('bg')) == expected
+        for label in bases:
+            assert str(label.cget('bg')) == expected
 
     def test_a_caller_can_still_ask_for_a_plate(self, tk_root):
         # The mechanism is kept: only the default changed.
@@ -481,7 +484,7 @@ class TestWheel:
         top.update()
 
         before = w.yview()[0]
-        label = w._frames[2].winfo_children()[1]
+        label = w.pair_labels(w._frames[2])[1][0]
         label.event_generate('<MouseWheel>', delta=-120, x=2, y=2)
         top.update_idletasks()
         after = w.yview()[0]
@@ -587,7 +590,7 @@ class TestBaselineAlignment:
         if plain is None:
             pytest.skip("Tk laid out nothing (headless display)")
         return (plain[1] + ascent,
-                [frame.winfo_y() + frame.winfo_children()[1].winfo_y() + ascent
+                [frame.winfo_y() + widget.pair_labels(frame)[1][0].winfo_y() + ascent
                  for frame in widget._frames])
 
     def test_every_annotated_word_shares_the_plain_baseline(self, mapped_widget):
@@ -639,10 +642,10 @@ class TestWordLikeRhythm:
         metrics = tkfont.Font(family=mapped_widget.base_font[0],
                               size=mapped_widget.base_font[1])
         for frame in mapped_widget._frames:
-            reading, base = frame.winfo_children()
+            reading, _bases = mapped_widget.pair_labels(frame)
             if frame.winfo_width() <= 1:
                 pytest.skip("Tk laid out nothing (headless display)")
-            natural = metrics.measure(base.cget('text'))
+            natural = metrics.measure(mapped_widget.pair_base_text(frame))
             assert frame.winfo_width() >= natural
             if metrics.measure(reading.cget('text')) <= natural:
                 assert frame.winfo_width() == natural
@@ -730,3 +733,88 @@ class TestSelectionHighlight:
     def test_it_is_harmless_without_ruby(self, widget):
         widget.insert_plain(tk.END, "nothing japanese here")
         self._select(widget, '1.0', 'end-1c')      # must not raise
+
+
+class TestEvenDistribution:
+    """A reading wider than its characters spreads them, Word's 均等割り付け.
+
+    Tk clips a child to its frame (a 51px label in a 40px frame renders at
+    40px), so a reading cannot hang out over the text beside it the way Word's
+    can - its width is a floor on the word's width. What is left is to decide
+    where the surplus goes: huddled around a centred word, or spread through it.
+    """
+
+    WIDE = "勉強"          # 勉強, read べんきょう - reading much wider
+    WIDE_READING = "べんきょう"
+    NARROW = "日本語"  # 日本語, read にほんご - reading narrower
+    NARROW_READING = "にほんご"
+    ONE_CHAR = "新"             # 新, read あたら
+
+    @staticmethod
+    def _insert(widget, base, ruby):
+        widget.clear()
+        widget.insert_segments(tk.END, (RubySegment(base, ruby),))
+        widget.update_idletasks()
+        widget.update()
+        return widget._frames[0]
+
+    def test_a_wide_reading_spreads_the_characters(self, mapped_widget):
+        frame = self._insert(mapped_widget, self.WIDE, self.WIDE_READING)
+        _reading, bases = mapped_widget.pair_labels(frame)
+        assert len(bases) == len(self.WIDE)
+
+    def test_a_narrow_reading_leaves_one_label(self, mapped_widget):
+        frame = self._insert(mapped_widget, self.NARROW, self.NARROW_READING)
+        _reading, bases = mapped_widget.pair_labels(frame)
+        assert len(bases) == 1
+        assert bases[0].cget('text') == self.NARROW
+
+    def test_a_single_character_is_never_split(self, mapped_widget):
+        # There is nothing to spread inside one character; it stays centred.
+        frame = self._insert(mapped_widget, self.ONE_CHAR, "あたら")
+        _reading, bases = mapped_widget.pair_labels(frame)
+        assert len(bases) == 1
+
+    def test_the_word_still_reads_back_whole(self, mapped_widget):
+        frame = self._insert(mapped_widget, self.WIDE, self.WIDE_READING)
+        assert mapped_widget.pair_base_text(frame) == self.WIDE
+        assert mapped_widget.get_plain() == self.WIDE
+
+    def test_the_surplus_lands_on_the_jis_rhythm(self, mapped_widget):
+        # Half a gap at each edge, a full gap between characters: what Tk gives
+        # when every column carries the same weight and centres its character.
+        frame = self._insert(mapped_widget, self.WIDE, self.WIDE_READING)
+        _reading, bases = mapped_widget.pair_labels(frame)
+        if frame.winfo_width() <= 1:
+            pytest.skip("Tk laid out nothing (headless display)")
+        positions = [label.winfo_x() for label in bases]
+        widths = [label.winfo_width() for label in bases]
+        left = positions[0]
+        inner = positions[1] - (positions[0] + widths[0])
+        right = frame.winfo_width() - (positions[-1] + widths[-1])
+        assert inner > 0, "the characters were not spread at all"
+        # 1:2:1, give or take Tk's integer rounding of an odd surplus.
+        assert abs((left + right) - inner) <= 2, (left, inner, right)
+
+    def test_the_frame_is_no_wider_than_the_reading_needs(self, mapped_widget):
+        frame = self._insert(mapped_widget, self.WIDE, self.WIDE_READING)
+        if frame.winfo_width() <= 1:
+            pytest.skip("Tk laid out nothing (headless display)")
+        metrics = tkfont.Font(family=mapped_widget.ruby_font[0],
+                              size=mapped_widget.ruby_font[1])
+        assert frame.winfo_width() == metrics.measure(self.WIDE_READING)
+
+    def test_a_spread_word_still_shares_the_baseline(self, mapped_widget):
+        frame = self._insert(mapped_widget, self.WIDE, self.WIDE_READING)
+        _reading, bases = mapped_widget.pair_labels(frame)
+        tops = {label.winfo_y() for label in bases}
+        assert len(tops) == 1, "the characters are not on one line"
+
+    def test_selection_recolours_every_character(self, mapped_widget):
+        frame = self._insert(mapped_widget, self.WIDE, self.WIDE_READING)
+        mapped_widget.tag_add('sel', '1.0', 'end-1c')
+        mapped_widget.event_generate('<<Selection>>')
+        mapped_widget.update()
+        _reading, bases = mapped_widget.pair_labels(frame)
+        selected = str(mapped_widget.cget('selectforeground'))
+        assert {str(label.cget('fg')) for label in bases} == {selected}

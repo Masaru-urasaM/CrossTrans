@@ -506,9 +506,18 @@ class RubyText(tk.Text):
         self.tag_configure(self.PLAIN_TAG, font=self.base_font,
                            foreground=base_fg)
 
+        try:
+            self._base_metrics = font.Font(family=self.base_font[0],
+                                           size=self.base_font[1])
+            self._ruby_metrics = font.Font(family=self.ruby_font[0],
+                                           size=self.ruby_font[1])
+        except tk.TclError:                    # pragma: no cover - defensive
+            self._base_metrics = self._ruby_metrics = None
+
         self._segments: List[RubySegment] = []
         self._frames: List[tk.Frame] = []
         self._window_base: Dict[str, str] = {}
+        self._window_labels: Dict[str, Tuple[tk.Label, List[tk.Label]]] = {}
         self._window_colors: Dict[str, Tuple[str, str, str]] = {}
         self._selected_frames: Set[str] = set()
         self._lifted_lines: Set[int] = set()
@@ -591,29 +600,50 @@ class RubyText(tk.Text):
         """Embed one reading-over-base frame at `index`."""
         frame = tk.Frame(self, bg=self._ruby_bg, bd=0, highlightthickness=0,
                          padx=0, pady=0, **NO_AUTOSTYLE)
+        base_fg = kanji_fg or self._kanji_fg
+        label_kwargs = dict(bg=self._ruby_bg, bd=0, padx=RUBY_PAD_X, pady=0,
+                            anchor='center', **NO_AUTOSTYLE)
         reading_label = tk.Label(frame, text=ruby, font=self.ruby_font,
-                                 fg=self._ruby_fg, bg=self._ruby_bg, bd=0,
-                                 padx=RUBY_PAD_X, pady=0, anchor='center',
-                                 **NO_AUTOSTYLE)
-        reading_label.pack(side='top', fill='x', pady=(RUBY_PAD_Y, 0))
-        base_label = tk.Label(frame, text=base, font=self.base_font,
-                              fg=kanji_fg or self._kanji_fg, bg=self._ruby_bg,
-                              bd=0, padx=RUBY_PAD_X, pady=0, anchor='center',
-                              **NO_AUTOSTYLE)
-        base_label.pack(side='top', fill='x', pady=(0, RUBY_PAD_Y))
+                                 fg=self._ruby_fg, **label_kwargs)
+        base_labels: List[tk.Label] = []
+
+        if self._distributes(base, ruby):
+            # The reading is wider than its characters, so the word is wider
+            # than its characters too - Tk clips a child to its frame, so a
+            # reading cannot hang out over the text beside it the way Word's
+            # can. Rather than leave the base huddled in the middle of a puddle
+            # of space, spread it: one grid column per character, each weighted
+            # equally. Tk hands each column the same share of the surplus and
+            # centres its character in it, which lands on the same 1:2:...:2:1
+            # rhythm as Word's 均等割り付け - half a gap at each edge, a full gap
+            # between characters.
+            reading_label.grid(row=0, column=0, columnspan=len(base),
+                               sticky='ew', pady=(RUBY_PAD_Y, 0))
+            for column, character in enumerate(base):
+                label = tk.Label(frame, text=character, font=self.base_font,
+                                 fg=base_fg, **label_kwargs)
+                label.grid(row=1, column=column, pady=(0, RUBY_PAD_Y))
+                frame.grid_columnconfigure(column, weight=1)
+                base_labels.append(label)
+        else:
+            # Nothing to distribute: the characters already set the width.
+            reading_label.pack(side='top', fill='x', pady=(RUBY_PAD_Y, 0))
+            label = tk.Label(frame, text=base, font=self.base_font,
+                             fg=base_fg, **label_kwargs)
+            label.pack(side='top', fill='x', pady=(0, RUBY_PAD_Y))
+            base_labels.append(label)
 
         # An embedded window would otherwise swallow the wheel event.
-        for widget in (frame, reading_label, base_label):
+        for widget in [frame, reading_label] + base_labels:
             widget.bind('<MouseWheel>', self._on_wheel)
 
         self.window_create(index, window=frame, align='baseline')
         self._frames.append(frame)
         self._window_base[str(frame)] = base
+        self._window_labels[str(frame)] = (reading_label, base_labels)
         # Remembered, not read back later: selection overwrites them, and a
         # caller's kanji_fg (the dictionary's highlight colours) would be lost.
-        self._window_colors[str(frame)] = (self._ruby_bg,
-                                           kanji_fg or self._kanji_fg,
-                                           self._ruby_fg)
+        self._window_colors[str(frame)] = (self._ruby_bg, base_fg, self._ruby_fg)
 
         # An embedded window can be addressed by its path name, so this is the
         # frame's real line rather than a guess from the insertion index.
@@ -643,6 +673,30 @@ class RubyText(tk.Text):
                 self.tag_add(self.LIFT_TAG, f'{line}.0', f'{line}.end +1c')
             except tk.TclError:                # pragma: no cover - defensive
                 self._lifted_lines.discard(line)
+
+    def _distributes(self, base: str, ruby: str) -> bool:
+        """Whether this pair's characters need spreading across its width."""
+        if len(base) < 2 or self._base_metrics is None:
+            return False                       # one character has nothing to spread
+        try:
+            return (self._ruby_metrics.measure(ruby)
+                    > self._base_metrics.measure(base))
+        except tk.TclError:                    # pragma: no cover - defensive
+            return False
+
+    def pair_labels(self, frame: tk.Frame) -> Tuple[Optional[tk.Label], List[tk.Label]]:
+        """The (reading, [base characters]) labels of one embedded ruby frame.
+
+        Use this instead of `frame.winfo_children()`: a pair whose reading is
+        wider than its characters holds one label per character, not one for the
+        whole word.
+        """
+        reading, bases = self._window_labels.get(str(frame), (None, []))
+        return reading, list(bases)
+
+    def pair_base_text(self, frame: tk.Frame) -> str:
+        """The base text of one embedded ruby frame, however it is laid out."""
+        return self._window_base.get(str(frame), '')
 
     def insert_ruby(self, index, text: str, lang_hint: Optional[str] = None,
                     tags=None, kanji_fg: Optional[str] = None) -> None:
@@ -707,6 +761,7 @@ class RubyText(tk.Text):
         self._segments.clear()
         self._frames.clear()
         self._window_base.clear()
+        self._window_labels.clear()
         self._window_colors.clear()
         self._selected_frames.clear()
         self._lifted_lines.clear()
@@ -812,12 +867,14 @@ class RubyText(tk.Text):
                 background = select_bg
                 if select_fg:
                     base_fg = ruby_fg = select_fg
+            reading, bases = self.pair_labels(frame)
             try:
-                reading, base = frame.winfo_children()
                 frame.configure(bg=background)
-                reading.configure(bg=background, fg=ruby_fg)
-                base.configure(bg=background, fg=base_fg)
-            except (tk.TclError, ValueError):  # pragma: no cover - defensive
+                if reading is not None:
+                    reading.configure(bg=background, fg=ruby_fg)
+                for label in bases:
+                    label.configure(bg=background, fg=base_fg)
+            except tk.TclError:                # pragma: no cover - defensive
                 continue
 
     # ------------------------------------------------------------------ #

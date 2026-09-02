@@ -40,23 +40,30 @@ All notable changes to CrossTrans are documented here.
   its button bar and by `app.py` to decide what crosses over, instead of the string test being
   spelled out twice.
 
-**Not done — measured as impossible**
-- Letting a reading that is wider than its kanji **overhang** into the space beside the word, so
-  the word does not widen. A Tk `Frame` clips its children: a label wider than its frame is cut
-  off, not drawn past the edge (measured — 51px label rendered at 40px). With the reading inside
-  the frame that carries the word, its width is a floor on the word's width. Word gets its
-  overhang from a layout engine that has no such containment. The alternatives are to spread the
-  base characters across the extra width (Word's 均等割り付け — same width, no puddle of space
-  around a centred word) or to shrink the reading's font, which cannot close a gap this size
-  (べんきょう at 7pt is 47px against 30px of 勉強 — it would need ~4.5pt). Left alone pending a
-  decision.
+**Changed**
+- **A reading wider than its kanji now spreads them instead of huddling them.** 勉強 under
+  べんきょう used to sit centred with a gap on each side, which broke the rhythm of the line.
+  Each character gets its own equally weighted grid column, so Tk hands them the same share of
+  the surplus and centres each one — landing on the same 1:2:…:2:1 rhythm as Word's
+  均等割り付け: half a gap at each edge, a full gap between characters. Measured on 勉強 at
+  45 px: left 3, gap 8, right 4. Words whose reading is *narrower* keep a single label and are
+  untouched, and a one-character base is never split — there is nothing inside it to spread.
 
-**Tests**: 476 → 510. New `tests/test_history_dialog.py` (13) drives the real dialog: the wheel
+  This is what could be done instead of the **overhang** originally asked for, which was
+  measured as impossible: a Tk `Frame` clips its children (a 51 px label in a 40 px frame renders
+  at 40 px), so with the reading inside the word's frame its width is a hard floor on the word's
+  width — Word gets its overhang from a layout engine with no such containment. Shrinking the
+  reading's font cannot close a gap this size either (べんきょう at 7 pt is 45 px against 30 px
+  of 勉強 — it would need about 4.5 pt).
+- `RubyText.pair_labels()` / `pair_base_text()` replace reading `frame.winfo_children()`: a pair
+  now holds one label per character when it is spread, so the old two-label assumption is gone.
+
+**Tests**: 476 → 518. New `tests/test_history_dialog.py` (13) drives the real dialog: the wheel
 scrolls over the canvas and over a row, survives a search and a delete, leaves no
 application-wide binding, takes no grab, and two dialogs can coexist. New
 `tests/test_error_popup_actions.py` (14) covers the predicate, the error bar's contents and
 order, and that a failure notice never reaches the main window's output box.
-`TestSelectionHighlight` (7) in `tests/test_ruby_text.py`. Verified as regression tests: against
+`TestSelectionHighlight` (7) and `TestEvenDistribution` (8) in `tests/test_ruby_text.py` — the latter pins the JIS rhythm, that a narrow reading changes nothing, and that a spread word still reads back whole. Verified as regression tests: against
 the previous `history_dialog.py`, 5 of the 13 fail with exactly the reported symptoms.
 
 ### Furigana reads like Word — copy, baseline, plate (2026-08-28)

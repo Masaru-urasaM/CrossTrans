@@ -215,8 +215,9 @@ class TestReplacePreview:
         manager._show_replace_preview()
         expected = str(manager.popup_text.tag_cget('translated', 'foreground'))
         for frame in manager.popup_text._frames:
-            _reading, base = frame.winfo_children()
-            assert str(base.cget('fg')) == expected
+            _reading, bases = manager.popup_text.pair_labels(frame)
+            for label in bases:
+                assert str(label.cget('fg')) == expected
 
     @HAS_PROVIDER
     def test_preview_is_not_clipped(self, manager, tk_root):
