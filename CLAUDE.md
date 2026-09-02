@@ -1,4 +1,4 @@
-# CrossTrans v1.9.19 - AI Context
+# CrossTrans v1.9.20 - AI Context
 
 ## Project Overview
 CrossTrans is a Windows desktop translation app using AI APIs (15 providers, 180+ models).
@@ -212,6 +212,16 @@ actually bundled afterwards (`tools/verify_furigana_bundle.py`). Without it furi
 renders as plain text — nothing crashes — and pykakasi is the only reading provider a fresh
 install has. A failed pre-flight aborts the build; a failed post-build check warns loudly.
 
+**The rename is verified, and SUCCESS means SUCCESS.** `ren` fails with "a duplicate file name
+exists" when `dist\CrossTrans_v{version}.exe` is already there — the ordinary case, since the
+previous release of that version sits in `dist\` and step 1 cannot delete it while it is
+running. `ren` sets no usable errorlevel, so the script checks by hand that the source is gone
+and the target exists; a blocked rename exits 1 with an explanation instead of printing SUCCESS
+for a file it did not create and then running the furigana guard against that stale EXE
+(measured 2026-09-02: 1156 archive entries verified while the real build had 1157). The finalize
+step uses `goto` labels rather than parenthesised `if` blocks, which is also why the two cmd.exe
+parsing traps below no longer apply to it.
+
 **Editing `build_exe.bat`**: cmd.exe cannot parse a `::` comment as the last line inside a
 parenthesised block — it dies with "`)` was unexpected at this time" and nothing builds. Use
 `rem`, or move the comment. Consecutive `::` lines inside a block also print a spurious "The
@@ -243,7 +253,47 @@ python main.py
 10. **Auto-Update** - In-app update with retry, backup, and registry sync
 11. **Furigana** - Japanese reading guides (hiragana above kanji) via pykakasi
 12. **Fix Grammar** - Main-window button (default ON) or optional Win+Alt+G hotkey (default **OFF** - collides with Xbox Game Bar): corrects grammar of selected text in place (no translation, no rephrasing, no censoring). Toggle button + hotkey separately in Settings → Hotkeys.
-13. **Merged Translate-or-Fix** (v1.9.18) - Pressing a language hotkey (Win+Alt+V/E/J/C + custom) on text already in that language auto-fixes its grammar instead of translating, via one merged AI prompt. No dedicated hotkey needed. See "Merged Translate-or-Fix" section below.
+13. **Model credit on the popup** (v1.9.20) - the quick-translate popup's top line names the model and provider that produced the result. See "Model credit" below.
+14. **Merged Translate-or-Fix** (v1.9.18) - Pressing a language hotkey (Win+Alt+V/E/J/C + custom) on text already in that language auto-fixes its grammar instead of translating, via one merged AI prompt. No dedicated hotkey needed. See "Merged Translate-or-Fix" section below.
+
+## Model credit on the quick-translate popup (v1.9.20)
+
+A small dim italic line at the very top of the popup: `Translated with gemini-2.5-flash (Google)`,
+or `Fixed with ...` for a grammar fix. Never shown on a failure popup.
+
+- **It names the model that answered, not the one in Settings.** Auto-detection picks a model
+  when the field is blank and rotation substitutes another when the first fails, both silently.
+  Recorded in `AIAPIManager._generate_content` / `_generate_content_multimodal`, the two
+  functions every successful text and vision call funnels through, so that is one bookkeeping
+  site instead of eight return points. `test_connection` goes through the same dispatch and
+  therefore also overwrites it - snapshot `last_attribution` right after your own call, never
+  later.
+- **Only on success.** A failed call leaves the previous credit alone, so a note never describes
+  a result that does not exist.
+- **A cache hit credits the stored entry** (`... , cached`). This is why `add_entry()` is finally
+  given a real `model_used` instead of always defaulting to `'Auto'`. Pre-existing entries carry
+  `'Auto'`, which names nothing, and get **no note** - naming the most recent live model instead
+  would be a quiet lie. See Decision 11.
+- **Trial mode** names its proxy model: `llama-3.3-70b (Trial mode)`.
+- **How it reaches the popup**: `TranslationService.last_attribution`, read by
+  `app.show_quick_translate()` when `model_info` is not passed. Deliberately *not* a seventh
+  element in the translation queue tuple, whose length already encodes the kind of result - and
+  the screenshot path never goes through the queue at all (it assigns `last_attribution` itself).
+- **Height**: `ATTRIBUTION_PX` is added to the popup budget only when the line shows, so the text
+  box never loses a row to make room for it.
+- The five copies of "trial client if trial mode, else the API manager" in `translation.py` are
+  now one `_call_model()`, which is also where the credit is recorded.
+
+### Files involved
+- `src/core/api_manager.py` - `last_attribution`, `_record_attribution()`, the
+  `_route_generate_content` / `_route_generate_multimodal` split
+- `src/core/translation.py` - `_call_model()`, `_cached_attribution()`, `last_attribution`
+- `src/core/history.py` - `find_cached_entry()` (whole entry) under `find_cached()` (text only)
+- `src/ui/quick_translate.py` - `ATTRIBUTION_FONT` / `ATTRIBUTION_FG` / `ATTRIBUTION_PX`,
+  `show(..., model_info=...)`, `popup_attribution`
+- `src/app.py` - `show_quick_translate(..., model_info=None)` and its default
+- `src/ui/screenshot_handler.py` - carries the credit over by hand
+- `tests/test_attribution.py`
 
 ## Merged Translate-or-Fix (language hotkeys, v1.9.18)
 

@@ -194,6 +194,13 @@ Instructions:
                     prompt, [image_path], {}
                 )
 
+                # This path calls the API manager directly instead of going
+                # through TranslationService._call_model, so the credit the
+                # popup shows has to be carried over by hand. Without this the
+                # note would name whatever model answered the *previous*
+                # translation.
+                self.translation_service.last_attribution =                     self.translation_service.api_manager.last_attribution
+
                 # Parse result
                 if "===ORIGINAL===" in result and "===TRANSLATION===" in result:
                     parts = result.split("===TRANSLATION===")
@@ -212,7 +219,8 @@ Instructions:
 
                 # Save to history
                 self.translation_service.history_manager.add_entry(
-                    "[Screenshot OCR]", translated, target_lang, source_type="screenshot"
+                    "[Screenshot OCR]", translated, target_lang, source_type="screenshot",
+                    model_used=self.translation_service.last_attribution or 'Auto'
                 )
 
             except Exception as e:

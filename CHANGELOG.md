@@ -4,6 +4,59 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Version 1.9.20 — build guard, and the popup names its model (2026-09-02)
+
+**Added**
+- **The quick-translate popup says which model produced the result.** A small dim line at the
+  very top: `Translated with gemini-2.5-flash (Google)` — `Fixed with ...` for a grammar fix.
+  It matters more here than it looks: the configured model is not necessarily the one that
+  answered. Auto-detection picks a model when the field is left blank, and model rotation
+  substitutes another when the first one fails, both silently, so comparing two translations of
+  the same text gave no way to tell whether you were comparing models or comparing runs.
+  - The credit is recorded where the call actually succeeds — `AIAPIManager._generate_content`
+    and `_generate_content_multimodal`, which every text and vision request funnels through —
+    so it names the model that answered rather than the one in Settings, in one place instead
+    of at eight return sites.
+  - A **failed** call credits nobody: the value is only written on success, so a note never
+    describes a result that does not exist. Failure popups carry no note at all.
+  - A **cache hit** credits whoever produced the stored entry (`gemini-2.0-flash (Google),
+    cached`), which is why `model_used` is now actually written to history instead of always
+    being the placeholder `'Auto'`. Entries stored before this get **no note** rather than a
+    made-up one — crediting the model that merely ran most recently would be a quiet lie.
+  - Trial mode names its proxy model (`llama-3.3-70b (Trial mode)`).
+
+**Fixed**
+- **`build_exe.bat` no longer reports a success it did not achieve.** `ren` fails with
+  "Access is denied. A duplicate file name exists" when a file of the target name is already in
+  `dist\` — the ordinary case, since the previous release of the same version sits there and
+  step 1 cannot delete it while it is running. The script never checked, so it printed
+  `SUCCESS! Created: dist\CrossTrans_v1.9.19.exe` for a file it had not created, then ran the
+  furigana guard **against that stale EXE** and reported it as verified; the build that had
+  actually just been made was left behind as `dist\CrossTrans.exe`. Measured on 2026-09-02: the
+  guard passed on the old file's 1156 archive entries while the real build had 1157. The rename
+  is now verified by hand (`ren` sets no usable errorlevel), a blocked one exits 1 with an
+  explanation, and the parenthesised `if` blocks were replaced with labels — which also removes
+  the two cmd.exe parsing traps documented in CLAUDE.md from the finalize step.
+
+**Changed**
+- `VERSION` 1.9.19 → **1.9.20** (`src/constants.py`, README badge, CLAUDE.md header).
+- `HistoryManager.find_cached_entry()` returns the whole matched entry; `find_cached()` is now a
+  thin text reader over it. The entry carries `model_used`, which the note needs.
+- The five copies of "trial client if trial mode, else the API manager" in `translation.py` are
+  one `_call_model()`, which is also the single place the credit is recorded.
+
+**Tests**: 518 → 551. New `tests/test_attribution.py` (27): the API manager credits the model
+that answered and not the configured one, a failed call leaves the previous credit alone,
+multimodal counts, trial mode names its proxy, a cache hit reuses the stored credit and an
+uncreditable entry gets no note, the credit reaches history so the *next* hit can use it, and on
+the popup the note is the top line, is absent on failures, says "Fixed" for grammar, and grows
+the window by exactly `ATTRIBUTION_PX` so the text box loses no row. Six more in
+`tests/test_furigana_hardening.py` pin the build script: the rename is verified before SUCCESS is
+announced and before the furigana guard runs, both failure labels exit 1, and every `goto` has a
+label. Verified as regression tests: reverting each of the four production changes in turn fails
+1–2 of them, and removing the rename check fails the build-script test.
+
+
 ### History window, ruby selection, a way out of a failed popup (2026-09-02)
 
 **Fixed**

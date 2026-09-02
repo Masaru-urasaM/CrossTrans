@@ -5,6 +5,53 @@ approaches. Newest first.
 
 ---
 
+### Decision 11 — The popup's model credit is read from the service, not carried in the queue
+
+**Date**: 2026-09-02
+**Status**: RESOLVED
+
+**Problem**: the popup should say which model produced the result. The value has to travel from a
+background worker thread to a Tk callback, and it has to survive three paths that do not share a
+shape: the translation queue (whose tuple length already encodes *which kind* of result it is —
+4, 5 or 6 items), the screenshot handler (which calls the API manager directly and never touches
+the queue), and a cache hit (where no model ran at all).
+
+**Options considered**:
+1. **Add a 7th element to the queue tuple** — Pros: the credit travels with the result it
+   describes, no shared state. Cons: the tuple is already overloaded as a type tag; every
+   producer (nine `put()` sites) and the single consumer would need updating, and the screenshot
+   path still bypasses it. Rejected: the cost is spread over a lot of code for one string.
+2. **A callback the popup calls when it renders** — Pros: no plumbing. Cons: the popup would ask
+   "who answered?" at paint time, which is not when the answer was true; a re-render after any
+   later call shows the wrong model.
+3. **Record it on the service, read it at show time** (chosen) — Pros: one attribute, one
+   producer (`_call_model`), one default (`show_quick_translate`); the screenshot path opts in
+   with one assignment. Cons: it is shared mutable state, so two translations genuinely in
+   flight at once could cross. They cannot be, in this app — a hotkey translation blocks on the
+   cooldown and the popup shows one result at a time — but it is the real limitation.
+
+**Resolution**: option 3. `AIAPIManager` records `(model, provider)` inside `_generate_content` /
+`_generate_content_multimodal`, the two functions every successful call funnels through, so
+auto-detection and rotation substitutes are named correctly without eight bookkeeping sites.
+`TranslationService._call_model()` snapshots it immediately after its own call.
+`app.show_quick_translate()` defaults `model_info` from it, which covers the queue and the
+screenshot handler at once.
+
+**On cache hits**: the stored entry's `model_used` is the credit, marked `, cached` — which is
+why `add_entry()` is finally passed a real value instead of always defaulting to `'Auto'`.
+Entries written before this carry `'Auto'`, which names nothing; those show **no note at all**.
+Rejected: falling back to the most recent live model. A note that quietly names the wrong model
+is worse than no note, because it looks like evidence.
+
+**Rejected wording**: "Translated with X" on a grammar fix (it was not translated — the popup
+says "Fixed with X"), and any note on a failure popup (nothing was produced to credit).
+
+**References**: `src/core/api_manager.py` (`last_attribution`, `_record_attribution`),
+`src/core/translation.py` (`_call_model`, `_cached_attribution`), `src/core/history.py`
+(`find_cached_entry`), `src/ui/quick_translate.py` (`ATTRIBUTION_*`), `tests/test_attribution.py`
+
+---
+
 ### Decision 10 — Word-like ruby: lift the plain text, drop the plate
 
 **Date**: 2026-08-28

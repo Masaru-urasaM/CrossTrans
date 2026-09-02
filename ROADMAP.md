@@ -13,7 +13,11 @@
 1.9.18 were never published), so it ships Fix Grammar, Merged Translate-or-Fix and furigana
 everywhere in one go. Suite at that commit: 450 passed / 0 failed.
 
-Every roadmap item up to and including 1.9.19 is complete and archived — nothing is
+**In the working tree: 1.9.20, not released.** `VERSION` was bumped on 2026-09-02 for the
+History/ruby/error-popup fixes of 2026-08-28 and 2026-09-02 plus the popup's model credit; the
+commits are local and nothing is tagged or published yet. Suite at this point: 551 passed.
+
+Every roadmap item up to and including 1.9.20 is complete and archived — nothing is
 half-finished, and there is no work in progress.
 
 ---

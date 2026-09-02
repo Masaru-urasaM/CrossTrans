@@ -54,8 +54,8 @@ class HistoryManager:
         """Get full history list."""
         return self.config.get('history', [])
 
-    def find_cached(self, original: str, target_lang: str,
-                    source_type: str = 'text') -> Optional[str]:
+    def find_cached_entry(self, original: str, target_lang: str,
+                          source_type: str = 'text') -> Optional[Dict]:
         """Return a stored translation for an exact (original, target_lang) match.
 
         Reuses the translation history as a lookup cache so identical input is not
@@ -72,7 +72,10 @@ class HistoryManager:
                 cross-served as a plain 'rephrase' translation (and vice versa).
 
         Returns:
-            The cached translation string, or None if no usable match exists.
+            The whole cached entry, or None if no usable match exists. Callers
+            that only want the text use find_cached(); the entry itself carries
+            `model_used`, which the popup needs to say where a cache hit came
+            from instead of crediting whatever model ran most recently.
         """
         if not original or not target_lang:
             return None
@@ -86,8 +89,17 @@ class HistoryManager:
             if entry.get('original') == original and entry.get('target_lang') == target_lang:
                 translated = entry.get('translated', '')
                 if translated and not translated.startswith('Error:'):
-                    return translated
+                    return entry
         return None
+
+    def find_cached(self, original: str, target_lang: str,
+                    source_type: str = 'text') -> Optional[str]:
+        """The cached translation text for an exact match, or None.
+
+        Thin reader over find_cached_entry() - see there for the matching rules.
+        """
+        entry = self.find_cached_entry(original, target_lang, source_type)
+        return entry.get('translated') if entry else None
 
     def clear_history(self):
         """Clear all history."""

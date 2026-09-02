@@ -330,7 +330,7 @@ class TranslatorApp:
 
     def show_quick_translate(self, original: str, translated: str, target_lang: str,
                              trial_info: dict = None, furigana_text: str = None,
-                             is_grammar: bool = False):
+                             is_grammar: bool = False, model_info: str = None):
         """Show compact popup near mouse cursor with translation result.
 
         Args:
@@ -340,7 +340,14 @@ class TranslatorApp:
             trial_info: Optional trial mode info dict
             furigana_text: Optional furigana-annotated text with {kanji|reading} notation
             is_grammar: True when showing a Fix Grammar result (hides translation-only buttons)
+            model_info: "model (Provider)" credit shown as a note at the top of the popup.
+                Defaults to whoever served the result that just arrived, which is what
+                every caller wants - the screenshot handler and the translation queue both
+                reach this method after the service has recorded it.
         """
+        if model_info is None:
+            model_info = self.translation_service.last_attribution
+
         self.current_original = original
         self.current_translated = translated
         self.current_target_lang = target_lang
@@ -351,7 +358,8 @@ class TranslatorApp:
             return
 
         self.quick_translate_manager.show(translated, target_lang, trial_info, original,
-                                          furigana_text=furigana_text, is_grammar=is_grammar)
+                                          furigana_text=furigana_text, is_grammar=is_grammar,
+                                          model_info=model_info)
 
     def close_quick_translate(self):
         """Close the quick translate popup."""

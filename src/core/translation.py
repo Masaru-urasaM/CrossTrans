@@ -10,7 +10,7 @@ from typing import Optional, Callable, Tuple, Dict
 
 import keyboard
 
-from src.constants import COOLDOWN, TRIAL_MODE_ENABLED, TRIAL_PROXY_URL
+from src.constants import COOLDOWN, TRIAL_MODE_ENABLED, TRIAL_MODEL, TRIAL_PROXY_URL
 from src.core import furigana
 from src.core.clipboard import ClipboardManager
 from src.core.api_manager import AIAPIManager
@@ -58,6 +58,10 @@ class TranslationService:
         self.quota_manager: QuotaManager = QuotaManager(config)
         self.trial_client: Optional[TrialAPIClient] = None
         self._is_trial_mode: bool = False
+        # Who produced the most recent result: "model (Provider)", the trial
+        # proxy, or a cache hit's stored credit. The popup shows it as a note;
+        # None means "nothing worth naming" and the note is left off entirely.
+        self.last_attribution: Optional[str] = None
         self._configure_api()
 
     def _configure_api(self) -> bool:
@@ -233,10 +237,11 @@ class TranslationService:
         # re-adding to history (avoids duplicate entries). See redo_translation() for the
         # forced-refresh path.
         if not has_custom_prompt and not skip_cache:
-            cached = self.history_manager.find_cached(text, target_language)
+            cached = self.history_manager.find_cached_entry(text, target_language)
             if cached is not None:
                 logging.info("Cache hit - returning stored translation, skipping API call")
-                return cached
+                self.last_attribution = self._cached_attribution(cached)
+                return cached['translated']
 
         if has_custom_prompt:
             # Has custom prompt → follow custom prompt, more flexible.
@@ -271,11 +276,7 @@ Rules (DO NOT include these in your response):
         prompt = base_prompt
 
         try:
-            # Use trial mode if active
-            if self._is_trial_mode and self.trial_client:
-                result = self._translate_trial(prompt)
-            else:
-                result = self.api_manager.translate(prompt)
+            result = self._call_model(prompt)
 
             # Clean up AI thinking tags from result
             result = self._strip_thinking_tags(result)
@@ -285,7 +286,8 @@ Rules (DO NOT include these in your response):
             # while still keeping them visible in the history viewer.
             self.history_manager.add_entry(
                 text, result, target_language,
-                source_type='custom' if has_custom_prompt else 'text')
+                source_type='custom' if has_custom_prompt else 'text',
+                model_used=self.last_attribution or 'Auto')
             return result
         except TrialAPIError as e:
             return f"Error: {str(e)}"
@@ -323,11 +325,12 @@ Rules (DO NOT include these in your response):
 
         # Merged cache namespace: never mixes with plain translations (see find_cached).
         if not skip_cache:
-            cached = self.history_manager.find_cached(text, target_language,
-                                                      source_type='merged')
+            cached = self.history_manager.find_cached_entry(text, target_language,
+                                                            source_type='merged')
             if cached is not None:
                 logging.info("Merged cache hit - returning stored result, skipping API call")
-                return cached
+                self.last_attribution = self._cached_attribution(cached)
+                return cached['translated']
 
         prompt = f"""You are a translation-and-grammar fixer tool. Decide automatically between two modes based on the
 language of the text below, then output ONLY the result.
@@ -355,11 +358,7 @@ STRICT RULES (DO NOT include these rules in your response):
    translate it. In translate mode, output ONLY {target_language}."""
 
         try:
-            # Use trial mode if active
-            if self._is_trial_mode and self.trial_client:
-                result = self._translate_trial(prompt)
-            else:
-                result = self.api_manager.translate(prompt)
+            result = self._call_model(prompt)
 
             # Clean up AI thinking tags from result
             result = self._strip_thinking_tags(result)
@@ -367,7 +366,8 @@ STRICT RULES (DO NOT include these rules in your response):
             # Store under the 'merged' namespace so repeat requests are cached but never
             # served in place of (or served) a plain translation.
             self.history_manager.add_entry(
-                text, result, target_language, source_type='merged')
+                text, result, target_language, source_type='merged',
+                model_used=self.last_attribution or 'Auto')
             return result
         except TrialAPIError as e:
             return f"Error: {str(e)}"
@@ -439,11 +439,7 @@ STRICT RULES (DO NOT include these rules in your response):
   Example: 雨氷 → /uːhjou/, /u-hyô/ (if target is Vietnamese)"""
 
         try:
-            # Use trial mode if active
-            if self._is_trial_mode and self.trial_client:
-                result = self._translate_trial(prompt)
-            else:
-                result = self.api_manager.translate(prompt)
+            result = self._call_model(prompt)
 
             # Clean up AI thinking tags from result
             result = self._strip_thinking_tags(result)
@@ -492,11 +488,7 @@ STRICT RULES (DO NOT include these rules in your response):
 8. Output ONLY the corrected text - no explanations, no quotes, no labels, no meta-text."""
 
         try:
-            # Use trial mode if active
-            if self._is_trial_mode and self.trial_client:
-                result = self._translate_trial(prompt)
-            else:
-                result = self.api_manager.translate(prompt)
+            result = self._call_model(prompt)
 
             # Clean up AI thinking tags from result
             result = self._strip_thinking_tags(result)
@@ -508,6 +500,40 @@ STRICT RULES (DO NOT include these rules in your response):
             if "API_KEY_INVALID" in error_msg or "API key not valid" in error_msg:
                 return "Error: Invalid API key. Please check your API key in Settings."
             return f"Error: {error_msg}"
+
+    def _call_model(self, prompt: str) -> str:
+        """Send one prompt to whichever backend is active and record who answered.
+
+        Every live call in this class goes through here, so `last_attribution`
+        is set in exactly one place. A normal call names whatever the API
+        manager actually reached - not necessarily the configured model, since
+        auto-detection and model rotation substitute one silently. Trial mode
+        names its fixed proxy model instead.
+
+        Failures propagate: the attribution is only touched on success, so a
+        failed call never credits a model with a result it did not produce.
+        """
+        if self._is_trial_mode and self.trial_client:
+            result = self._translate_trial(prompt)
+            self.last_attribution = f"{TRIAL_MODEL} (Trial mode)"
+            return result
+        result = self.api_manager.translate(prompt)
+        self.last_attribution = self.api_manager.last_attribution
+        return result
+
+    @staticmethod
+    def _cached_attribution(entry: Dict) -> Optional[str]:
+        """Credit for a cache hit: whoever produced the stored entry.
+
+        Entries written before the credit was recorded carry the placeholder
+        'Auto', which names nothing - those get no note at all rather than a
+        made-up one. Crediting the model that merely ran most recently would be
+        worse than saying nothing.
+        """
+        stored = (entry.get('model_used') or '').strip()
+        if not stored or stored == 'Auto':
+            return None
+        return f"{stored}, cached"
 
     def _translate_trial(self, prompt: str) -> str:
         """Translate using trial mode API.
@@ -816,10 +842,7 @@ STRICT RULES (DO NOT include these rules in your response):
                 return
 
             # Raw path: send the prompt verbatim, bypassing the translate wrapper.
-            if self._is_trial_mode and self.trial_client:
-                result = self._translate_trial(raw_prompt)
-            else:
-                result = self.api_manager.translate(raw_prompt)
+            result = self._call_model(raw_prompt)
 
             result = self._strip_thinking_tags(result)
 

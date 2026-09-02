@@ -34,6 +34,14 @@ HORIZONTAL_PADDING = 50  # frame(30) + scrollbar(20)
 # translation: 1px line plus its 8px padding above and below.
 FURIGANA_SEPARATOR_PX = 17
 
+# The "Translated with ..." credit at the top of the popup. A footnote, so it is
+# deliberately small and dim: it must be readable when looked for and invisible
+# when not. 13px of line at 8pt italic, 6px of gap under it, 2px for the label's
+# own border - measured, and added to the popup height only when the line shows.
+ATTRIBUTION_FONT = ('Segoe UI', 8, 'italic')
+ATTRIBUTION_FG = '#8a8a8a'
+ATTRIBUTION_PX = 21
+
 def is_error_text(translated: str) -> str:
     """Whether a result string is a failure notice rather than a translation.
 
@@ -212,6 +220,7 @@ class QuickTranslateManager:
         self.popup: Optional[tk.Toplevel] = None
         self.popup_text: Optional[RubyText] = None  # Read with get_plain(), not get()
         self.popup_furigana: Optional[RubyText] = None  # Read-only reading guide
+        self.popup_attribution: Optional[ttk.Label] = None  # "Translated with ..." note
         self.popup_copy_btn: Optional[ttk.Button] = None
         self.popup_dict_btn: Optional[ttk.Button] = None
         self.toast = ToastManager(root)  # For shake notifications
@@ -477,7 +486,8 @@ class QuickTranslateManager:
         return int(width), int(max(MIN_HEIGHT, min(height, MAX_HEIGHT)))
 
     def show(self, translated: str, target_lang: str, trial_info: dict = None, original: str = "",
-             furigana_text: str = None, is_grammar: bool = False):
+             furigana_text: str = None, is_grammar: bool = False,
+             model_info: str = None):
         """Show popup with translation result.
 
         Args:
@@ -489,6 +499,10 @@ class QuickTranslateManager:
             is_grammar: True when showing a Fix Grammar result. Hides the translation-only
                 buttons (Re-translate, Dictionary, Custom Prompt) since they assume a real
                 target language; keeps Copy / Replace / Open Translator for fixing in place.
+            model_info: "model (Provider)" credit for the result, shown as a small note at
+                the very top. None leaves the note off entirely - which is what happens for
+                a cache hit whose stored entry predates the credit being recorded, because
+                naming the model that merely ran most recently would be a lie.
         """
         self.close()
 
@@ -497,6 +511,11 @@ class QuickTranslateManager:
 
         # Calculate size (MIN_HEIGHT already handled in calculate_size)
         width, height = self.calculate_size(translated)
+
+        # The credit note is one small line above everything else.
+        show_attribution = bool(model_info) and not is_error
+        if show_attribution:
+            height += ATTRIBUTION_PX
 
         # Add extra height for trial mode header
         if trial_info and trial_info.get('is_trial') and not is_error:
@@ -553,6 +572,18 @@ class QuickTranslateManager:
         # Bind dragging events
         main_frame.bind("<Button-1>", self._start_move)
         main_frame.bind("<B1-Motion>", self._on_drag)
+
+        # "Translated with <model> (<Provider>)" - packed first, so it is the top
+        # line of the popup even when the trial header is also present. Dragging
+        # works on it like the rest of the frame; it is not a control.
+        if show_attribution:
+            verb = "Fixed" if is_grammar else "Translated"
+            attribution = ttk.Label(main_frame, text=f"{verb} with {model_info}",
+                                    font=ATTRIBUTION_FONT, foreground=ATTRIBUTION_FG)
+            attribution.pack(side=TOP, fill=X, pady=(0, 6))
+            attribution.bind("<Button-1>", self._start_move)
+            attribution.bind("<B1-Motion>", self._on_drag)
+            self.popup_attribution = attribution
 
         # Trial mode warning header (if applicable)
         if trial_info and trial_info.get('is_trial') and not is_error:
@@ -1690,6 +1721,7 @@ class QuickTranslateManager:
             self.popup = None
             self.popup_text = None
             self.popup_furigana = None
+            self.popup_attribution = None
             self.popup_copy_btn = None
             self.popup_replace_btn = None
             self._replace_gear_btn = None

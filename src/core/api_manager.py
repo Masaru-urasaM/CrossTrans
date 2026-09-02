@@ -68,6 +68,12 @@ class AIAPIManager:
         self._failed_models: Dict[tuple, set] = {}        # (key_prefix, provider) -> {failed_model_names}
         self._rotation_working_cache: Dict[tuple, str] = {} # (key_prefix, provider) -> working_model
         self._rotation_lock = threading.Lock()
+        # Which model actually served the last successful call, and on which
+        # provider. Not necessarily the configured one: auto-detection and model
+        # rotation both substitute a different model silently, which is exactly
+        # what the popup's "Translated with" note exists to make visible.
+        self.last_model: Optional[str] = None
+        self.last_provider: Optional[str] = None
 
     def configure(self, api_configs: List[Dict[str, Any]],
                   notification_callback: Optional[Callable[[str], None]] = None,
@@ -424,8 +430,42 @@ class AIAPIManager:
             timeout=60  # Longer timeout for multi-image
         )
 
+    @property
+    def last_attribution(self):
+        """"model (Provider)" for the last successful call, or None if there was none.
+
+        `test_connection` and `test_vision_connection` go through the same
+        dispatch and therefore also update it - a Settings test overwrites the
+        value. Callers that care snapshot it right after their own call rather
+        than reading it later (see TranslationService.last_attribution).
+        """
+        if not self.last_model:
+            return None
+        if not self.last_provider:
+            return self.last_model
+        return f"{self.last_model} ({self.last_provider})"
+
+    def _record_attribution(self, model_name: str, provider: str) -> None:
+        """Remember the model+provider that just answered successfully."""
+        self.last_model = model_name
+        self.last_provider = provider
+
     def _generate_content(self, provider: str, api_key: str, model_name: str,
                            prompt: str, image_path: Optional[str] = None) -> str:
+        """Dispatch one request and record which model served it.
+
+        Every successful text/vision call in this class funnels through here, so
+        recording the attribution once covers the configured model, an
+        auto-detected one and any rotation substitute without eight separate
+        bookkeeping sites.
+        """
+        result = self._route_generate_content(provider, api_key, model_name,
+                                              prompt, image_path)
+        self._record_attribution(model_name, provider)
+        return result
+
+    def _route_generate_content(self, provider: str, api_key: str, model_name: str,
+                                prompt: str, image_path: Optional[str] = None) -> str:
         """Route the request to the correct provider.
 
         Provider names use Title Case (e.g., 'Google', 'OpenAI', 'Groq').
@@ -1003,6 +1043,15 @@ class AIAPIManager:
     def _generate_content_multimodal(self, provider: str, api_key: str, model_name: str,
                                       prompt: str, image_paths: List[str],
                                       file_contents: Dict[str, str]) -> str:
+        """Multimodal dispatch; records the attribution like _generate_content."""
+        result = self._route_generate_multimodal(provider, api_key, model_name,
+                                                 prompt, image_paths, file_contents)
+        self._record_attribution(model_name, provider)
+        return result
+
+    def _route_generate_multimodal(self, provider: str, api_key: str, model_name: str,
+                                    prompt: str, image_paths: List[str],
+                                    file_contents: Dict[str, str]) -> str:
         """Generate content with multiple images and file contents."""
         import PIL.Image
         import os

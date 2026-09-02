@@ -1,6 +1,6 @@
 # CrossTrans
 
-![Version](https://img.shields.io/badge/version-1.9.19-blue.svg)
+![Version](https://img.shields.io/badge/version-1.9.20-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-yellow.svg)
 ![License](https://img.shields.io/badge/license-AGPL%20v3-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-informational.svg)
