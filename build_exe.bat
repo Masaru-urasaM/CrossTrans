@@ -42,37 +42,62 @@ python -m PyInstaller CrossTrans.spec --clean --noconfirm
 
 :: Check build result and rename
 echo [5/6] Finalizing...
-if exist "dist\CrossTrans.exe" (
-    :: Rename with version
-    if exist "dist\CrossTrans_v%APP_VERSION%.exe" del "dist\CrossTrans_v%APP_VERSION%.exe"
-    ren "dist\CrossTrans.exe" "CrossTrans_v%APP_VERSION%.exe"
+if not exist "dist\CrossTrans.exe" goto :build_failed
 
-    :: Show file info
-    echo.
-    echo ========================================================
-    echo SUCCESS! Created: dist\CrossTrans_v%APP_VERSION%.exe
-    echo ========================================================
-    for %%A in ("dist\CrossTrans_v%APP_VERSION%.exe") do echo File size: %%~zA bytes
-    echo.
+:: Clear the way for the rename. `ren` fails with "a duplicate file name exists"
+:: when the target is already there - usually a previously released EXE of the
+:: same version that step 1 could not remove because it was still running.
+if exist "dist\CrossTrans_v%APP_VERSION%.exe" del /f /q "dist\CrossTrans_v%APP_VERSION%.exe" 2>nul
+if exist "dist\CrossTrans_v%APP_VERSION%.exe" goto :rename_blocked
 
-    :: Confirm the reading dictionary reached the archive - warns last so it is not buried
-    echo [6/6] Verifying bundled furigana data...
-    python tools\verify_furigana_bundle.py --exe "dist\CrossTrans_v%APP_VERSION%.exe"
-    if errorlevel 1 call :furigana_missing
-    echo.
+ren "dist\CrossTrans.exe" "CrossTrans_v%APP_VERSION%.exe"
 
-    :: Cleanup build folder
-    echo Cleaning up build folder...
-    rmdir /s /q "build" 2>nul
-) else (
-    echo.
-    echo ========================================================
-    echo ERROR: Build failed! Check the output above for errors.
-    echo ========================================================
-)
+:: Verify the rename actually happened. Without this the script printed SUCCESS
+:: for a file it had not created, and then ran the furigana check against that
+:: stale EXE - so a build could be signed off on the strength of the previous
+:: one. Measured on 2026-09-02.
+if exist "dist\CrossTrans.exe" goto :rename_blocked
+if not exist "dist\CrossTrans_v%APP_VERSION%.exe" goto :rename_blocked
+
+echo.
+echo ========================================================
+echo SUCCESS! Created: dist\CrossTrans_v%APP_VERSION%.exe
+echo ========================================================
+for %%A in ("dist\CrossTrans_v%APP_VERSION%.exe") do echo File size: %%~zA bytes
+echo.
+
+:: Confirm the reading dictionary reached the archive - warns last so it is not buried
+echo [6/6] Verifying bundled furigana data...
+python tools\verify_furigana_bundle.py --exe "dist\CrossTrans_v%APP_VERSION%.exe"
+if errorlevel 1 call :furigana_missing
+echo.
+
+:: Cleanup build folder
+echo Cleaning up build folder...
+rmdir /s /q "build" 2>nul
 
 pause
-exit /b
+exit /b 0
+
+:build_failed
+echo.
+echo ========================================================
+echo ERROR: Build failed! Check the output above for errors.
+echo ========================================================
+pause
+exit /b 1
+
+:rename_blocked
+echo.
+echo ========================================================
+echo ERROR: could not name the build CrossTrans_v%APP_VERSION%.exe
+echo A file of that name is already in dist\ and cannot be replaced -
+echo it is most likely still running, or open in another program.
+echo The build itself succeeded and is waiting as dist\CrossTrans.exe
+echo Close or delete the old EXE, then run this script again.
+echo ========================================================
+pause
+exit /b 1
 
 :furigana_missing
 echo.

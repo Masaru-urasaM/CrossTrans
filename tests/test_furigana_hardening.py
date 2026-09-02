@@ -327,3 +327,57 @@ class TestBuildScriptInvokesTheGuard:
             if current.startswith(")"):
                 assert not previous.startswith("::"), \
                     f"'{previous}' directly precedes '{current}'"
+
+
+class TestTheScriptCannotReportAFalseSuccess:
+    """build_exe.bat used to print SUCCESS for a file it had not created.
+
+    `ren` fails with "Access is denied. A duplicate file name exists" when a
+    file of the target name is already in dist, which is exactly the normal
+    case: the previous release of the same version sits there and step 1 could
+    not delete it because it was still running. The script did not check, so it
+    printed "SUCCESS! Created: CrossTrans_v1.9.19.exe", ran the furigana check
+    against that *stale* EXE and reported it as verified, while the build that
+    had actually just been made was left behind as CrossTrans.exe. Measured on
+    2026-09-02: the guard passed on 1156 archive entries while the real build
+    had 1157.
+    """
+
+    BUILT = 'ren "dist\\CrossTrans.exe"'
+    LEFTOVER = 'if exist "dist\\CrossTrans.exe" goto :rename_blocked'
+
+    def setup_method(self):
+        self.script = (ROOT / "build_exe.bat").read_text(encoding="utf-8")
+
+    def test_the_rename_is_verified(self):
+        after = self.script[self.script.index(self.BUILT):]
+        assert after.index(self.LEFTOVER) < after.index("SUCCESS!"), 'SUCCESS is announced before the rename is checked'
+
+    def test_the_exe_check_runs_on_the_verified_file(self):
+        # Otherwise it verifies whatever happened to be there already.
+        after = self.script[self.script.index(self.BUILT):]
+        assert after.index("goto :rename_blocked") < after.index(
+            "verify_furigana_bundle.py --exe")
+
+    def test_a_blocked_rename_fails_loudly(self):
+        block = self.script[self.script.index("\n:rename_blocked"):]
+        assert "ERROR" in block
+        assert "exit /b 1" in block
+
+    def test_a_failed_build_fails_loudly(self):
+        block = self.script[self.script.index("\n:build_failed"):]
+        assert "ERROR" in block
+        assert "exit /b 1" in block
+
+    def test_the_success_path_exits_zero(self):
+        head = self.script[:self.script.index("\n:build_failed")]
+        assert "exit /b 0" in head
+
+    def test_every_goto_has_a_label(self):
+        lines = [line.strip() for line in self.script.splitlines()]
+        labels = {line[1:].strip().lower() for line in lines
+                  if line.startswith(":") and not line.startswith("::")}
+        for line in lines:
+            if "goto :" in line:
+                target = line.split("goto :", 1)[1].split()[0].lower()
+                assert target in labels, f"goto :{target} has no label"
