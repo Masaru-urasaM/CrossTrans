@@ -58,9 +58,16 @@ class HistoryDialog:
         # Apply dark title bar (Windows 10/11)
         set_dark_title_bar(self.window)
 
+        # No grab_set(): see CLAUDE.md "Never use grab_set() on popups". A modal
+        # grab here locks every other window of the app behind a dialog the user
+        # may not even see, and the Clear All confirmation is itself a Toplevel
+        # that has to take input while this one is up.
         self.window.transient(parent)
-        self.window.grab_set()
+        self.window.attributes('-topmost', True)
+        self.window.lift()
         self.window.focus_force()
+        self.window.after(100, lambda: self.window.attributes('-topmost', False)
+                          if self.window.winfo_exists() else None)
 
         self._create_widgets()
         self._refresh_list()
@@ -121,17 +128,45 @@ class HistoryDialog:
         self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw", width=580)
         self.canvas.pack(fill=BOTH, expand=True)
 
-        # Mousewheel scrolling only
-        def _on_mousewheel(event):
-            self.canvas.yview_scroll(int(-3*(event.delta/120)), "units")
-
-        self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        self.window.bind("<Destroy>", lambda e: self.canvas.unbind_all("<MouseWheel>"))
+        # Mousewheel scrolling only - there is no scrollbar, so this binding is
+        # the only way to reach entry 11 and beyond.
+        #
+        # It used to be bind_all() undone by a <Destroy> handler on this window,
+        # which was wrong twice over. bind_all() is interpreter-wide: it stole
+        # the wheel from the popup, the dictionary window and the main window
+        # for as long as the dialog was open. And a child's <Destroy> propagates
+        # up to its toplevel's bindtag, so the *first* list rebuild - one
+        # keystroke in the search box, one deleted entry, one focus-out that
+        # restores the placeholder - destroyed a row, fired the handler and
+        # unbound the wheel from the whole application. From then on the list
+        # could not be scrolled at all, and neither could anything else.
+        #
+        # Bound per widget instead, and re-bound on every row as it is built.
+        self._bind_wheel(self.canvas)
+        self._bind_wheel(self.scrollable_frame)
 
         # Resize handler for canvas width
         def _configure_canvas(event):
             self.canvas.itemconfig(self.canvas.find_withtag("all")[0], width=event.width)
         self.canvas.bind('<Configure>', _configure_canvas)
+
+    def _on_mousewheel(self, event):
+        """Scroll the list. Bound per widget, never with bind_all()."""
+        try:
+            self.canvas.yview_scroll(int(-3 * (event.delta / 120)), "units")
+        except tk.TclError:                    # dialog closing
+            pass
+        return "break"
+
+    def _bind_wheel(self, widget):
+        """Bind the wheel on `widget` and everything already inside it.
+
+        Every row has to carry it: the rows cover the canvas, and a child widget
+        consumes the event before the canvas under it ever sees it.
+        """
+        widget.bind("<MouseWheel>", self._on_mousewheel)
+        for child in widget.winfo_children():
+            self._bind_wheel(child)
 
     def _on_search_focus_in(self, event):
         """Clear placeholder on focus."""
@@ -199,12 +234,15 @@ class HistoryDialog:
                 msg = f"No results for \"{search_text}\""
             else:
                 msg = "No history yet."
-            ttk.Label(self.scrollable_frame, text=msg,
-                     foreground='#888888', font=('Segoe UI', 10)).pack(pady=20)
+            empty = ttk.Label(self.scrollable_frame, text=msg,
+                              foreground='#888888', font=('Segoe UI', 10))
+            empty.pack(pady=20)
+            self._bind_wheel(empty)
             return
 
         for item in filtered:
             self._create_history_item(item)
+        self._bind_wheel(self.scrollable_frame)
 
     def _create_history_item(self, item):
         """Create a single history row."""

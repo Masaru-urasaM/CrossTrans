@@ -4,6 +4,61 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### History window, ruby selection, a way out of a failed popup (2026-09-02)
+
+**Fixed**
+- **Translation History works again.** Nothing was wrong with the stored history — the config
+  file held its 100 entries throughout. The window was the problem, twice over:
+  - It bound the mouse wheel with `bind_all("<MouseWheel>")` and undid that from a `<Destroy>`
+    handler on its own toplevel. A child widget's bindtags include its toplevel, so destroying
+    **one row** fired the handler: the first search keystroke, the first deleted entry, even
+    clicking out of the search box (which restores the placeholder and rebuilds the list)
+    unbound the wheel **from the entire application**. The dialog has no scrollbar, so from that
+    moment the history could not be scrolled at all — and neither could anything else.
+  - `bind_all` also meant that while History was open it took the wheel away from the popup, the
+    dictionary window and the main window.
+  The wheel is now bound per widget and re-bound on every row as the list is rebuilt.
+- **History no longer locks the app.** It called `grab_set()`, which this project forbids
+  outright (CLAUDE.md, Known Issues): a modal grab holds every other window hostage behind a
+  dialog the user may not even have in front of them, and the Clear All confirmation is itself a
+  Toplevel that has to take input while History is up. Replaced with the documented
+  topmost + lift + focus_force + drop-topmost pattern.
+- **Selecting Japanese now highlights the annotated words too.** Tk's `sel` tag draws straight
+  past an embedded window, so dragging across a sentence highlighted everything *except* the
+  words carrying a reading — holes exactly where the readings were, which read as "these words
+  are not selected" right next to the bug that meant they were not copied either. The frames are
+  painted with the widget's own selection colours, readings included (`#80b8ff` on the selection
+  background is unreadable). A caller's own colour — the dictionary's per-word highlights — is
+  recorded at insert time and restored on deselect.
+
+**Added**
+- **"Open Translator" on a failed quick translate**, next to API Settings. A failure is often
+  not an API-key problem: the model refused, timed out, or returned nothing useful, and all of
+  those are quicker to retry in the main window. It opens with the source text already in the
+  input box and an **empty** output — the failure notice is not carried across. `is_error_text()`
+  is now a single module-level predicate in `quick_translate.py`, used both by the popup to pick
+  its button bar and by `app.py` to decide what crosses over, instead of the string test being
+  spelled out twice.
+
+**Not done — measured as impossible**
+- Letting a reading that is wider than its kanji **overhang** into the space beside the word, so
+  the word does not widen. A Tk `Frame` clips its children: a label wider than its frame is cut
+  off, not drawn past the edge (measured — 51px label rendered at 40px). With the reading inside
+  the frame that carries the word, its width is a floor on the word's width. Word gets its
+  overhang from a layout engine that has no such containment. The alternatives are to spread the
+  base characters across the extra width (Word's 均等割り付け — same width, no puddle of space
+  around a centred word) or to shrink the reading's font, which cannot close a gap this size
+  (べんきょう at 7pt is 47px against 30px of 勉強 — it would need ~4.5pt). Left alone pending a
+  decision.
+
+**Tests**: 476 → 510. New `tests/test_history_dialog.py` (13) drives the real dialog: the wheel
+scrolls over the canvas and over a row, survives a search and a delete, leaves no
+application-wide binding, takes no grab, and two dialogs can coexist. New
+`tests/test_error_popup_actions.py` (14) covers the predicate, the error bar's contents and
+order, and that a failure notice never reaches the main window's output box.
+`TestSelectionHighlight` (7) in `tests/test_ruby_text.py`. Verified as regression tests: against
+the previous `history_dialog.py`, 5 of the 13 fail with exactly the reported symptoms.
+
 ### Furigana reads like Word — copy, baseline, plate (2026-08-28)
 
 **Fixed**

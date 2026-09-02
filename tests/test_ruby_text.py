@@ -652,3 +652,81 @@ class TestWordLikeRhythm:
         model = R.tk_layout_model()
         assert model.ruby_width("x", "y") == max(model.char_width("x"),
                                                  model.char_width("y"))
+
+
+class TestSelectionHighlight:
+    """An embedded window is not text, so Tk's `sel` tag draws straight past it.
+
+    Dragging across a sentence highlighted everything except the words carrying
+    a reading, leaving holes exactly where the readings were - which read as
+    "those words are not selected", right next to the bug that meant they were
+    not copied either.
+    """
+
+    @staticmethod
+    def _colors(widget, position=0):
+        frame = widget._frames[position]
+        reading, base = frame.winfo_children()
+        return (str(frame.cget('bg')), str(reading.cget('fg')), str(base.cget('fg')))
+
+    @staticmethod
+    def _select(widget, first, last):
+        widget.tag_remove('sel', '1.0', 'end')
+        widget.tag_add('sel', first, last)
+        widget.event_generate('<<Selection>>')
+        widget.update()
+
+    def test_a_selected_word_takes_the_selection_colours(self, widget):
+        widget.insert_notation(tk.END, NOTATION)
+        before = self._colors(widget)
+        self._select(widget, '1.0', 'end-1c')
+        after = self._colors(widget)
+        assert after[0] == str(widget.cget('selectbackground'))
+        assert after != before
+
+    def test_the_reading_is_recoloured_with_its_base(self, widget):
+        # #80b8ff on the selection background is unreadable - the word chips
+        # repaint their readings on selection for the same reason.
+        widget.insert_notation(tk.END, NOTATION)
+        self._select(widget, '1.0', 'end-1c')
+        _bg, ruby_fg, base_fg = self._colors(widget)
+        assert ruby_fg == base_fg == str(widget.cget('selectforeground'))
+
+    def test_deselecting_restores_the_original_colours(self, widget):
+        widget.insert_notation(tk.END, NOTATION)
+        before = self._colors(widget)
+        self._select(widget, '1.0', 'end-1c')
+        widget.tag_remove('sel', '1.0', 'end')
+        widget.event_generate('<<Selection>>')
+        widget.update()
+        assert self._colors(widget) == before
+
+    def test_only_the_words_inside_the_selection_change(self, widget):
+        widget.insert_notation(tk.END, NOTATION)
+        assert len(widget._frames) >= 2, "need two annotated words"
+        untouched = self._colors(widget, 1)
+        index = widget.index(widget._frames[0])
+        self._select(widget, index, index + ' +1c')
+        assert self._colors(widget, 0)[0] == str(widget.cget('selectbackground'))
+        assert self._colors(widget, 1) == untouched
+
+    def test_a_callers_own_colour_is_restored_not_the_default(self, widget):
+        # The dictionary result window gives looked-up words their own colour;
+        # restoring the widget default would wipe the highlight on deselect.
+        widget.insert_notation(tk.END, NOTATION, tags='mine', kanji_fg='#4ec9b0')
+        self._select(widget, '1.0', 'end-1c')
+        widget.tag_remove('sel', '1.0', 'end')
+        widget.event_generate('<<Selection>>')
+        widget.update()
+        assert self._colors(widget)[2] == '#4ec9b0'
+
+    def test_clearing_forgets_the_selection_state(self, widget):
+        widget.insert_notation(tk.END, NOTATION)
+        self._select(widget, '1.0', 'end-1c')
+        widget.clear()
+        assert widget._selected_frames == set()
+        assert widget._window_colors == {}
+
+    def test_it_is_harmless_without_ruby(self, widget):
+        widget.insert_plain(tk.END, "nothing japanese here")
+        self._select(widget, '1.0', 'end-1c')      # must not raise

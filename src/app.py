@@ -49,7 +49,7 @@ from src.ui.settings import SettingsWindow
 from src.ui.dialogs import APIErrorDialog, TrialExhaustedDialog, TrialFeatureDialog
 from src.ui.history_dialog import HistoryDialog
 from src.ui.toast import ToastManager, ToastType
-from src.ui.quick_translate import QuickTranslateManager
+from src.ui.quick_translate import QuickTranslateManager, is_error_text
 from src.core import furigana
 from src.ui.ruby_text import MAX_ANNOTATE_CHARS, RubyText, insert_output
 from src.ui.tray import TrayManager
@@ -450,15 +450,23 @@ class TranslatorApp:
         threading.Thread(target=do_paste, daemon=True).start()
 
     def _on_quick_translate_open_translator(self):
-        """Handle open translator from quick translate popup."""
+        """Handle open translator from quick translate popup.
+
+        Also reachable from a *failed* popup, where the button sits next to API
+        Settings. In that case there is no translation to carry over - only a
+        failure notice - so the output box is left empty and the user can press
+        Translate straight away.
+        """
         self.close_quick_translate()
 
         # Check if there's a pending screenshot to load into attachments
         pending_image = self.screenshot_handler.get_pending_screenshot()
 
+        translated = "" if is_error_text(self.current_translated) else self.current_translated
+
         self.show_popup(
             self.current_original,
-            self.current_translated,
+            translated,
             self.current_target_lang,
             pending_attachment=pending_image
         )

@@ -34,6 +34,17 @@ HORIZONTAL_PADDING = 50  # frame(30) + scrollbar(20)
 # translation: 1px line plus its 8px padding above and below.
 FURIGANA_SEPARATOR_PX = 17
 
+def is_error_text(translated: str) -> str:
+    """Whether a result string is a failure notice rather than a translation.
+
+    Module level because `app.py` needs the same answer: the popup decides which
+    buttons to draw with it, and the main window must not paste a failure notice
+    into its output box when the user opens it from a failed popup.
+    """
+    return bool(translated) and (translated.startswith("Error:")
+                                 or translated.startswith("No text"))
+
+
 # Dictionary result window font. Monospace is load-bearing: _align_dictionary_text
 # pads the labels with spaces so every value starts at the same column.
 DICT_RESULT_FONT = ('Consolas', 10)
@@ -482,7 +493,7 @@ class QuickTranslateManager:
         self.close()
 
         # Check if this is an error message
-        is_error = translated.startswith("Error:") or translated.startswith("No text")
+        is_error = is_error_text(translated)
 
         # Calculate size (MIN_HEIGHT already handled in calculate_size)
         width, height = self.calculate_size(translated)
@@ -717,6 +728,17 @@ class QuickTranslateManager:
             if HAS_TTKBOOTSTRAP:
                 settings_btn_kwargs["bootstyle"] = "warning"
             ttk.Button(self._btn_frame, **settings_btn_kwargs).pack(side=LEFT, padx=8)
+
+            # ...and next to it, a way out of the popup entirely. A failed quick
+            # translate often just needs a different model, a longer prompt or a
+            # second attempt, all of which are quicker to do in the main window
+            # than through this popup. It opens with the source text already in
+            # the input box and an empty output, ready to translate.
+            open_btn_kwargs = {"text": "Open Translator",
+                               "command": self._handle_open_translator, "width": 16}
+            if HAS_TTKBOOTSTRAP:
+                open_btn_kwargs["bootstyle"] = "success"
+            ttk.Button(self._btn_frame, **open_btn_kwargs).pack(side=LEFT, padx=8)
 
         # Close button
         close_btn_kwargs = {"text": "\u2715", "command": self.close, "width": 3}
@@ -1188,7 +1210,11 @@ class QuickTranslateManager:
             self._on_open_settings_hotkeys_tab()
 
     def _handle_open_translator(self):
-        """Handle open translator button click."""
+        """Handle open translator button click.
+
+        The callback closes this popup itself (it has to: the main window is
+        positioned over it), so there is nothing to close here.
+        """
         if self._on_open_translator:
             self._on_open_translator()
 

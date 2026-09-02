@@ -112,6 +112,16 @@ Key points:
 
 - **ttkbootstrap discards explicit colours on standard `tk` widgets**: it re-themes them at construction, so `tk.Label(fg='#80b8ff', bg='#363636')` comes back `fg='#ffffff'`, `bg='#222222'`. Measured, not theoretical — it is why the furigana reading colour never actually shipped before v1.9.19. Pass `autostyle=False` whenever a colour must survive - use `ruby_text.NO_AUTOSTYLE`, which guards the kwarg for the no-ttkbootstrap case. `tag_configure()` colours are **not** affected, only widget options. Leave a widget themed when it should match the frame around it.
 
+- **`bind_all()` is interpreter-wide, and `<Destroy>` propagates upward.** Both halves bit the
+  History dialog at once: it bound the wheel with `canvas.bind_all("<MouseWheel>")` (stealing it
+  from the popup, the dictionary window and the main window for as long as the dialog was open)
+  and undid it from a `<Destroy>` handler on its own toplevel. A child widget's bindtags include
+  its toplevel, so destroying **one row** fired that handler — the first search keystroke, the
+  first deleted entry, even a focus-out restoring the placeholder unbound the wheel from the whole
+  application. Bind per widget and re-bind rows as they are rebuilt. `dictionary_mode.py` and
+  `custom_word_boxes.py` also use `bind_all`, but only for the duration of a drag, and they unbind
+  in the drag-end handler rather than on `<Destroy>` — that use is bounded and fine.
+
 - **Never use `grab_set()` on popups**: Tkinter `grab_set()` + `transient(hidden_root)` causes permanent UI freeze. The root window is withdrawn, so modal grab locks all input with no visible dialog to dismiss. Always use `attributes('-topmost', True)` + `lift()` + `focus_force()` + `after(100, topmost=False)` pattern instead.
 
 ## Remote Config System (Important)
@@ -176,7 +186,8 @@ Hardcoded values in `constants.py` serve as fallback defaults.
 - `custom_word_boxes.py` - Custom Word Boxes for manual phrase composition in Dictionary mode
 - `expanded_window.py` - Fullscreen translation view
 - `screenshot_handler.py` - Screenshot/vision translation handler
-- `history_dialog.py` - History viewer
+- `history_dialog.py` - History viewer (no scrollbar: the wheel binding *is* the scrolling, and
+  it is bound per widget - see Known Issues; no `grab_set`)
 - `toast.py` - Toast notifications
 - `settings/` - Settings window (modular tabs)
 
@@ -293,6 +304,10 @@ Popup "Replace" button copies translated text and pastes it back into the source
 ```
 [Copy] [Replace][⚙] [Dictionary] [Open Translator]  [×]
 ```
+On a **failed** translation the bar is replaced by `[API Settings] [Open Translator]  [×]`.
+`is_error_text()` (module level in `quick_translate.py`) is the single predicate for "this is a
+failure notice, not a translation" — the popup picks the bar with it and `app.py` uses the same
+call to blank the output box, so a failure notice is never pasted into the main window.
 
 ### Two Replace Modes (config: `quick_replace`):
 - **Manual Replace** (default, `quick_replace=False`): Click Replace → preview with strikethrough original → translated text → Agree/Cancel buttons
@@ -557,6 +572,12 @@ display rather than receiving pre-annotated strings through the queue.
     hangs below the frame's baseline. `content_ruby` is the bare frame now.
   - **A plain row on a ruby-carrying line is taller** (`content_lifted`), which `layout_rows()`
     counts separately — a wrapped Japanese sentence whose tail lands on its own row.
+- **Selection is painted onto the ruby frames** (`_on_selection`). Tk's `sel` tag draws straight
+  past an embedded window, so a drag across a sentence used to highlight everything *except* the
+  annotated words — holes exactly where the readings were. The reading is recoloured with its
+  base (`#80b8ff` on the selection background is unreadable). The original colours are recorded
+  at insert time, not read back later, so a caller's `kanji_fg` (the dictionary's highlight
+  colours) survives a deselect.
 - **No plate, no side padding — the Word look.** A ruby pair takes the widget's own background
   (read back after construction, so a ttkbootstrap re-theme is picked up), and
   `FURIGANA_RUBY_PAD_X = 0`, so an annotated word occupies exactly the width its characters

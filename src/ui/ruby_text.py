@@ -509,6 +509,8 @@ class RubyText(tk.Text):
         self._segments: List[RubySegment] = []
         self._frames: List[tk.Frame] = []
         self._window_base: Dict[str, str] = {}
+        self._window_colors: Dict[str, Tuple[str, str, str]] = {}
+        self._selected_frames: Set[str] = set()
         self._lifted_lines: Set[int] = set()
         self._layout: Optional[LayoutModel] = None
 
@@ -519,6 +521,7 @@ class RubyText(tk.Text):
 
         self.bind('<MouseWheel>', self._on_wheel)
         self.bind('<<Copy>>', self._on_copy)
+        self.bind('<<Selection>>', self._on_selection)
 
     # ------------------------------------------------------------------ #
     # Insertion
@@ -606,6 +609,11 @@ class RubyText(tk.Text):
         self.window_create(index, window=frame, align='baseline')
         self._frames.append(frame)
         self._window_base[str(frame)] = base
+        # Remembered, not read back later: selection overwrites them, and a
+        # caller's kanji_fg (the dictionary's highlight colours) would be lost.
+        self._window_colors[str(frame)] = (self._ruby_bg,
+                                           kanji_fg or self._kanji_fg,
+                                           self._ruby_fg)
 
         # An embedded window can be addressed by its path name, so this is the
         # frame's real line rather than a guess from the insertion index.
@@ -699,6 +707,8 @@ class RubyText(tk.Text):
         self._segments.clear()
         self._frames.clear()
         self._window_base.clear()
+        self._window_colors.clear()
+        self._selected_frames.clear()
         self._lifted_lines.clear()
 
     # ------------------------------------------------------------------ #
@@ -746,6 +756,69 @@ class RubyText(tk.Text):
             logging.debug(f"RubyText copy failed: {e}")
             return None
         return 'break'
+
+    def _selection_colors(self) -> Tuple[Optional[str], Optional[str]]:
+        """The widget's own selection colours, or (None, None) if unusable."""
+        try:
+            background = str(self.cget('selectbackground')) or None
+            foreground = str(self.cget('selectforeground')) or None
+        except tk.TclError:                    # pragma: no cover - defensive
+            return None, None
+        return background, foreground
+
+    def _on_selection(self, _event=None) -> None:
+        """Paint the ruby frames that fall inside the selection.
+
+        An embedded window is not text, so Tk's `sel` tag draws straight past
+        it: dragging across a sentence highlighted everything *except* the words
+        carrying a reading, leaving holes exactly where the readings were - and
+        making it look as though those words were not selected, which is also
+        what they were not being copied for.
+
+        The reading is recoloured with the base: `#80b8ff` on the selection
+        background is unreadable, the same reason the word chips repaint theirs.
+        """
+        if not self._frames:
+            return
+        try:
+            first, last = self.index('sel.first'), self.index('sel.last')
+        except tk.TclError:
+            first = last = None
+
+        selected = set()
+        if first is not None:
+            for frame in self._frames:
+                try:
+                    index = self.index(frame)
+                except tk.TclError:            # pragma: no cover - defensive
+                    continue
+                if self.compare(index, '>=', first) and self.compare(index, '<', last):
+                    selected.add(str(frame))
+
+        if selected == self._selected_frames:
+            return                             # a drag fires this constantly
+        self._selected_frames = selected
+
+        select_bg, select_fg = self._selection_colors()
+        if select_bg is None:                  # pragma: no cover - defensive
+            return
+        for frame in self._frames:
+            key = str(frame)
+            colors = self._window_colors.get(key)
+            if colors is None:                 # pragma: no cover - defensive
+                continue
+            background, base_fg, ruby_fg = colors
+            if key in selected:
+                background = select_bg
+                if select_fg:
+                    base_fg = ruby_fg = select_fg
+            try:
+                reading, base = frame.winfo_children()
+                frame.configure(bg=background)
+                reading.configure(bg=background, fg=ruby_fg)
+                base.configure(bg=background, fg=base_fg)
+            except (tk.TclError, ValueError):  # pragma: no cover - defensive
+                continue
 
     # ------------------------------------------------------------------ #
     # Sizing
