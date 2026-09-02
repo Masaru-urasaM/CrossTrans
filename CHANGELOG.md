@@ -4,7 +4,13 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
-### Version 1.9.20 — build guard, and the popup names its model (2026-09-02)
+_Nothing yet._
+
+---
+
+## [1.9.20] - Model credit, History fixed, ruby like Word (2026-09-02)
+
+### Build guard, and the popup names its model (2026-09-02)
 
 **Added**
 - **The quick-translate popup says which model produced the result.** A small dim line at the

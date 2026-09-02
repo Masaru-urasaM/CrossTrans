@@ -8,14 +8,13 @@
 
 ## Where things stand
 
-**Current release: 1.9.19** — tag `v1.9.19`, published 2026-08-18 with
-`CrossTrans_v1.9.19.exe` attached. It is the first public release since 1.9.16 (1.9.17 and
-1.9.18 were never published), so it ships Fix Grammar, Merged Translate-or-Fix and furigana
-everywhere in one go. Suite at that commit: 450 passed / 0 failed.
+**Current release: 1.9.20** — tag `v1.9.20`, published 2026-09-02 with
+`CrossTrans_v1.9.20.exe` attached. It carries the Word-like furigana work (copy the bases, one
+shared baseline, no plate, 均等割り付け), the History window fix, "Open Translator" on a failed
+quick translate, the dictionary window's empty band, the build script's false SUCCESS, and the
+popup's model credit. Suite at that commit: 551 passed / 0 failed.
 
-**In the working tree: 1.9.20, not released.** `VERSION` was bumped on 2026-09-02 for the
-History/ruby/error-popup fixes of 2026-08-28 and 2026-09-02 plus the popup's model credit; the
-commits are local and nothing is tagged or published yet. Suite at this point: 551 passed.
+The previous public release was 1.9.19 (2026-08-18, furigana everywhere).
 
 Every roadmap item up to and including 1.9.20 is complete and archived — nothing is
 half-finished, and there is no work in progress.
