@@ -448,7 +448,8 @@ Dictionary mode filters tokens before displaying as clickable buttons:
 ### Auto-dictionary detection REMOVED
 `translate()` no longer auto-switches to dictionary mode for short text (1-4 words).
 Dictionary lookup only happens through the dedicated Dictionary button.
-The `_is_dictionary_query()` method still exists but is unused.
+`_is_dictionary_query()` and the `SENTENCE_PUNCTUATION` constant it was the only user of
+were deleted on 2026-09-07 (D8) - do not reintroduce them to "restore" the behaviour.
 
 ### Custom Word Boxes
 

@@ -37,20 +37,6 @@ file anyone still has.
 
 ---
 
-### D8 — Dead code: `progress_dialog.py`, `_is_dictionary_query()`
-
-**Found**: 2026-09-07 (0 % coverage, zero references).
-**Effort**: Small.
-
-`src/ui/progress_dialog.py` (196 lines) has no importer anywhere in `src/`, `tests/` or
-`main.py`. `TranslationService._is_dictionary_query()` has been unused since auto-dictionary
-detection was removed. Neither is deleted here because neither was in the way — see the
-"touch only what the task requires" rule.
-
-**Trigger**: a cleanup pass, or the next change that lands in either file.
-
----
-
 ### D9 — `test_a_partial_selection_copies_only_that_part` is not hermetic
 
 **Found**: 2026-09-07 — failed once in six full-suite runs, passes in isolation.

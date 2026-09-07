@@ -37,8 +37,8 @@ outstanding.
 ## Backlog — identified, not scheduled
 
 D1–D3 were closed on 2026-08-28. The 2026-09-07 health review reopened the file with D4–D10;
-**D6 and D7 were closed the same day** (Groq had decommissioned every model both entries named —
-see Decision 15), and closing them surfaced **D11**. `DEFERRED.md` now holds **D4, D5, D8–D11** —
-signalling the running instance instead of scolding the second one, JSONL logging, two pieces of
-dead code, one non-hermetic clipboard test, the absence of CI, and the other providers' unverified
-default models. None is scheduled; each carries its own trigger condition.
+**D6, D7 and D8 were closed the same day** (Groq had decommissioned every model D6/D7 named —
+see Decision 15 — and the two pieces of dead code went with them), and closing them surfaced
+**D11**. `DEFERRED.md` now holds **D4, D5, D9, D10, D11** — signalling the running instance
+instead of scolding the second one, JSONL logging, one non-hermetic clipboard test, the absence
+of CI, and the other providers' unverified default models. None is scheduled; each carries its own trigger condition.

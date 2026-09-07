@@ -4,6 +4,31 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Dead code removed (2026-09-07)
+
+**Removed** (closes D8)
+- **`src/ui/progress_dialog.py`** (196 lines). A modal progress dialog for long file
+  translations that was never wired to anything: no importer in `src/`, `tests/`, `main.py`,
+  `src/ui/__init__.py` or the spec file's `hiddenimports`, and no dynamic import reaches it
+  either - the only `importlib` in the project loads NLP language packs. The only references to
+  `ProgressDialog` were inside the file: its own class statement, its docstring example, and a
+  `show_quick_progress()` helper nothing called.
+- **`TranslationService._is_dictionary_query()`** (35 lines), unused since auto-dictionary
+  detection was taken out - `translate()` stopped switching to dictionary mode for short text,
+  and lookup has gone through the Dictionary button ever since.
+- **`SENTENCE_PUNCTUATION`** (20 lines) went with it. The removed method was its only reader, so
+  leaving it would have replaced one orphan with another.
+
+Both were listed as deliberately-not-done under the "touch only what the task requires" rule;
+this is the cleanup pass their trigger asked for. `CLAUDE.md` now records the deletion rather
+than describing `_is_dictionary_query()` as present-but-unused, so it is not reintroduced later
+to "restore" behaviour that was removed on purpose.
+
+**Tests**: 593 -> 593, no regressions - nothing referenced either symbol. Verified beyond the
+suite: `pyflakes` reports no orphaned import left in `translation.py`, the module still compiles,
+and an import smoke test loads `src.app`, `src.ui`, `src.ui.quick_translate`,
+`src.ui.dictionary_popup` and `src.ui.settings` with the UI module gone.
+
 ### Every Groq model the app knew about was gone (2026-09-07)
 
 **Fixed**
