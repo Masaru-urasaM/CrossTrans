@@ -81,23 +81,10 @@
       "deepseek-v2.5"
     ],
     "Groq": [
-      "llama-3.3-70b-versatile",
-      "llama-3.3-70b-specdec",
-      "llama-3.2-1b-preview",
-      "llama-3.2-3b-preview",
-      "llama-3.2-11b-vision-preview",
-      "llama-3.2-90b-vision-preview",
-      "llama-3.1-70b-versatile",
-      "llama-3.1-8b-instant",
-      "llama3-70b-8192",
-      "llama3-8b-8192",
-      "llama-guard-3-8b",
-      "mixtral-8x7b-32768",
-      "gemma-7b-it",
-      "gemma2-9b-it",
-      "whisper-large-v3",
-      "whisper-large-v3-turbo",
-      "distil-whisper-large-v3-en"
+      "openai/gpt-oss-120b",
+      "openai/gpt-oss-20b",
+      "qwen/qwen3.6-27b",
+      "qwen/qwen3.8-27b"
     ],
     "xAI": [
       "grok-3",
@@ -259,8 +246,7 @@
       "claude-3-5-*"
     ],
     "groq": [
-      "llama-3.2-*-vision-*",
-      "llava-*"
+      "qwen/qwen3*"
     ],
     "xai": [
       "grok-*-vision*",
@@ -303,9 +289,8 @@
       "deepseek-coder"
     ],
     "Groq": [
-      "llama-3.3-70b-versatile",
-      "llama-3.1-70b-versatile",
-      "mixtral-8x7b-32768"
+      "openai/gpt-oss-120b",
+      "openai/gpt-oss-20b"
     ],
     "xAI": [
       "grok-2",

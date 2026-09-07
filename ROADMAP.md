@@ -36,8 +36,9 @@ outstanding.
 
 ## Backlog — identified, not scheduled
 
-D1–D3 were closed on 2026-08-28. The 2026-09-07 health review reopened the file: `DEFERRED.md`
-now holds **D4–D10** — signalling the running instance instead of scolding the second one, JSONL
-logging, the trial proxy's reasoning models, the stale Groq fallback list in `constants.py`, two
-pieces of dead code, one non-hermetic clipboard test, and the absence of CI. None is scheduled;
-each carries its own trigger condition.
+D1–D3 were closed on 2026-08-28. The 2026-09-07 health review reopened the file with D4–D10;
+**D6 and D7 were closed the same day** (Groq had decommissioned every model both entries named —
+see Decision 15), and closing them surfaced **D11**. `DEFERRED.md` now holds **D4, D5, D8–D11** —
+signalling the running instance instead of scolding the second one, JSONL logging, two pieces of
+dead code, one non-hermetic clipboard test, the absence of CI, and the other providers' unverified
+default models. None is scheduled; each carries its own trigger condition.

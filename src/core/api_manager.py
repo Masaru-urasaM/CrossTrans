@@ -26,7 +26,12 @@ DEFAULT_MODELS_BY_PROVIDER = {
     'OpenAI': ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo'],
     'Anthropic': ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022', 'claude-3-haiku-20240307'],
     'DeepSeek': ['deepseek-chat', 'deepseek-coder'],
-    'Groq': ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768'],
+    # All three previous entries were decommissioned by Groq (checked 2026-09-07).
+    # This list drives auto-pick and _try_model_rotation(), so it holds only models
+    # measured to answer a translation directly: gpt-oss returns the text in ~0.8 s
+    # with no reasoning preamble, where qwen3 spends most of the 1024-token budget
+    # (api_manager.py's max_tokens) inside <think> and can truncate the answer.
+    'Groq': ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
     'xAI': ['grok-2', 'grok-beta'],
     'Mistral': ['mistral-large-latest', 'mistral-small-latest'],
     'Perplexity': ['sonar', 'sonar-pro'],

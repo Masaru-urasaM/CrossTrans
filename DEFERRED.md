@@ -37,35 +37,6 @@ file anyone still has.
 
 ---
 
-### D6 — Trial proxy still admits reasoning and agentic models
-
-**Found**: 2026-07-01 review, re-verified 2026-09-07.
-**Effort**: Small (worker-side only).
-
-`cloudflare_worker.js` does not exclude qwen3 / gpt-oss / deepseek-r1 / `groq/compound*` from the
-trial pool, and `callOpenAIAPI` sends no `reasoning_format`. Exposure is small — Groq is
-`FALLBACK_ORDER` #3 and `getProviderModels()` now puts the curated defaults first — and the app
-strips `<think>` blocks on every path as of 2026-09-07, so a leak is cosmetic at worst. The
-agentic `compound` models can still exceed the 15 s timeout.
-
-**Trigger**: a trial translation comes back visibly wrong or times out.
-
----
-
-### D7 — `src/constants.py` Groq fallback list is stale
-
-**Found**: 2026-09-07 (compared against the live config).
-**Effort**: Small.
-
-17 hardcoded models, 10 of which no longer exist on Groq — including
-`distil-whisper-large-v3-en`, a speech model that was never a translation candidate. Only reached
-in tier-3 fallback (remote config unreachable *and* no local cache), where it offers the user
-models that will fail.
-
-**Trigger**: bundle it with the next change to `constants.py`.
-
----
-
 ### D8 — Dead code: `progress_dialog.py`, `_is_dictionary_query()`
 
 **Found**: 2026-09-07 (0 % coverage, zero references).
@@ -103,3 +74,28 @@ every push; the widget tests need a desktop session, and the ones that pop a rea
 (`TestItReallyExits`) would need checking there.
 
 **Trigger**: a second contributor, or the first regression that reaches a release.
+
+---
+
+### D11 — The other providers' hardcoded default models are unverified
+
+**Found**: 2026-09-07, while replacing Groq's (Decision 15).
+**Effort**: Small per provider, Medium to do them all properly.
+
+Closing D6/D7 proved that `STATIC_DEFAULT_MODELS_BY_PROVIDER` in `cloudflare_worker.js` — the
+table the 12-hourly cron copies into KV **without regenerating** — had a Groq entry in which both
+models were decommissioned. Only Groq was checked, because only Groq was in scope. The same table
+still claims `gemini-1.5-flash` / `gemini-1.5-pro`, `gpt-3.5-turbo`,
+`claude-3-5-sonnet-20241022`, `grok-2` / `grok-beta`, `deepseek-coder`, `llama-3.3-70b` (Cerebras)
+and `Meta-Llama-3.1-70B-Instruct` (SambaNova). Several of those look retired. The mirrored copy
+in `api_manager.DEFAULT_MODELS_BY_PROVIDER` carries the same values.
+
+This is not a fallback path: it is what auto-detection and `_try_model_rotation()` read on every
+run where the model field is blank. A wrong entry costs the user a failed attempt per model, in
+silence.
+
+**Dependency**: an API key per provider to check against, the way Groq's was checked. Cerebras
+and SambaNova keys exist only as Worker secrets, which cannot be read back.
+**Trigger**: a provider's auto-pick fails for a user, or the next time any of these keys is at
+hand. Better still, teach the cron to derive this table the way `fetchGroqModels()` already does
+for the model map, so it cannot rot again.

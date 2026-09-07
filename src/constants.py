@@ -227,20 +227,21 @@ MODEL_PROVIDER_MAP = {
         'deepseek-v3', 'deepseek-v2.5',
     ],
     # === GROQ ===
+    # Verified against Groq's own /models endpoint 2026-09-07. The entire Llama
+    # chat line is decommissioned: 15 of the 17 IDs that used to sit here are
+    # gone, and the 2 survivors were whisper - a speech model that was never a
+    # translation candidate. Only reached in tier-3 fallback (remote config
+    # unreachable AND no local cache), which is exactly when offering a model
+    # that 404s is worst. Live but deliberately absent: whisper / orpheus
+    # (speech), *-guard and gpt-oss-safeguard (classifiers), allam-2-7b (Arabic
+    # specialist, 4k ctx), groq/compound* (agentic - multi-step, and it cannot
+    # hold the trial proxy's 15 s timeout).
     'Groq': [
-        # Llama 3.3
-        'llama-3.3-70b-versatile', 'llama-3.3-70b-specdec',
-        # Llama 3.2
-        'llama-3.2-1b-preview', 'llama-3.2-3b-preview',
-        'llama-3.2-11b-vision-preview', 'llama-3.2-90b-vision-preview',
-        # Llama 3.1
-        'llama-3.1-70b-versatile', 'llama-3.1-8b-instant',
-        # Llama 3
-        'llama3-70b-8192', 'llama3-8b-8192', 'llama-guard-3-8b',
-        # Mixtral & Gemma
-        'mixtral-8x7b-32768', 'gemma-7b-it', 'gemma2-9b-it',
-        # Whisper (Audio)
-        'whisper-large-v3', 'whisper-large-v3-turbo', 'distil-whisper-large-v3-en',
+        # GPT-OSS - 131k ctx, answers directly (measured: no reasoning preamble)
+        'openai/gpt-oss-120b', 'openai/gpt-oss-20b',
+        # Qwen 3 - 131k ctx, multilingual; emits <think>, which
+        # text_cleanup.strip_thinking_tags() removes on every path
+        'qwen/qwen3.6-27b', 'qwen/qwen3.8-27b',
     ],
     # === XAI (Grok) ===
     'xAI': [
@@ -385,7 +386,10 @@ VISION_MODELS = {
     'google': ['gemini-*'],  # All Gemini models support vision
     'openai': ['gpt-4-vision-*', 'gpt-4o', 'gpt-4o-*'],  # Note: o1 models do NOT support vision
     'anthropic': ['claude-3-*', 'claude-3.5-*', 'claude-3-5-*'],  # Wildcard support
-    'groq': ['llama-3.2-*-vision-*', 'llava-*'],
+    # Measured 2026-09-07 with a 2x2 PNG: qwen3 accepts images; gpt-oss-*,
+    # groq/compound* and allam-2-7b reject them ('content must be a string').
+    # The llama-3.2 vision previews and llava are gone from Groq entirely.
+    'groq': ['qwen/qwen3*'],
     'xai': ['grok-*-vision*', 'grok-vision-*'],
     'mistral': ['pixtral-*'],
     'together': ['meta-llama/Llama-3.2-*-Vision-*', 'Qwen/Qwen2-VL-*', '*-vision-*'],

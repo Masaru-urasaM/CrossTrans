@@ -4,6 +4,72 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Every Groq model the app knew about was gone (2026-09-07)
+
+**Fixed**
+- **Groq's whole Llama line is decommissioned, and every list in the project still named it.**
+  Checked against Groq's own `/models` endpoint on 2026-09-07: of the 17 IDs hardcoded in
+  `constants.py`, **15 return nothing**, and the 2 survivors were `whisper-large-v3` and
+  `whisper-large-v3-turbo` - speech-to-text models that were never translation candidates. The
+  usable count was zero. Gone with them: `mixtral-8x7b-32768`, `gemma-7b-it`, `gemma2-9b-it`,
+  every `llama-3.2-*-preview`, `llama3-70b-8192`, and `distil-whisper-large-v3-en`, which had
+  been sitting in the model dropdown as something to translate with. What Groq still serves that
+  is a general chat model is four IDs: `openai/gpt-oss-120b`, `openai/gpt-oss-20b`,
+  `qwen/qwen3.6-27b`, `qwen/qwen3.8-27b`.
+- **Auto-pick was choosing a dead model, and this was live, not a fallback.** The list behind
+  auto-detection and `_try_model_rotation()` is `default_models_by_provider`, served from KV -
+  and KV takes it from a table hardcoded in the Worker, which the 12-hourly cron never
+  regenerates. Its Groq entry was `['llama-3.3-70b-versatile', 'llama-3.1-8b-instant']`. A user
+  with a Groq key and a blank model field had both attempts fail before the app gave up. The
+  same three-dead-models bug sat in `api_manager.DEFAULT_MODELS_BY_PROVIDER` for the tier-3 path.
+- **Screenshot translation could never pick a Groq model.** `VISION_MODELS['groq']` matched
+  `llama-3.2-*-vision-*`, `llava-*` and `meta-llama/llama-4-*` - three patterns that now match
+  nothing Groq serves. Measured by POSTing a 2x2 PNG to each live model: **`qwen/qwen3.6-27b`
+  accepts images**; `openai/gpt-oss-*`, `groq/compound*` and `allam-2-7b` answer
+  `400 content must be a string`. The pattern is now `qwen/qwen3*`.
+- **The trial proxy's Groq pool started with a 4k-context Arabic specialist.** `getProviderModels()`
+  carried a "curated defaults first" safeguard, but it selects with `models.includes(m)` against
+  the live catalog - and both curated names were decommissioned, so the filter matched nothing,
+  the branch never ran, and the trial fell through to the raw list sorted alphabetically:
+  `allam-2-7b` first, then the two agentic `groq/compound*` systems. The safeguard now fires
+  because the names in it exist.
+- **Reasoning and agentic models are kept out of the trial pool** (closes D6). New
+  `TRIAL_MODEL_DENY_PATTERNS` filters `*compound*` (agentic - plans and calls tools, routinely
+  outlives the 15 s proxy timeout), `*qwen3*`, `*deepseek-r1*`, `*-r1` (measured: qwen3.6 spent
+  239 completion tokens on "Good morning", nearly all inside `<think>`; under a smaller
+  `max_tokens` it truncates before reaching the answer, which then arrives empty once the block
+  is stripped) and `*allam*`. **`openai/gpt-oss-*` is deliberately not filtered** even though D6
+  named it - measured at 46-84 tokens in ~0.8 s with no reasoning preamble, and excluding it
+  would leave Groq's trial pool empty. The filter fails open: if it would empty a pool, the
+  unfiltered list is kept.
+- **`reasoning_format: 'hidden'` is now sent to Groq**, so a reasoning model's monologue is
+  suppressed server-side rather than stripped after the fact. It rides on a new per-provider
+  `extraBody`, spread into the request body, so Cerebras and SambaNova - which share
+  `callOpenAIAPI` - never receive a non-OpenAI-standard field.
+
+**Changed**
+- `src/constants.py` - `MODEL_PROVIDER_MAP['Groq']` (17 -> 4), `VISION_MODELS['groq']`.
+- `src/core/api_manager.py` - `DEFAULT_MODELS_BY_PROVIDER['Groq']` (3 dead -> the 2 measured to
+  answer directly). qwen3 is offered in the dropdown but kept out of auto-pick: it spends most
+  of the 1024-token budget in `<think>`.
+- `cloudflare_worker.js` - `PROVIDERS.groq.defaultModels`, `STATIC_DEFAULT_MODELS_BY_PROVIDER`,
+  `STATIC_PROVIDER_MODELS['Groq']`, `STATIC_VISION_PATTERNS['groq']`, and nine dead Groq entries
+  in `PROVIDER_MODEL_OVERRIDES` (the `llama-3.2-90b-vision` entry went entirely - Groq was its
+  only mapping). Deployed; the KV `models_config` was patched with the two fields the cron
+  derives from those tables so the fix applied immediately instead of at the next 12-hourly run,
+  and the cron reproduces exactly those values.
+- `docs/models_config_template.json` - the same three Groq lists.
+
+**Tests**: 593 -> 593, no regressions. No test asserted the contents of these tables; the three
+Groq assertions in `test_api_manager.py` route through `_identify_provider`'s suffix patterns
+(`-8192`, `-32768`, `gemma-`), not the model map, so they are unaffected. Verified by hand
+instead, against tier-3 (hardcoded) config: all four live IDs now resolve to Groq, where before
+the change `openai/gpt-oss-120b` fell through to `OpenAI` (step 5, `'gpt' in name`) and
+`qwen/qwen3.6-27b` to `SiliconFlow` (step 10, `'qwen' in name`) whenever no API key was passed.
+The Worker's shipped `getProviderModels`, `globMatch` and deny list were executed under Node
+against the real live catalog: Groq's trial order is now `gpt-oss-120b, gpt-oss-20b`, Cerebras is
+untouched, and a fully-blocked pool falls open rather than empty.
+
 ### A second instance that leaves, a log that survives, clean vision output (2026-09-07)
 
 **Fixed**

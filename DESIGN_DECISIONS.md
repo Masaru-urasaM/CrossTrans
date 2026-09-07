@@ -5,6 +5,75 @@ approaches. Newest first.
 
 ---
 
+### Decision 15 — The Groq lists are curated, not mirrored; the trial pool excludes by measured behaviour
+
+**Date**: 2026-09-07
+**Status**: RESOLVED
+
+**Problem**: Groq decommissioned its entire Llama chat line. 15 of the 17 IDs hardcoded in
+`constants.py` were gone, and so were the models named in four other tables. Two questions had to
+be answered before replacing them: what should the hardcoded lists contain, and what should the
+trial proxy be allowed to reach for.
+
+**Options considered**:
+
+1. **Mirror the live catalog** - copy whatever Groq's `/models` returns.
+   Pros: never stale again, one obvious source. Cons: the catalog is 14 entries of which 7 are
+   speech, TTS or safety classifiers, and the remainder includes agentic and Arabic-specialist
+   models. `constants.py` is the **tier-3 fallback**, reached only when the remote config is
+   unreachable *and* there is no cache - a first run with no internet. Handing that user a
+   dropdown of `whisper-large-v3` and `canopylabs/orpheus-arabic-saudi` to translate with is
+   exactly the failure the old list already caused.
+2. **Curate: general-purpose chat models only** - the four IDs that can actually translate.
+   Pros: every entry works; a short list is honest about being a safety net rather than pretending
+   to be a catalog. Cons: needs revisiting when Groq's lineup moves again.
+3. **Delete the hardcoded Groq list** and rely on remote + cache.
+   Pros: nothing to go stale. Cons: removes Groq from the dropdown entirely in the one situation
+   tier-3 exists for.
+
+**Resolution**: **Option 2**, with the split made explicit. Two lists exist and they answer
+different questions, so they get different contents:
+
+- `MODEL_PROVIDER_MAP['Groq']` = *what exists on this provider* -> all four general chat models
+  (`openai/gpt-oss-120b/20b`, `qwen/qwen3.6-27b`, `qwen/qwen3.8-27b`). It also drives
+  `_identify_provider()` step 1, and without the entries `openai/gpt-oss-120b` falls through to
+  **OpenAI** on `'gpt' in name` and `qwen/qwen3.6-27b` to **SiliconFlow** on `'qwen' in name`
+  whenever no API key is supplied. Listing them is what makes routing correct, not just tidy.
+- `DEFAULT_MODELS_BY_PROVIDER['Groq']` = *what to pick unattended* -> only `gpt-oss-120b/20b`.
+  Measured 2026-09-07: gpt-oss answers in ~0.8 s using 46-84 completion tokens with no reasoning
+  preamble; qwen3.6 spent 239 tokens on the same three-word input, nearly all of it inside
+  `<think>`. `api_manager` sends `max_tokens: 1024`, so on a real paragraph qwen3 can exhaust the
+  budget mid-monologue - and after `strip_thinking_tags()` the user gets an empty translation.
+  A model a user picks deliberately is their call; a model the app substitutes silently must be
+  boring and fast.
+
+For the trial pool the rule is **measured behaviour, not model category**. D6 asked for
+qwen3 / gpt-oss / deepseek-r1 / compound to be excluded. gpt-oss is nominally a reasoning model
+and was excluded from that exclusion, because measurement disagreed with the category: it emits
+no `<think>` and answers in under a second, and dropping it would leave Groq's pool empty, which
+is a worse outcome than the one being prevented. The deny list is therefore
+`*compound*` (agentic - outlives the 15 s timeout), `*qwen3*`, `*deepseek-r1*`, `*-r1`
+(budget-exhausting reasoning) and `*allam*` (4k-context Arabic specialist). It **fails open**:
+if the filter would empty a provider's pool the unfiltered list is used, because a slow model
+beats falling through to the next provider with nothing.
+
+`reasoning_format: 'hidden'` is sent **only to Groq**, via a per-provider `extraBody` spread into
+the request. `callOpenAIAPI` is shared with Cerebras and SambaNova, and the field is not
+OpenAI-standard; sending it to all three to save a line would risk a 400 on providers that were
+working. Measured accepted by Groq on a non-reasoning model (`openai/gpt-oss-120b` -> 200 OK,
+output unchanged), so it is safe to send unconditionally *within* Groq.
+
+**Rejected**: mirroring the catalog (option 1) - `GROQ_NON_CHAT_PATTERNS` already strips speech
+and classifier models on the Worker's live path, and duplicating that judgement as raw data in
+`constants.py` is how the old list rotted in the first place.
+
+**References**: `src/constants.py` (`MODEL_PROVIDER_MAP`, `VISION_MODELS`),
+`src/core/api_manager.py` (`DEFAULT_MODELS_BY_PROVIDER`, `_identify_provider`),
+`cloudflare_worker.js` (`TRIAL_MODEL_DENY_PATTERNS`, `getProviderModels`, `PROVIDERS.groq.extraBody`,
+`STATIC_VISION_PATTERNS`), `docs/models_config_template.json`, DEFERRED D6/D7 (both closed).
+
+---
+
 ### Decision 14 — Reasoning tags are stripped at the dispatch point, not at the callers
 
 **Date**: 2026-09-07
