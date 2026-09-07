@@ -37,19 +37,6 @@ file anyone still has.
 
 ---
 
-### D9 — `test_a_partial_selection_copies_only_that_part` is not hermetic
-
-**Found**: 2026-09-07 — failed once in six full-suite runs, passes in isolation.
-**Effort**: Small.
-
-`TestCopySelection` drives a real `<<Copy>>` and reads the **Windows clipboard**, which is a
-global resource any other process can take mid-test. The production code is not implicated; the
-test is.
-
-**Trigger**: the next time it fails. Fix by retrying on `TclError` or faking the clipboard.
-
----
-
 ### D10 — No CI
 
 **Found**: 2026-09-07. `.github/` holds only `copilot-instructions.md`.

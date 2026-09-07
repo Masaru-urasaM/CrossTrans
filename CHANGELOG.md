@@ -4,6 +4,34 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### The clipboard tests stop borrowing a global (2026-09-07)
+
+**Fixed** (closes D9)
+- **`TestCopySelection` no longer reads the Windows clipboard.** Its `_copy()` helper wrote a
+  sentinel, fired `<<Copy>>`, then read the value back with `clipboard_get()` - and the clipboard
+  is a global any other process can take between those two steps. It cost one failure in six
+  full-suite runs, always passing in isolation; the production code was never implicated. The
+  helper now captures what the handler writes, by intercepting the widget's own
+  `clipboard_clear` / `clipboard_append` for the duration of the call. The event still fires, the
+  binding still resolves and `RubyText._on_copy` still runs - only the round trip through a
+  shared OS resource is gone. D9 named one test; **five** shared that helper.
+
+**Added**
+- `test_it_really_reaches_the_windows_clipboard` - one deliberate round trip, kept so something
+  still proves Tk hands the text to Windows. It **skips** on `TclError` instead of failing, so a
+  stolen clipboard can never redden the suite again.
+
+**Verified as regression tests** (both probes run, not assumed):
+- Making `_on_copy` call `get()` instead of `get_plain()` - the original bug, annotated words
+  dropping out of the copy - fails **4** tests, three of them the hermetic ones.
+- Removing `return 'break'` fails **2**. Notably it does *not* fail the hermetic ones, and the
+  helper's docstring says so: `tk_textCopy` writes through the Tcl `clipboard` command, not
+  through the widget's Python methods, so an interception at that level cannot see the default
+  binding overwrite anything. That contract is pinned directly by
+  `test_the_handler_stops_tk_from_overwriting_it`, which asserts the return value itself.
+
+**Tests**: 593 -> 594.
+
 ### Dead code removed (2026-09-07)
 
 **Removed** (closes D8)

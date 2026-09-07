@@ -506,14 +506,41 @@ class TestCopySelection:
 
     @staticmethod
     def _copy(widget, first, last):
-        widget.tag_remove('sel', '1.0', 'end')
-        widget.tag_add('sel', first, last)
-        widget.focus_set()
-        widget.clipboard_clear()
-        widget.clipboard_append('@@untouched@@')
-        widget.event_generate('<<Copy>>')
-        widget.update()
-        return widget.clipboard_get()
+        """Drive a real <<Copy>> and return what landed on the clipboard.
+
+        The value is captured from the widget's own `clipboard_append` instead
+        of being read back with `clipboard_get()`. The Windows clipboard is a
+        global resource any other process can take mid-test, and reading it
+        back was the one non-hermetic thing in this file - the partial-selection
+        case failed once in six full-suite runs and always passed in isolation
+        (D9). The event still fires, the binding still resolves, and
+        `RubyText._on_copy` still runs and still calls clipboard_clear/append,
+        so the bug this class exists for - annotated words dropping out of the
+        copy - is caught here exactly as before (verified: making `_on_copy`
+        use `get()` again fails three of these).
+
+        What this CANNOT see is Tk's *default* binding. `tk_textCopy` writes
+        through the Tcl `clipboard` command, not through the widget's Python
+        methods, so a handler that stopped returning 'break' would overwrite
+        the real clipboard while leaving what we captured untouched. That
+        contract is pinned directly by
+        `test_the_handler_stops_tk_from_overwriting_it`, and end to end by
+        `test_it_really_reaches_the_windows_clipboard`.
+        """
+        written = []
+        widget.clipboard_clear = lambda *a, **k: written.clear()
+        widget.clipboard_append = lambda text, *a, **k: written.append(text)
+        try:
+            widget.tag_remove('sel', '1.0', 'end')
+            widget.tag_add('sel', first, last)
+            widget.focus_set()
+            widget.event_generate('<<Copy>>')
+            widget.update()
+        finally:
+            # remove the instance attributes so the class methods show again
+            del widget.clipboard_clear
+            del widget.clipboard_append
+        return ''.join(written)
 
     def test_the_whole_selection_survives(self, widget):
         widget.insert_notation(tk.END, NOTATION)
@@ -549,6 +576,24 @@ class TestCopySelection:
     def test_plain_text_is_unaffected(self, widget):
         widget.insert_plain(tk.END, "hello world")
         assert self._copy(widget, '1.0', 'end-1c') == "hello world"
+
+    def test_it_really_reaches_the_windows_clipboard(self, widget):
+        """The one deliberate round trip through the real clipboard.
+
+        `_copy` is hermetic by design, which leaves nothing checking that Tk
+        actually hands the text to Windows. This does - and skips rather than
+        fails when another process owns the clipboard, so it can never flake
+        the suite the way the old helper did.
+        """
+        widget.insert_notation(tk.END, NOTATION)
+        widget.tag_add('sel', '1.0', 'end-1c')
+        widget.focus_set()
+        widget.event_generate('<<Copy>>')
+        widget.update()
+        try:
+            assert widget.clipboard_get() == SOURCE
+        except tk.TclError as exc:
+            pytest.skip(f"another process took the clipboard: {exc}")
 
     def test_no_selection_is_left_to_tk(self, widget):
         widget.insert_notation(tk.END, NOTATION)
