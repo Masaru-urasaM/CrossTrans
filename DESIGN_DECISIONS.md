@@ -5,6 +5,103 @@ approaches. Newest first.
 
 ---
 
+### Decision 14 — Reasoning tags are stripped at the dispatch point, not at the callers
+
+**Date**: 2026-09-07
+**Status**: RESOLVED
+
+**Problem**: `<think>...</think>` was removed on the five text paths (all inside
+`TranslationService`) and on none of the vision ones. Image translation, screenshot OCR and
+scanned-PDF OCR call `AIAPIManager` directly and never see the service.
+
+**Options considered**:
+1. **Strip at the three vision callers** — Pros: no shared layer, each caller decides. Cons:
+   three edits for one rule, a fourth caller would silently miss it, and `translate_image` /
+   `translate_multimodal` each have two return paths (normal and model rotation) — so really six
+   places, which is how this was missed the first time.
+2. **Strip inside `_generate_content` / `_generate_content_multimodal`** — Pros: one site per
+   modality; every caller, every rotation substitute and every future caller is covered by
+   construction. It is exactly where `_record_attribution` already lives, for the same reason.
+   Cons: text results are then stripped twice (once here, once in the service). The function is
+   idempotent, so the second pass is a no-op.
+3. **Move the whole cleanup into the service and route vision through it** — Pros: one owner.
+   Cons: `pdf_ocr.py` has an API manager and no service; giving it one to clean a string is a
+   large change for a small rule.
+
+**Resolution**: option 2. `src/core/text_cleanup.strip_thinking_tags()` is the single
+implementation; the two dispatch methods call it, and `TranslationService._strip_thinking_tags()`
+delegates to it — kept, because the trial proxy does not go through the API manager at all.
+
+**References**: `src/core/text_cleanup.py`, `src/core/api_manager.py`
+(`_generate_content`, `_generate_content_multimodal`, `_dispatch_call`),
+`tests/test_vision_cleanup.py`. Same one-site argument as [Decision 11].
+
+---
+
+### Decision 13 — The frozen app logs to %APPDATA%, and prunes after 14 days
+
+**Date**: 2026-09-07
+**Status**: RESOLVED
+
+**Problem**: `setup_logging()` derived its directory from `__file__`. Under a PyInstaller onefile
+build that is inside `_MEIxxxxx`, the temp directory deleted on exit — so the shipped app's log,
+the only artefact a bug report can be diagnosed from, was discarded every run.
+
+**Options considered**:
+1. **Next to the EXE** (`dirname(sys.executable)/logs`) — Pros: obvious, portable-friendly.
+   Cons: the EXE may sit in `Program Files`, where a normal user cannot write; the auto-updater
+   also renames and moves it.
+2. **`%APPDATA%/CrossTrans/logs`** — Pros: always writable, survives an update, sits beside
+   `config.json` and `models_config.json`, so support asks for one folder. Cons: nothing ever
+   cleans it up.
+3. **`%TEMP%/CrossTrans`** — Pros: self-cleaning-ish. Cons: the same disappearing act, just
+   slower, and users are told to look in a folder Windows may empty.
+
+**Resolution**: option 2, with retention as the price of it — `prune_old_logs()` deletes daily
+files older than `LOG_RETENTION_DAYS` (14) at startup, matching only the exact
+`translator_YYYYMMDD.log` name so nothing else in the folder is at risk. Rewriting the format as
+JSONL (global Rule 10) is deliberately **not** part of this: it changes every log line and every
+reader, and the location bug is worth fixing on its own. Tracked in `DEFERRED.md`.
+
+**References**: `src/utils/logging_setup.py`, `tests/test_logging_setup.py`,
+`config.py` (`CONFIG_DIR`, the same root).
+
+---
+
+### Decision 12 — The "already running" notice is a native dialog with a watchdog
+
+**Date**: 2026-09-07
+**Status**: RESOLVED
+
+**Problem**: the second instance's notice hung the process forever, invisibly. ttkbootstrap's
+`Messagebox` builds its dialog with `transient=<the root>`; `main.py` withdraws that root; Tk
+withdraws a transient window whose master is withdrawn. The dialog was never mapped and `show()`
+waited in `wait_window()` for a click that could not be given. Measured with py-spy on a process
+resident since 2026-08-19.
+
+**Options considered**:
+1. **Deiconify the root before showing the dialog** — Pros: one line. Cons: flashes an empty main
+   window at someone who did not ask for one, and leaves the modality trap in place for the next
+   dialog built this way.
+2. **Stdlib `tkinter.messagebox`** — Pros: on Windows it is a native dialog (verified: window
+   class `#32770`, visible), so a withdrawn owner cannot hide it; no `grab_set`, no transient.
+   Cons: it does not match the app's theme — acceptable for a one-line notice that appears once.
+3. **Signal the running instance to show itself** — the lock socket is already listening, so the
+   second instance could connect and the first could raise its window. Pros: what most apps do,
+   and strictly better UX. Cons: needs an accept loop in the app's lifecycle, which is well
+   beyond fixing a hang. Deferred, not rejected.
+
+**Resolution**: option 2, plus a daemon `threading.Timer` that calls `os._exit(0)` after
+`ALREADY_RUNNING_TIMEOUT_S` (60 s). The dialog fix removes the known hang; the watchdog makes the
+whole path incapable of stranding a process, whatever a future dialog does. `os._exit` rather
+than `sys.exit` for the reason already documented for the updater: `SystemExit` is catchable, and
+Tk catches it. Option 3 is recorded in `DEFERRED.md`.
+
+**References**: `main.py` (`_warn_already_running`), `tests/test_single_instance_notice.py`,
+CLAUDE.md → Known Issues (the `grab_set()` entry this extends).
+
+---
+
 ### Decision 11 — The popup's model credit is read from the service, not carried in the queue
 
 **Date**: 2026-09-02

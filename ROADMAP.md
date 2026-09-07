@@ -19,16 +19,25 @@ The previous public release was 1.9.19 (2026-08-18, furigana everywhere).
 Every roadmap item up to and including 1.9.20 is complete and archived — nothing is
 half-finished, and there is no work in progress.
 
+**Unreleased work sits on `main`** (2026-09-07): the H1 health-review fixes — archived in
+`ROADMAP_DONE.md`, detailed in `CHANGELOG.md` → Unreleased, reasoned in Decisions 12–14. Suite
+551 → 593. **Not yet released**: no version bump, no tag, no build. That is the only thing
+outstanding.
+
 ---
 
 ## Active / Upcoming
 
-_No active items._ The next task has not been chosen yet.
+| Item | Status | Notes |
+|------|--------|-------|
+| Cut 1.9.21 | 📋 Planned | Bump `VERSION`, run `build_exe.bat`, tag, write release notes. The work it would ship is already on `main` and tested |
 
 ---
 
 ## Backlog — identified, not scheduled
 
-_Empty._ D1 (dictionary window height) and D2 (dead import) were fixed on 2026-08-28; D3
-(furigana reading colour) was resolved the same day — readings stay blue, see Decision 9.
-`DEFERRED.md` holds nothing at the moment.
+D1–D3 were closed on 2026-08-28. The 2026-09-07 health review reopened the file: `DEFERRED.md`
+now holds **D4–D10** — signalling the running instance instead of scolding the second one, JSONL
+logging, the trial proxy's reasoning models, the stale Groq fallback list in `constants.py`, two
+pieces of dead code, one non-hermetic clipboard test, and the absence of CI. None is scheduled;
+each carries its own trigger condition.

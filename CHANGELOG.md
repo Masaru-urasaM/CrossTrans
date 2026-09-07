@@ -4,7 +4,62 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
-_Nothing yet._
+### A second instance that leaves, a log that survives, clean vision output (2026-09-07)
+
+**Fixed**
+- **A second CrossTrans no longer hangs forever, invisibly.** Launching the app while it was
+  already running left a process resident with no window at all: on the machine this was found,
+  one had been sitting there since 2026-08-19 - nineteen days - holding 30 MB and its own
+  PyInstaller temp directory. The notice is built by ttkbootstrap's `Messagebox`, which parents
+  its dialog with `transient=<the root>`, and `main.py` withdraws that root; Tk withdraws a
+  transient window whose master is withdrawn, so the dialog was never mapped and `show()` sat in
+  `wait_window()` waiting for a click nobody could give it. Confirmed with py-spy against a live
+  hang, and it is the same family as the `grab_set()` trap already in CLAUDE.md's Known Issues.
+  The notice is now the stdlib messagebox - a native Windows dialog (class `#32770`), which a
+  withdrawn root cannot hide - and a daemon watchdog force-exits the process after
+  `ALREADY_RUNNING_TIMEOUT_S`, so no future dialog trouble can strand one either.
+- **The EXE writes its log somewhere it can be read.** `setup_logging()` derived the directory
+  from `__file__`, which under a onefile build resolves inside the temporary `_MEIxxxxx`
+  extraction directory - the one PyInstaller deletes on exit. Every log the shipped app ever
+  wrote was thrown away, which is precisely the log anyone asks for after a crash. Measured
+  2026-09-07: six orphaned `_MEI*` directories (202 MB), each holding a `logs/translator_*.log`
+  nobody could have found. The frozen app now logs to `%APPDATA%/CrossTrans/logs`, beside the
+  config file support already asks for; running from source is unchanged.
+- **Reasoning tags no longer reach screenshot, image and PDF results.** `<think>...</think>` was
+  stripped on all five text paths but on none of the vision ones - `app.py` (image and file
+  translation), `screenshot_handler.py` (Win+Alt+S) and `pdf_ocr.py` all call the API manager
+  directly, without passing through `TranslationService`. A reasoning model, which the user can
+  select and which rotation can substitute on its own, would have printed its whole monologue
+  over the screenshot, or fed it into the text a scanned PDF is translated from. The cleanup now
+  sits in `_generate_content` / `_generate_content_multimodal` - the two dispatch points every
+  call in the class funnels through, the same place the model credit is recorded and for the
+  same reason: one site instead of eight return statements.
+
+**Added**
+- `src/core/text_cleanup.py` - `strip_thinking_tags()`, the single implementation.
+- `logging_setup.resolve_log_dir()` / `is_frozen()` / `prune_old_logs()`. The move to `%APPDATA%`
+  creates growth nothing cleans up, so daily logs older than `LOG_RETENTION_DAYS` (14) are
+  deleted at startup. Only files matching the exact `translator_YYYYMMDD.log` name are eligible,
+  and one that cannot be deleted - another instance holding it open - is skipped, not fatal.
+
+**Changed**
+- `main.py` no longer imports ttkbootstrap at all; the already-running branch is one call to
+  `_warn_already_running()`.
+- `TranslationService._strip_thinking_tags()` delegates to the shared function. It stays because
+  the trial proxy does not go through the API manager. Its `import re` went with the old body.
+
+**Tests**: 551 -> 593. New `tests/test_single_instance_notice.py` (11): the notice is the stdlib
+messagebox and never ttkbootstrap, the watchdog is armed as a daemon before the dialog and
+disarmed after it - including when the dialog raises - and it force-exits with `os._exit`; plus
+an end-to-end test that holds the lock port and asserts a second instance really terminates.
+`tests/test_logging_setup.py` (14): the frozen path is under `%APPDATA%` and never under
+`_MEI*`, source builds are unchanged, and retention deletes only what this module wrote.
+`tests/test_vision_cleanup.py` (17): both dispatch points strip while still recording the
+credit, `translate_image` / `translate_multimodal` / `_dispatch_call` (the rotation route) all
+return clean text, and an unclosed tag is left alone rather than swallowing the answer.
+Verified as regression tests: restoring the ttkbootstrap dialog fails the end-to-end test after
+a 45 s hang, restoring the `__file__` log path fails 3, removing the pruning call fails 1, and
+unwrapping the two dispatch sites fails 5.
 
 ---
 

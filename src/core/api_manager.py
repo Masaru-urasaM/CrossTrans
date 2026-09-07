@@ -14,6 +14,7 @@ import base64
 
 from src.core.remote_config import get_config
 from src.core.multimodal import MultimodalProcessor
+from src.core.text_cleanup import strip_thinking_tags
 from src.core.ssl_pinning import get_ssl_context_for_url
 
 # Default models to try for each provider when model is "Auto"
@@ -452,15 +453,18 @@ class AIAPIManager:
 
     def _generate_content(self, provider: str, api_key: str, model_name: str,
                            prompt: str, image_path: Optional[str] = None) -> str:
-        """Dispatch one request and record which model served it.
+        """Dispatch one request, clean the answer, record which model served it.
 
         Every successful text/vision call in this class funnels through here, so
         recording the attribution once covers the configured model, an
         auto-detected one and any rotation substitute without eight separate
-        bookkeeping sites.
+        bookkeeping sites. Reasoning tags are stripped for the same reason: the
+        image, screenshot and PDF-OCR callers read this result directly, without
+        passing through TranslationService.
         """
-        result = self._route_generate_content(provider, api_key, model_name,
-                                              prompt, image_path)
+        result = strip_thinking_tags(
+            self._route_generate_content(provider, api_key, model_name,
+                                         prompt, image_path))
         self._record_attribution(model_name, provider)
         return result
 
@@ -1043,9 +1047,10 @@ class AIAPIManager:
     def _generate_content_multimodal(self, provider: str, api_key: str, model_name: str,
                                       prompt: str, image_paths: List[str],
                                       file_contents: Dict[str, str]) -> str:
-        """Multimodal dispatch; records the attribution like _generate_content."""
-        result = self._route_generate_multimodal(provider, api_key, model_name,
-                                                 prompt, image_paths, file_contents)
+        """Multimodal dispatch; cleans and attributes like _generate_content."""
+        result = strip_thinking_tags(
+            self._route_generate_multimodal(provider, api_key, model_name,
+                                            prompt, image_paths, file_contents))
         self._record_attribution(model_name, provider)
         return result
 

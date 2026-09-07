@@ -124,6 +124,22 @@ Key points:
 
 - **Never use `grab_set()` on popups**: Tkinter `grab_set()` + `transient(hidden_root)` causes permanent UI freeze. The root window is withdrawn, so modal grab locks all input with no visible dialog to dismiss. Always use `attributes('-topmost', True)` + `lift()` + `focus_force()` + `after(100, topmost=False)` pattern instead.
 
+- **A ttkbootstrap dialog on a withdrawn root never appears, and blocks forever.** The same trap
+  from the other side: `Messagebox`/`Dialog.show()` builds its toplevel with
+  `transient=<the master>` and then calls `grab_set()` + `wait_window()`. **Tk withdraws a
+  transient window whose master is withdrawn**, so the dialog is never mapped — `show()` waits
+  for a click on a window that does not exist. `main.py`'s "already running" notice did this and
+  left a process resident for 19 days with no visible window (measured 2026-09-07 with py-spy;
+  see Decision 12). For a notice on a hidden root use **stdlib `tkinter.messagebox`** — on
+  Windows it is a native dialog (class `#32770`), which a withdrawn owner cannot hide — and give
+  any such path a watchdog that force-exits, so a future dialog cannot strand a process either.
+
+- **The frozen app must not derive paths from `__file__`.** Under a onefile build it resolves
+  inside `_MEIxxxxx`, the temp directory PyInstaller deletes on exit. `setup_logging()` did this
+  and threw away every log the shipped EXE ever wrote. Frozen paths belong under
+  `%APPDATA%/CrossTrans` (`logging_setup.resolve_log_dir()`, guarded by `is_frozen()`); anything
+  written there needs its own retention, hence `prune_old_logs()`.
+
 ## Remote Config System (Important)
 
 Models, providers, and API URLs are dynamically fetched from Cloudflare Worker KV.
@@ -166,6 +182,8 @@ Hardcoded values in `constants.py` serve as fallback defaults.
 - `file_processor.py` - Document extraction (.docx, .txt, .srt)
 - `pdf_ocr.py` - Scanned PDF OCR support
 - `crypto.py` - Secure API key storage (DPAPI encryption)
+- `text_cleanup.py` - `strip_thinking_tags()`: the single place `<think>...</think>` is removed,
+  called from the API manager's two dispatch points so vision callers are covered too
 - `auth.py` - Windows Hello authentication
 - `provider_health.py` - Smart provider fallback
 - `quota_manager.py` - Trial mode quota tracking
@@ -195,6 +213,8 @@ Hardcoded values in `constants.py` serve as fallback defaults.
 
 - `updates.py` - Auto-update system (check, download, install)
 - `single_instance.py` - TCP socket lock for single instance
+- `logging_setup.py` - log file setup; `resolve_log_dir()` (%APPDATA% when frozen, repo `logs/`
+  from source), `prune_old_logs()` (14-day retention)
 - `ui_helpers.py` - Dark title bar, word filtering utilities
 
 ## Build
