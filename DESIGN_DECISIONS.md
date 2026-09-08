@@ -5,6 +5,53 @@ approaches. Newest first.
 
 ---
 
+### Decision 18 - CI checks its own green tick
+
+**Date**: 2026-09-08
+**Status**: RESOLVED
+
+**Problem**: The suite only ever ran on one machine, by hand (D10). Adding a workflow is trivial;
+making it *mean* something is not. `tests/conftest.py`'s `tk_root` fixture calls `pytest.skip`
+when Tk cannot open a display - correct for a developer on a headless shell - and **312 of the
+630 tests need it**. A GitHub runner without a usable desktop session would skip roughly half the
+suite, pytest would exit 0, and the badge would be green.
+
+That is worse than no CI. No CI is a known gap; a green tick over an untested half is a false
+one, and it is exactly the failure the project's own Rule 4 warns about ("any decrease in test
+count = regression") - except silent, because nothing was counting.
+
+**Options considered**:
+
+1. **Just add the workflow.** Pros: five minutes. Cons: the failure above, undetected.
+2. **Make `tk_root` fail instead of skip under CI** (e.g. when `$CI` is set). Pros: no extra
+   tooling. Cons: turns one broken runner into 312 identical red tests with no summary, and
+   couples a fixture to an environment variable that has nothing to do with what it does.
+3. **Count the results and judge them.** Have pytest write JUnit XML and check it: fail when more
+   tests were skipped than a healthy run explains, or when barely anything was collected.
+
+**Resolution**: **Option 3**, as `tools/check_test_counts.py`, run with `if: always()` so the
+counts are reported even when pytest itself failed. The ceiling (`DEFAULT_MAX_SKIPPED = 10`)
+leaves room for the genuinely environment-dependent skips - the clipboard round trip yields when
+another process owns the clipboard (D9) - and sits far below the 312 a missing display produces.
+`--min-total 500` catches the other empty outcome, a collection error that finds almost nothing.
+
+The guard is a script with its own tests rather than an inline shell one-liner, because a check
+that silently stops working is precisely the thing being guarded against. The headless scenario
+is pinned by feeding it a synthetic report with 312 skips.
+
+`windows-latest` only: the app registers global hotkeys, reads the registry and the clipboard
+through pywin32, and draws Tk widgets. There is nothing meaningful to run on Linux, so a matrix
+would buy nothing but minutes.
+
+**Not verified**: whether the runner actually has a usable Tk display. That cannot be known
+without a push. Both outcomes are handled - a diagnostic step reports Tk's availability, and the
+guard turns the bad one into a clear failure rather than a quiet pass.
+
+**References**: `.github/workflows/tests.yml`, `tools/check_test_counts.py`,
+`tests/test_ci_guard.py`, `tests/conftest.py` (`tk_root`), global Rule 4.
+
+---
+
 ### Decision 17 - The log file is JSON, the console is not, and the tag is derived
 
 **Date**: 2026-09-08

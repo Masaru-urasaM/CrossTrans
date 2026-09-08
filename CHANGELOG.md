@@ -4,6 +4,30 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### The suite runs somewhere other than one desk (2026-09-08)
+
+**Added** (closes D10)
+- **`.github/workflows/tests.yml`** - the full suite on `windows-latest` for every push and pull
+  request, plus manual dispatch. Windows only: the app registers global hotkeys, reads the
+  registry and clipboard through pywin32, and draws Tk widgets, so a Linux job would test nothing
+  the app does.
+- **`tools/check_test_counts.py`, and it is the point of the change.** `conftest.py`'s `tk_root`
+  fixture skips when Tk cannot open a display, and **312 of the 630 tests need one** - so a runner
+  without a desktop session would skip half the suite, pytest would exit 0, and the badge would be
+  green over an untested half. That is worse than no CI: no CI is a known gap, a false green is a
+  believed one. The guard reads the JUnit XML and fails the build when more tests were skipped
+  than a healthy run explains, or when barely anything was collected. It runs with `if: always()`
+  so the counts are reported even when pytest itself failed. See Decision 18.
+
+**Tests**: 630 -> 642. `tests/test_ci_guard.py` (12) pins the guard itself, including the headless
+scenario fed as a synthetic report with 312 skips - a check that quietly stops working is exactly
+what is being guarded against. The workflow's own commands were run locally end to end:
+`pytest --junitxml --cov` then the guard, 642 passed, guard OK.
+
+**Not verified**: whether the GitHub runner has a usable Tk display. That needs a push to find
+out. Both outcomes are handled - a diagnostic step reports Tk's availability, and the guard turns
+the bad one into a clear failure instead of a quiet pass.
+
 ### The log file became machine-readable (2026-09-08)
 
 **Changed** (closes D5)

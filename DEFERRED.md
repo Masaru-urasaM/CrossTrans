@@ -8,19 +8,6 @@
 
 ---
 
-### D10 — No CI
-
-**Found**: 2026-09-07. `.github/` holds only `copilot-instructions.md`.
-**Effort**: Medium.
-
-593 tests only ever run on one machine, by hand. A `windows-latest` workflow could run them on
-every push; the widget tests need a desktop session, and the ones that pop a real dialog
-(`TestItReallyExits`) would need checking there.
-
-**Trigger**: a second contributor, or the first regression that reaches a release.
-
----
-
 ### D11 — The other providers' hardcoded default models are unverified
 
 **Found**: 2026-09-07, while replacing Groq's (Decision 15).

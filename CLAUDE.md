@@ -268,6 +268,17 @@ system cannot find the drive specified." Both measured; a test guards the first.
 pytest tests/ --cov=src
 ```
 
+CI runs the same suite on `windows-latest` for every push and PR
+(`.github/workflows/tests.yml`). Windows only - the app registers global hotkeys,
+reads the registry and the clipboard through pywin32, and draws Tk widgets.
+
+**A green tick is checked, not trusted.** `conftest.py`'s `tk_root` fixture *skips*
+without a usable display and 312 of the tests need one, so a runner with no desktop
+session would skip half the suite and still pass. `tools/check_test_counts.py` reads
+the JUnit XML and fails the build when more tests were skipped than a healthy run
+explains (`DEFAULT_MAX_SKIPPED`), or when suspiciously few were collected at all.
+Raise the ceiling only for a skip you can name.
+
 ## Run
 
 ```bash

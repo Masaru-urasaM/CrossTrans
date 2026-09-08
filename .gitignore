@@ -86,6 +86,7 @@ tests/__pycache__/
 .pytest_cache/
 htmlcov/
 .coverage
+junit.xml
 
 # Config backups (may contain API keys)
 *_backup.json
