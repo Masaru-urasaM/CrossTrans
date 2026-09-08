@@ -284,25 +284,27 @@ MODEL_PROVIDER_MAP = {
         'llama-3.1-sonar-huge-128k-online',
     ],
     # === CEREBRAS ===
+    # Cerebras serves exactly three models (its own /models, 2026-09-08 with a
+    # real key). All SIX IDs that used to be here are gone - the whole Llama line
+    # and qwen-3-32b - and llama-3.3-70b / llama3.1-70b answered a real request
+    # with 404 "Model does not exist". The three below returned 402 "Payment
+    # required" instead, which is the useful distinction: Cerebras validates the
+    # model before it checks billing, so 402 proves the model exists where 404
+    # proves it does not. Not callable beyond that - the key has no credit.
     'Cerebras': [
-        # Llama Series
-        'llama-4-scout-17b', 'llama-4-maverick-17b',
-        'llama-3.3-70b', 'llama3.1-8b', 'llama3.1-70b',
-        # Qwen Series
-        'qwen-3-32b',
+        'gpt-oss-120b', 'qwen-3.8-27b', 'gemma-4-31b',
     ],
     # === SAMBANOVA ===
+    # SambaNova's own /models, 2026-09-08 with a real key: 11 of the 12 IDs that
+    # used to be here are gone - every DeepSeek-R1 variant, the whole Llama 3.1/3.2
+    # line and all three Qwen entries. Only Meta-Llama-3.3-70B-Instruct survived.
+    # Weaker evidence than Cerebras and Google, deliberately noted: SambaNova checks
+    # billing BEFORE model validity, so every call returned 402 - including one for
+    # a model absent from its own catalogue. The listing is the only evidence here;
+    # no model below has been sent a real translation.
     'SambaNova': [
-        # DeepSeek
-        'DeepSeek-R1', 'DeepSeek-R1-Distill-Llama-70B', 'DeepSeek-R1-Distill-Qwen-32B',
-        # Llama 3.3
-        'Meta-Llama-3.3-70B-Instruct',
-        # Llama 3.2
-        'Meta-Llama-3.2-1B-Instruct', 'Meta-Llama-3.2-3B-Instruct',
-        # Llama 3.1
-        'Meta-Llama-3.1-8B-Instruct', 'Meta-Llama-3.1-70B-Instruct', 'Meta-Llama-3.1-405B-Instruct',
-        # Qwen
-        'Qwen2.5-72B-Instruct', 'Qwen2.5-Coder-32B-Instruct', 'QwQ-32B-Preview',
+        'Meta-Llama-3.3-70B-Instruct', 'gemma-4-31B-it', 'gpt-oss-120b',
+        'DeepSeek-V3.2', 'DeepSeek-V3.1', 'MiniMax-M3', 'MiniMax-M2.7',
     ],
     # === TOGETHER ===
     'Together': [
@@ -406,7 +408,13 @@ API_KEY_PATTERNS = {
     'sk-or-v1-': 'OpenRouter', # OpenRouter keys
     'pplx-': 'Perplexity',    # Perplexity keys
     'hf_': 'HuggingFace',     # HuggingFace keys start with hf_
+    'csk-': 'Cerebras',       # Cerebras keys start with csk-
     # Note: sk- is used by OpenAI, DeepSeek, Together, SiliconFlow - need model name
+    # SambaNova cannot be added: its keys are bare UUIDs with no prefix to match.
+    # A provider missing from this table falls through _detect_provider_from_key()
+    # to its 'default to Google' branch, so a Cerebras user with Provider=Auto and
+    # a blank model field was being handed gemini-2.5-flash and sending it to
+    # api.cerebras.ai (measured 2026-09-08).
 }
 
 # ============== VISION MODELS ==============

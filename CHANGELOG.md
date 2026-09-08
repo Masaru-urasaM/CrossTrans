@@ -4,6 +4,47 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Cerebras and SambaNova, and a correction (2026-09-08)
+
+Keys were supplied for Cerebras, Groq and SambaNova, so three more rows of D11 could be checked
+against the real APIs.
+
+**Fixed**
+- **Cerebras: all six models in the dropdown and both defaults were dead.** `llama-3.3-70b` and
+  `llama3.1-70b` answered `404 Model does not exist` to a real request. Cerebras now serves
+  exactly three models. Defaults are `gpt-oss-120b`, `qwen-3.8-27b`.
+- **SambaNova: eleven of twelve dropdown models and one of two defaults were gone** - every
+  DeepSeek-R1 variant, the whole Llama 3.1/3.2 line, all three Qwen entries.
+  `Meta-Llama-3.3-70B-Instruct` survived and stays first; `gemma-4-31B-it` replaces the dead
+  `Meta-Llama-3.1-70B-Instruct`.
+- **A Cerebras key was being read as Google.** `csk-` was missing from `API_KEY_PATTERNS`, and
+  `_detect_provider_from_key()` falls back to Google, so a Cerebras user with Provider on 'Auto'
+  and a blank model field was handed `gemini-2.5-flash` and sent it to `api.cerebras.ai`. Silent,
+  and indistinguishable from a dead model. SambaNova cannot be fixed the same way - its keys are
+  bare UUIDs with no prefix to match.
+
+**Confirmed working** - Groq's defaults, by real translation: `openai/gpt-oss-120b` 0.7 s and
+`openai/gpt-oss-20b` 0.6 s, both returning clean Japanese with their reasoning in a *separate*
+`reasoning` field rather than inline in the content.
+
+**Corrected**: earlier entries said reasoning models risk truncation because `api_manager` sends
+`max_tokens: 1024`. That is wrong - `_call_generic_openai_style` sends **no** `max_tokens`, and
+the 1024 cap belongs to `_call_anthropic` alone. The measurements and the conclusion are
+unchanged (qwen3.6-27b really does take 509 completion tokens and 1.3 s against gpt-oss's 134 and
+0.7 s, with `<think>` inline in content); only the mechanism was misstated. The real hard limit
+on that path is `timeout=10`.
+
+**Evidence quality, stated per provider** - the point of D11 is not to guess twice:
+- *Cerebras* - strong. It validates the model **before** it checks billing, so `404` and `402` are
+  a real distinction: 404 proves gone, 402 proves the model exists. The account has no credit, so
+  the three live models could not be translated with.
+- *SambaNova* - weak, and marked as such. It returns `402` **before** validating the model - even
+  for a model absent from its own catalogue - so the listing is the only evidence and no model
+  was called.
+- *Groq* - strong. Real translations, end to end.
+
+**Tests**: 674 -> 676.
+
 ### OpenRouter's defaults were dead too, and pointed at the wrong provider (2026-09-08)
 
 **Fixed** (narrows D11 further)
@@ -32,8 +73,9 @@ All notable changes to CrossTrans are documented here.
 
 **Not verified, and said plainly**: no OpenRouter key was available, so the two new defaults are
 confirmed *routable* but not confirmed to translate well. The risk to test when a key appears is
-the one already measured on Groq: `max_tokens` is 1024 and a model that spends it inside `<think>`
-truncates the answer - both of these lean reasoning/agentic.
+**latency**: `_call_generic_openai_style` sends no `max_tokens` but does use `timeout=10`, and
+both of these lean reasoning/agentic - on Groq the comparable model took 1.3 s against gpt-oss's
+0.7 s.
 
 **A shortcut that does not work**: OpenRouter's `/endpoints` resource names the upstreams serving
 each model, which looked like a free way to verify other providers' native IDs. It lists Groq as
@@ -279,8 +321,10 @@ and an import smoke test loads `src.app`, `src.ui`, `src.ui.quick_translate`,
 **Changed**
 - `src/constants.py` - `MODEL_PROVIDER_MAP['Groq']` (17 -> 4), `VISION_MODELS['groq']`.
 - `src/core/api_manager.py` - `DEFAULT_MODELS_BY_PROVIDER['Groq']` (3 dead -> the 2 measured to
-  answer directly). qwen3 is offered in the dropdown but kept out of auto-pick: it spends most
-  of the 1024-token budget in `<think>`.
+  answer directly). qwen3 is offered in the dropdown but kept out of auto-pick: it spends ~4x the
+  completion tokens inside `<think>`. *(Corrected 2026-09-08: this originally said qwen3 exhausts
+  a 1024-token `max_tokens` budget. That path sends no `max_tokens` - the cap is Anthropic-only.
+  The token measurements and the conclusion are unchanged.)*
 - `cloudflare_worker.js` - `PROVIDERS.groq.defaultModels`, `STATIC_DEFAULT_MODELS_BY_PROVIDER`,
   `STATIC_PROVIDER_MODELS['Groq']`, `STATIC_VISION_PATTERNS['groq']`, and nine dead Groq entries
   in `PROVIDER_MODEL_OVERRIDES` (the `llama-3.2-90b-vision` entry went entirely - Groq was its

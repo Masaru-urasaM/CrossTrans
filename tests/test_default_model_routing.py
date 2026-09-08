@@ -92,3 +92,24 @@ def test_no_default_model_is_a_batch_variant():
     for provider, models in DEFAULT_MODELS_BY_PROVIDER.items():
         for model in models:
             assert ':batch' not in model, f'{provider} default {model!r} is a batch endpoint'
+
+
+def test_a_cerebras_key_is_not_mistaken_for_google(offline_manager):
+    """`_detect_provider_from_key()` defaults to Google, so a missing pattern is expensive.
+
+    Measured 2026-09-08 with a real key: without the `csk-` entry a Cerebras user
+    who leaves Provider on 'Auto' and the model field blank was handed Google's
+    default (`gemini-2.5-flash`) and sent it to `api.cerebras.ai`. The failure is
+    silent and looks like a dead model, which is what made it worth a test rather
+    than just a table entry.
+    """
+    assert offline_manager._detect_provider_from_key('csk-' + 'x' * 20) == 'Cerebras'
+
+
+def test_an_unknown_model_on_a_known_key_still_finds_its_provider(offline_manager):
+    """The key pattern is the backstop when a model is too new to be in the map."""
+    for prefix, provider in API_KEY_PATTERNS.items():
+        identified = offline_manager._identify_provider('some-unreleased-model', prefix + 'x' * 20)
+        assert identified == provider, (
+            f'a {provider} key ({prefix}...) with an unlisted model identified as {identified}'
+        )

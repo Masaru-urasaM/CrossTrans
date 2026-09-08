@@ -184,6 +184,16 @@ listed in the map. So: **every entry in `default_models_by_provider` must also a
 `MODEL_PROVIDER_MAP` under the same provider.** `tests/test_default_model_routing.py` asserts the
 round-trip for all thirteen providers at tier 3, where `constants.py` is the only list there is.
 
+**A provider missing from `API_KEY_PATTERNS` is read as Google.** `_detect_provider_from_key()`
+ends in `return 'Google'`, so a key it cannot place picks up Google's default model and sends it
+to the user's own provider - silent, and indistinguishable from a dead model. Cerebras had this
+until `csk-` was added (2026-09-08). Still uncovered: OpenAI, DeepSeek, Mistral, Together,
+SiliconFlow, SambaNova - and **SambaNova can never be covered**, its keys are bare UUIDs.
+
+**Thirteen model IDs are claimed by two providers at once**, and `_identify_provider()` returns
+the first match, so one of the two always loses (DEFERRED D12). It only matters under
+`provider='Auto'`. Do not "fix" it by deleting a real model from a provider's list.
+
 ### Key module: `src/core/remote_config.py`
 - Singleton `RemoteConfigManager` with thread-safe RLock
 - `get_config()` returns the singleton instance

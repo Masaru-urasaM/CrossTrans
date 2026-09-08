@@ -34,15 +34,32 @@ DEFAULT_MODELS_BY_PROVIDER = {
     'DeepSeek': ['deepseek-chat', 'deepseek-coder'],
     # All three previous entries were decommissioned by Groq (checked 2026-09-07).
     # This list drives auto-pick and _try_model_rotation(), so it holds only models
-    # measured to answer a translation directly: gpt-oss returns the text in ~0.8 s
-    # with no reasoning preamble, where qwen3 spends most of the 1024-token budget
-    # (api_manager.py's max_tokens) inside <think> and can truncate the answer.
+    # measured to answer a translation directly. Re-measured 2026-09-08 with a real
+    # call: gpt-oss-120b/20b answer in 0.6-0.7 s and put their reasoning in a
+    # SEPARATE 'reasoning' field, leaving content clean; qwen3.6-27b takes 1.3 s and
+    # 509 completion tokens against gpt-oss's 134, with <think> inline in content, so
+    # it depends on strip_thinking_tags() and costs 4x the tokens. qwen3.8-27b also
+    # answered 429 'Request too large ... on output' on one of two attempts.
+    # NB the OpenAI-compatible path sends NO max_tokens (see
+    # _call_generic_openai_style) - the hard limit there is its timeout=10, not a
+    # token budget. Only _call_anthropic caps output, at 1024.
     'Groq': ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
     'xAI': ['grok-2', 'grok-beta'],
     'Mistral': ['mistral-large-latest', 'mistral-small-latest'],
     'Perplexity': ['sonar', 'sonar-pro'],
-    'Cerebras': ['llama-3.3-70b', 'llama3.1-70b'],
-    'SambaNova': ['Meta-Llama-3.3-70B-Instruct', 'Meta-Llama-3.1-70B-Instruct'],
+    # Both previous entries answered 404 "Model does not exist" (2026-09-08, real
+    # call). Cerebras only serves three models now. gpt-oss-120b leads because it is
+    # the one model here measured directly - on Groq's build it answers in 0.7 s with
+    # its reasoning in a separate field, leaving content clean. Cerebras's own build
+    # could not be called (402, the account has no credit), so that is an inference
+    # from the same base model on another provider, not a measurement of this one.
+    'Cerebras': ['gpt-oss-120b', 'qwen-3.8-27b'],
+    # Meta-Llama-3.1-70B-Instruct is gone from SambaNova's catalogue (2026-09-08);
+    # Meta-Llama-3.3-70B-Instruct survives and stays first. gemma-4-31B-it replaces
+    # the dead entry - a plain instruct model, deliberately not one of the MiniMax or
+    # DeepSeek reasoning models, since auto-pick wants boring and fast. Unverified by
+    # a real call: SambaNova returns 402 before it validates the model.
+    'SambaNova': ['Meta-Llama-3.3-70B-Instruct', 'gemma-4-31B-it'],
     'Together': ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo'],
     'SiliconFlow': ['deepseek-ai/DeepSeek-V3', 'Qwen/Qwen2.5-72B-Instruct'],
     # Both previous entries are gone: google/gemini-2.0-flash-exp:free and
@@ -56,9 +73,10 @@ DEFAULT_MODELS_BY_PROVIDER = {
     # different upstreams (Google AI Studio and Nvidia).
     # UNVERIFIED BY A REAL CALL - no OpenRouter key was available. Both were
     # confirmed routable, which proves they are not dead but not that they
-    # translate well. Test before trusting: max_tokens is 1024 (line ~327) and
-    # both lean reasoning/agentic, so the risk to check is the qwen3 failure
-    # recorded under Groq above - budget spent inside <think>, answer truncated.
+    # translate well. The risk to test is latency, not truncation: this path sends
+    # no max_tokens but does use timeout=10 (_call_generic_openai_style), and both
+    # of these lean reasoning/agentic. A model that thinks for eleven seconds fails
+    # even though its answer was fine.
     'OpenRouter': ['google/gemma-4-31b-it:free', 'nvidia/nemotron-3.5-lightning:free'],
 }
 

@@ -40,9 +40,10 @@ Studio and Nvidia) so that they fail independently rather than together. Option 
 and declined; do not re-propose a paid default without asking.
 
 **Unverified, and knowingly so**: no OpenRouter key was available, so both were confirmed
-*routable* but neither was confirmed to translate well. The specific risk to test when a key
-appears is the one already measured on Groq (Decision 15): `max_tokens` is 1024, and a model that
-spends that budget inside `<think>` truncates the answer. Both of these lean reasoning/agentic.
+*routable* but neither was confirmed to translate well. The risk to test when a key appears is
+**latency**, not truncation: `_call_generic_openai_style` sends no `max_tokens`, but it does use
+`timeout=10`, and both of these lean reasoning/agentic. On Groq the same shape of model took
+1.3 s against gpt-oss's 0.7 s; a slower one fails the timeout with a perfectly good answer.
 
 **The second half of this decision came out of the fix.** Choosing a default is not enough - it
 must also *identify* as its own provider. `_identify_provider()` tries an exact match in
@@ -331,8 +332,14 @@ different questions, so they get different contents:
 - `DEFAULT_MODELS_BY_PROVIDER['Groq']` = *what to pick unattended* -> only `gpt-oss-120b/20b`.
   Measured 2026-09-07: gpt-oss answers in ~0.8 s using 46-84 completion tokens with no reasoning
   preamble; qwen3.6 spent 239 tokens on the same three-word input, nearly all of it inside
-  `<think>`. `api_manager` sends `max_tokens: 1024`, so on a real paragraph qwen3 can exhaust the
-  budget mid-monologue - and after `strip_thinking_tags()` the user gets an empty translation.
+  `<think>`. **Correction (2026-09-08)**: the original entry explained this as qwen3 exhausting
+  `max_tokens: 1024`. That mechanism is wrong - `_call_generic_openai_style` sends **no**
+  `max_tokens` at all, and the 1024 cap belongs to `_call_anthropic` alone. The measurements and
+  the conclusion stand on their own: re-measured with a real call, qwen3.6-27b needs 509
+  completion tokens and 1.3 s where gpt-oss-120b needs 134 and 0.7 s, it puts `<think>` inline in
+  `content` (so it leans on `strip_thinking_tags()`) where gpt-oss returns a separate `reasoning`
+  field, and qwen3.8-27b answered `429 Request too large ... on output` on one of two attempts.
+  The real hard limit on this path is `timeout=10`, which a slow reasoning model can exceed.
   A model a user picks deliberately is their call; a model the app substitutes silently must be
   boring and fast.
 

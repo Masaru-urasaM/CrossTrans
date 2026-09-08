@@ -41,7 +41,9 @@ D1–D3 were closed on 2026-08-28. The 2026-09-07 health review reopened the fil
 Decision 15 — the two pieces of dead code went with them, and the clipboard tests were made
 hermetic), **D4, D5 and D10 on 2026-09-08** (a second instance now asks the running one for its window, the
 file log is JSON Lines, and the suite runs on `windows-latest` for every push; see Decisions 16
-to 18), and closing them surfaced **D11**. `DEFERRED.md` now holds **D11** alone, narrowed twice
-the same day: Google's three defaults were dead too and were replaced and made self-maintaining
-(Decision 19), then OpenRouter's two were found dead *and* mis-routed to Together (Decision 20).
-Eight providers remain, and none can be checked without a key each. None is scheduled; each carries its own trigger condition.
+to 18), and closing them surfaced **D11**. `DEFERRED.md` now holds **D11** and **D12**. D11 was
+narrowed three times on 2026-09-08: Google's three defaults were dead and were replaced and made
+self-maintaining (Decision 19); OpenRouter's two were dead *and* mis-routed to Together
+(Decision 20); then keys arrived for Cerebras and SambaNova, whose lists were 6/6 and 11/12 dead.
+Five providers checked, not one table clean - eight remain, each needing its own key. **D12** is
+the cross-provider model-name clash that surfaced from the same work. None is scheduled; each carries its own trigger condition.
