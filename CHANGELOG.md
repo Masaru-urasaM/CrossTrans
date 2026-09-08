@@ -4,6 +4,51 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Google's default models were dead too (2026-09-08)
+
+**Fixed** (narrows D11)
+- **All three of Google's auto-pick models answered 404.** `gemini-2.0-flash`,
+  `gemini-1.5-flash` and `gemini-1.5-pro` are retired. This is the app's **primary** provider and
+  `default_models_by_provider` is not a fallback - it is what auto-detection and
+  `_try_model_rotation()` read whenever the model field is left blank, so a user with a Gemini key
+  and no model chosen got three silent failures and nothing else. Now
+  `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-flash-latest`: the old intent (a mid-tier
+  flash model), a faster one to rotate to when the first is busy, and an alias that cannot rot.
+- **Six of the eight models in the Google dropdown were dead** as well - the whole 2.0 line,
+  `gemini-3-flash` (the live name is `gemini-3-flash-preview`) and
+  `gemini-2.5-flash-preview-image`. Replaced with twelve verified IDs.
+
+**Added**
+- **`fetchGeminiModels()` in the Worker**, mirroring `fetchGroqModels()`: Google's catalogue now
+  comes from Google (Step 5.6) instead of from OpenRouter, which lags it badly - on 2026-09-08
+  OpenRouter still listed `gemini-2.0-flash`. `supportedGenerationMethods` alone cannot be the
+  filter, because the same endpoint serves tts, image, transcribe, robotics, computer-use, lyria
+  (music), nano-banana (image) and the agentic deep-research / antigravity families, so
+  `GEMINI_NON_CHAT_PATTERNS` subtracts them: 22 of 40 excluded, 18 general chat models kept.
+  `gemini_source` is reported beside `groq_source`.
+
+**Rejected, after simulating it** (Decision 19): filtering the curated defaults against
+`model_provider_map`, which is what D11 suggested and what `getProviderModels()` does for the
+trial pool. Run across all thirteen providers it would have *kept* `gemini-2.0-flash`, because
+the map comes from OpenRouter and OpenRouter still lists it; for the nine OpenRouter-derived
+providers the catalogue is exactly as stale as the thing it would check. It would have looked
+like a safeguard and removed nothing - the same false-green failure Decision 18 guards against,
+one layer down.
+
+**Worth writing down: presence in a listing is not usability.** `gemini-2.5-pro` appears in
+Google's own `/models` output and answers `404 no longer available to new users`. Every model
+named here was checked with a real translation request, reading the reply code rather than
+counting it - `404` is dead, `503` is busy, `429` is out of quota, and two models that looked
+dead at first were neither.
+
+**Still open**: nine providers whose defaults have never been checked, because each needs its own
+API key - see DEFERRED D11, which now carries the table of what is verified and what is not.
+
+**Tests**: 642 -> 642 (no test asserted these tables). Verified by hand instead: every new Google
+ID routes to Google at tier 3, all three tiers agree, and the shipped `fetchGeminiModels` was run
+under Node against Google's real payload - 18 models kept, and all four failure paths return null
+so the static list survives.
+
 ### The suite runs somewhere other than one desk (2026-09-08)
 
 **Added** (closes D10)

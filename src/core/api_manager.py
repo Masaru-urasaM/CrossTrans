@@ -22,7 +22,13 @@ from src.core.ssl_pinning import get_ssl_context_for_url
 # Keys match PROVIDERS_LIST exactly (Title Case)
 # NOTE: These are hardcoded fallbacks. The active list comes from get_config().
 DEFAULT_MODELS_BY_PROVIDER = {
-    'Google': ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'],
+    # All three previous entries answer 404 (checked 2026-09-08 with a real call):
+    # gemini-2.0-flash, gemini-1.5-flash and gemini-1.5-pro are retired. This list
+    # drives auto-pick and _try_model_rotation, so it keeps the old intent - a
+    # mid-tier flash model first - with IDs that exist, a faster one to rotate to
+    # when the first is busy (2.5-flash really did answer 503 mid-check), and an
+    # alias last that will survive the next deprecation.
+    'Google': ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest'],
     'OpenAI': ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo'],
     'Anthropic': ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022', 'claude-3-haiku-20240307'],
     'DeepSeek': ['deepseek-chat', 'deepseek-coder'],

@@ -159,6 +159,20 @@ Hardcoded values in `constants.py` serve as fallback defaults.
 2. **Local cache**: `%APPDATA%/CrossTrans/models_config.json` (24h TTL)
 3. **Hardcoded**: `constants.py` values (always available, compiled into EXE)
 
+**Groq and Google come from their own APIs, not from OpenRouter.** The cron's OpenRouter
+data lags badly for both - on 2026-09-08 it still listed `gemini-2.0-flash`, retired and
+answering 404 - so `fetchGroqModels()` and `fetchGeminiModels()` query each provider directly
+and replace its slice of `model_provider_map` outright (Steps 5.5 and 5.6). Both fail closed to
+the static list and report `groq_source` / `gemini_source` in `cache_meta`. The remaining
+11 providers are still OpenRouter-derived - see DEFERRED D11.
+
+**`default_models_by_provider` is hand-written and the cron does NOT regenerate it**
+(`STATIC_DEFAULT_MODELS_BY_PROVIDER`). It is what auto-detection and `_try_model_rotation()`
+read when the model field is blank, so a stale entry costs a real user a silent failed attempt
+per model - which is exactly what happened to Groq and Google. Verify an entry with a real API
+call before trusting it: **presence in a provider's `/models` listing is not enough**
+(`gemini-2.5-pro` is listed and 404s on use).
+
 ### Key module: `src/core/remote_config.py`
 - Singleton `RemoteConfigManager` with thread-safe RLock
 - `get_config()` returns the singleton instance

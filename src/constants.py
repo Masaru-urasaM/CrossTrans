@@ -182,14 +182,24 @@ PROVIDERS_LIST = [
 # Updated January 2026 with all active models
 MODEL_PROVIDER_MAP = {
     # === GOOGLE (Gemini) ===
+    # Verified 2026-09-08 by a real generateContent call per model. Six of the
+    # eight IDs that used to sit here answer 404: the whole 2.0 line,
+    # gemini-3-flash (the live name is gemini-3-flash-preview) and
+    # gemini-2.5-flash-preview-image. gemini-2.5-pro is *listed* by the API and
+    # still 404s on use ("no longer available to new users") - which is why
+    # presence in /models is not the test here, a call is.
+    # Chat models only: the same endpoint also serves tts, image, transcribe,
+    # robotics, computer-use, lyria (music), nano-banana (image) and the agentic
+    # deep-research / antigravity families, none of which translate.
     'Google': [
-        # Gemini 3.0 Series
-        'gemini-3-flash',
-        # Gemini 2.5 Series
-        'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite',
-        'gemini-2.5-flash-preview-image',
-        # Gemini 2.0 Series
-        'gemini-2.0-flash', 'gemini-2.0-flash-exp', 'gemini-2.0-flash-lite',
+        # Gemini 3.x flash
+        'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash',
+        'gemini-3.5-flash', 'gemini-3.5-flash-lite',
+        'gemini-3.1-flash-lite', 'gemini-3-flash-preview',
+        # Gemini 2.5
+        'gemini-2.5-flash', 'gemini-2.5-flash-lite',
+        # Aliases that follow the current release, so they cannot go stale
+        'gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-pro-latest',
     ],
     # === OPENAI ===
     'OpenAI': [

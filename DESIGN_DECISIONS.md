@@ -5,6 +5,64 @@ approaches. Newest first.
 
 ---
 
+### Decision 19 - Ask the provider. Filtering against the catalogue is theatre.
+
+**Date**: 2026-09-08
+**Status**: RESOLVED
+
+**Problem**: D11 said the hardcoded `default_models_by_provider` entries for providers other than
+Groq were unverified. Google was checked first, being the app's primary provider, and **all three
+of its defaults answered 404**: `gemini-2.0-flash`, `gemini-1.5-flash` and `gemini-1.5-pro` are
+retired. Six of the eight entries in `MODEL_PROVIDER_MAP['Google']` were dead as well. This is
+not a fallback path - it is what auto-detection and `_try_model_rotation()` read on every run
+where the model field is blank, so a user with a Gemini key and no model chosen got three silent
+failures and nothing else.
+
+D11 itself proposed the durable fix: derive the table instead of writing it by hand.
+
+**Options considered**:
+
+1. **Filter the curated defaults against `model_provider_map`** and drop whatever is not in it -
+   the same shape as `getProviderModels()`. Cheap, no keys needed, covers all thirteen providers
+   at once.
+2. **Query each provider's own `/models`**, the way `fetchGroqModels()` already does, and let
+   that be the catalogue.
+3. **Verify by hand and re-hardcode.** Correct today, stale again by definition.
+
+**Resolution**: **Option 1 was simulated across all thirteen providers and rejected.** For
+Google it would have *kept* `gemini-2.0-flash`, because OpenRouter - where the map comes from -
+still lists a model that 404s. For the nine OpenRouter-derived providers the catalogue is exactly
+as stale as the thing it would be checking, so the filter would have removed nothing real while
+looking like a safeguard. That is the failure Decision 18 was written against, one layer down:
+protection that is believed rather than true. It was not shipped.
+
+**Option 2 for Google**, as `fetchGeminiModels()` + Step 5.6, mirroring Groq: query
+`generativelanguage.googleapis.com/v1beta/models`, keep what supports `generateContent`, and
+subtract `GEMINI_NON_CHAT_PATTERNS`. `supportedGenerationMethods` alone is not the filter - the
+same endpoint serves tts, image, transcribe, robotics, computer-use, lyria (music), nano-banana
+(image) and the agentic deep-research / antigravity families, all of which report it. Measured
+against the live list: 22 of 40 excluded, and the 18 that remain are all general chat models.
+Fails closed to the static list on a missing key, an HTTP error, an empty response or an
+exception - all four verified by running the shipped function under Node against the real payload.
+
+**Option 3 for the defaults themselves**, because there is no deriving them: which model to pick
+unattended is a judgement, not a fact. `['gemini-2.5-flash', 'gemini-2.5-flash-lite',
+'gemini-flash-latest']` keeps the old intent - a mid-tier flash model first - adds a faster one
+to rotate to when the first is busy (`gemini-2.5-flash` really did answer 503 during the check),
+and ends on an **alias**, which is the closest thing to a default that cannot rot.
+
+**The lesson worth keeping: presence in a listing is not usability.** `gemini-2.5-pro` appears in
+Google's own `/models` output and answers `404 no longer available to new users` when called.
+Every model named in this change was verified with a real translation request, and the reply
+codes were read rather than counted - `404` is dead, `503` is busy and `429` is out of quota, and
+two of the models that looked dead on a first pass were neither.
+
+**References**: `cloudflare_worker.js` (`fetchGeminiModels`, `GEMINI_NON_CHAT_PATTERNS`,
+Step 5.6, `STATIC_DEFAULT_MODELS_BY_PROVIDER`, `STATIC_PROVIDER_MODELS`), `src/constants.py`,
+`src/core/api_manager.py`, `docs/models_config_template.json`, Decision 15, DEFERRED D11.
+
+---
+
 ### Decision 18 - CI checks its own green tick
 
 **Date**: 2026-09-08
