@@ -4,6 +4,40 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### The log file became machine-readable (2026-09-08)
+
+**Changed** (closes D5)
+- **The file log is JSON Lines**, one `{"ts","level","tag","msg"}` object per line, as global
+  Rule 10 asks. **The console is not** - `python main.py` prints to a terminal with a human in
+  front of it.
+- **Not one of the ~458 logging calls changed.** D5 was deferred because the format "touches
+  every call site"; it does not, if the tag is derived from the record. 55 messages already open
+  with a bracketed tag - `[ModelRotation]`, `[Trial]`, `[TOKENIZE]` - and those are better tags
+  than any file name, so the formatter lifts them into `tag` and drops them from `msg`. Everything
+  else gets `record.module`, and `mod` is added only when it differs. Writing
+  `logging.info("[Thing] ...")` remains the way to set a tag. See Decision 17.
+- **The log rotates by size as well as by age.** Retention bounds a quiet app but not one runaway
+  loop inside a single day, so today's file is now capped at `LOG_MAX_BYTES` with
+  `LOG_BACKUP_COUNT` siblings.
+
+**Fixed**
+- **Rotation would have leaked past retention.** `prune_old_logs` globbed `translator_*.log` and
+  matched a regex anchored on `.log`, so the `translator_20260908.log.1` files the new handler
+  creates were neither found nor eligible - unbounded growth *within* a day would simply have
+  become unbounded growth *across* days. Both patterns widened; `.bak`, `.logged` and
+  `translator_2026.log.1` are still spared, and a test says so.
+
+**Deliberately not done**: buffered writes, which Rule 10 also suggests. Every ending this app
+has skips cleanup - the updater's `os._exit(0)`, the crash hook, the already-running watchdog -
+so a buffer would drop exactly the lines worth having. `delay=True` is used instead, which also
+stops a run that never logs from leaving an empty file behind.
+
+**Tests**: 610 -> 630. Five probes were run rather than assumed: removing the tag extraction fails
+3, `ensure_ascii=True` fails the Japanese-legibility test, `delay=False` fails the empty-file
+test, restoring the old prune regex fails the rotated-sibling test, and dropping `.astimezone()`
+fails the timestamp test. The Japanese test was tightened first - it originally asserted a round
+trip, which `json.loads` satisfies either way, and so proved nothing.
+
 ### Launching CrossTrans twice now shows you CrossTrans (2026-09-08)
 
 **Changed** (closes D4)

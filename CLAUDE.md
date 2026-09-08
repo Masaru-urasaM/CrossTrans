@@ -223,7 +223,13 @@ Hardcoded values in `constants.py` serve as fallback defaults.
 - `updates.py` - Auto-update system (check, download, install)
 - `single_instance.py` - TCP socket lock for single instance
 - `logging_setup.py` - log file setup; `resolve_log_dir()` (%APPDATA% when frozen, repo `logs/`
-  from source), `prune_old_logs()` (14-day retention)
+  from source), `prune_old_logs()` (14-day retention **plus** rotated `.log.N` siblings),
+  `JsonLinesFormatter`. **The file log is JSONL, the console is not** - a terminal has a
+  human in front of it. `tag` comes off a `[Bracket]` prefix when the message has one and
+  from `record.module` otherwise, so none of the ~458 call sites had to change; keep writing
+  `logging.info("[Thing] ...")` and it lands in `tag`. Not buffered, deliberately: the
+  updater's `os._exit(0)`, the crash hook and the already-running watchdog all end the
+  process without cleanup, and a buffer would drop exactly the lines that matter
 - `ui_helpers.py` - Dark title bar, word filtering utilities
 
 ## Build

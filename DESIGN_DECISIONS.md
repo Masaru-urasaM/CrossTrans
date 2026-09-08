@@ -5,6 +5,65 @@ approaches. Newest first.
 
 ---
 
+### Decision 17 - The log file is JSON, the console is not, and the tag is derived
+
+**Date**: 2026-09-08
+**Status**: RESOLVED
+
+**Problem**: Global Rule 10 wants `{"ts","level","tag","msg"}` JSON Lines. The app has ~458
+logging calls, essentially all of them `logging.info("...")` on the root logger with no tag
+anywhere, and D5 was deferred precisely because "changing the format touches every call site".
+
+**Options considered**:
+
+1. **Add a tag argument at all ~458 call sites.** Pros: explicit. Cons: a 458-site mechanical
+   edit for a formatting change, every one of them a chance to typo, and every future call site a
+   chance to forget. Rejected as soon as it was priced.
+2. **Derive the tag from the LogRecord.** Pros: zero call-site changes; new code gets a tag for
+   free. Cons: `record.module` is a file name, not a concept - `api_manager` where the message
+   really means "model rotation".
+3. **Derive it, but honour the convention already in the codebase.** 55 of the 458 messages open
+   with a bracketed tag - `[ModelRotation]`, `[Trial]`, `[TOKENIZE]`, `[Auto-Model]`. Those are
+   *better* tags than any module name.
+
+**Resolution**: **Option 3.** `JsonLinesFormatter` lifts a leading `[Bracket]` into `tag` and
+removes it from `msg` (so it is not said twice); everything else gets `record.module`. `mod` is
+added only when it differs from the tag, so nothing is duplicated. An informal convention became
+structured data and not one call site moved - and `logging.info("[Thing] ...")` keeps working as
+the way to set a tag.
+
+**The console keeps the old human format.** `python main.py` prints to a terminal somebody is
+watching; JSON there serves nobody. Rule 10 is about a log a *tool* reads, which is the file.
+
+**Local time with a real UTC offset**, not UTC and not a bare local stamp. A log is read beside a
+user saying "it broke at three" and by a tool that must not have to guess which three;
+`2026-09-08T11:56:18.651+09:00` satisfies both. `ensure_ascii=False` for the same reason - a
+Japanese translation in a log should read as Japanese, not as escapes.
+
+**Rotation caps size as well as age.** Retention (Decision 13) bounds a quiet app but not one
+runaway loop inside a single day, so the handler is a `RotatingFileHandler`
+(`LOG_MAX_BYTES` x `1 + LOG_BACKUP_COUNT` per day). That created a second, quieter leak:
+`prune_old_logs` globbed `translator_*.log` and matched `^translator_\d{8}\.log$`, so the rotated
+`translator_20260908.log.1` siblings were neither globbed nor matched and would have survived
+forever - converting unbounded growth *within* a day into unbounded growth *across* days. Both
+patterns were widened, and a test pins that `.bak`, `.logged` and `translator_2026.log.1` are
+still spared.
+
+**Buffering was rejected, though Rule 10 suggests it.** Every ending this app actually has skips
+cleanup: the updater exits with `os._exit(0)` (CLAUDE.md), the crash hook writes as the process
+dies, and the already-running watchdog force-exits (Decision 12). A buffer would drop precisely
+the lines anyone would want. `delay=True` is used instead, which costs nothing and stops a run
+that never logs from leaving an empty file.
+
+**Migration**: existing daily files are plain text and new ones are JSONL, with one day's file
+possibly holding both. A reader that skips non-JSON lines handles it, and retention removes the
+overlap within 14 days. Not worth a converter.
+
+**References**: `src/utils/logging_setup.py`, `tests/test_logging_setup.py`, Decisions 12 and 13,
+global Rule 10.
+
+---
+
 ### Decision 16 — A second instance must be acknowledged, not merely connected
 
 **Date**: 2026-09-08

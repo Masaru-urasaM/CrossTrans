@@ -8,20 +8,6 @@
 
 ---
 
-### D5 — Structured (JSONL) logging with rotation
-
-**Found**: 2026-09-07, while moving the frozen app's log out of the PyInstaller temp directory.
-**Effort**: Medium.
-
-Global Rule 10 asks for `{"ts","level","tag","msg"}` JSON Lines with ring-buffer rotation. The log
-is still `%(asctime)s [%(levelname)s] %(message)s`, one file per day, now pruned after 14 days
-(Decision 13). Changing the format touches every call site's readability and every existing log
-file anyone still has.
-
-**Trigger**: the first time a log has to be parsed by a tool rather than read by a person.
-
----
-
 ### D10 — No CI
 
 **Found**: 2026-09-07. `.github/` holds only `copilot-instructions.md`.

@@ -39,6 +39,7 @@ outstanding.
 D1–D3 were closed on 2026-08-28. The 2026-09-07 health review reopened the file with D4–D10;
 **D6–D9 were closed on 2026-09-07** (Groq had decommissioned every model D6/D7 named — see
 Decision 15 — the two pieces of dead code went with them, and the clipboard tests were made
-hermetic), **D4 on 2026-09-08** (a second instance now asks the running one for its window; see
-Decision 16), and closing them surfaced **D11**. `DEFERRED.md` now holds **D5, D10, D11** —
-JSONL logging, the absence of CI, and the other providers' unverified default models. None is scheduled; each carries its own trigger condition.
+hermetic), **D4 and D5 on 2026-09-08** (a second instance now asks the running one for its window, and the
+file log is JSON Lines; see Decisions 16 and 17), and closing them surfaced **D11**.
+`DEFERRED.md` now holds **D10, D11** — the absence of CI, and the other providers' unverified
+default models. None is scheduled; each carries its own trigger condition.
