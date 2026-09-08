@@ -4,6 +4,41 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Launching CrossTrans twice now shows you CrossTrans (2026-09-08)
+
+**Changed** (closes D4)
+- **A second instance asks the running one for its window instead of pointing at the tray.**
+  The lock socket on `127.0.0.1:47823` had been `listen()`ing since single-instance detection was
+  written and nobody ever accepted; all a second launch could do was fail to bind and show a
+  dialog telling the user to go hunting in the system tray. It now sends a show request, and the
+  running instance raises its window - which is what double-clicking the icon means - plus a
+  two-second toast, "CrossTrans is already running", so nobody wonders whether a second copy
+  started.
+- **What "show yourself" means was not a new decision.** D4 listed it as an open question;
+  `app.show_main_window()` has answered it since the tray menu was written. It already marshals
+  itself onto the UI thread, and already raises an open popup rather than building a second one.
+  The accept loop reuses it. That is what took D4 from Medium to Small.
+
+**Added**
+- `single_instance.signal_running_instance()` and `serve_show_requests()`.
+- `TranslatorApp.on_second_instance()` / `_raise_for_second_instance()`.
+
+**The acknowledgement is the load-bearing part** (Decision 16). Connecting proves nothing:
+`listen()` predates the accept loop, so a connection against *any* older build succeeds and then
+rots in the backlog. Seen for real on 2026-09-08 while writing the tests - `netstat` showed the
+suite's connection sitting in `CLOSE_WAIT` against the running 1.9.20. Without waiting for a
+reply, a user who upgraded and double-clicked the icon would get a second process that exits
+silently having done nothing at all - no window, and not even the old dialog. The notice and its
+Decision 12 watchdog therefore stay, as the fallback for exactly that case.
+
+**Tests**: 594 -> 610. New `tests/test_second_instance_signal.py` (15). Three probes were run
+rather than assumed: trusting a bare connection instead of the ACK fails the older-build test;
+dropping the token check lets any stray local connect raise the window and fails another; and
+calling the handler straight off the socket thread - a cross-thread Tk call - fails two more.
+`TestMainTakesTheNoticePath` was split in two and both halves now stub
+`signal_running_instance`: unstubbed it reached the real socket, so whether the notice path ran
+depended on whether a CrossTrans happened to be running on the machine.
+
 ### The clipboard tests stop borrowing a global (2026-09-07)
 
 **Fixed** (closes D9)

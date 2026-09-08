@@ -8,21 +8,6 @@
 
 ---
 
-### D4 — Signal the running instance instead of scolding the second one
-
-**Found**: 2026-09-07, while fixing the hung "already running" notice (Decision 12).
-**Effort**: Medium.
-
-The lock socket on `127.0.0.1:47823` is already `listen()`ing and nobody ever accepts. A second
-instance could connect, and the running one could raise its main window — which is what a user
-double-clicking the icon actually wants, instead of a dialog telling them to look in the tray.
-
-**Dependency**: an accept loop in `TranslatorApp`'s lifecycle, and a decision about what "show
-yourself" should do while a popup is open. **Revisit** when the app's startup path is touched
-again for another reason.
-
----
-
 ### D5 — Structured (JSONL) logging with rotation
 
 **Found**: 2026-09-07, while moving the frozen app's log out of the PyInstaller temp directory.

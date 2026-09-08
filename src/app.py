@@ -81,6 +81,12 @@ READING_PANE_PLACEHOLDER_FG = '#666666'
 READING_PANE_PLACEHOLDER_TAG = 'reading_placeholder'
 READING_PANE_LABEL = "Reading"
 
+# Shown when a second CrossTrans is launched and this one raises its window
+# instead (D4). The window appearing is the real answer; the toast is there so
+# nobody wonders whether a second copy started.
+SECOND_INSTANCE_TOAST = "CrossTrans is already running"
+SECOND_INSTANCE_TOAST_MS = 2000
+
 
 class TranslatorApp:
     """Main application class."""
@@ -521,6 +527,24 @@ class TranslatorApp:
         # Create a new SEPARATE dictionary result window
         self.quick_translate_manager.capture_mouse_position()
         self.quick_translate_manager.show_dictionary_result(result, target_lang, trial_info, looked_up_words)
+
+    def on_second_instance(self):
+        """Another CrossTrans was launched: raise this one instead of starting it.
+
+        Called from the lock socket's accept thread, so nothing here touches Tk
+        directly. `show_main_window` already marshals itself, but the toast does
+        not - both are handed over in one `after(0, ...)`, the same way the
+        Replace path hands its toast over from a daemon thread.
+        """
+        try:
+            self.root.after(0, self._raise_for_second_instance)
+        except tk.TclError:
+            pass  # shutting down; the window is going away anyway
+
+    def _raise_for_second_instance(self):
+        """The UI half of `on_second_instance`, on the main thread."""
+        self.show_main_window()
+        self.toast.show_info(SECOND_INSTANCE_TOAST, duration=SECOND_INSTANCE_TOAST_MS)
 
     def show_main_window(self, icon=None, item=None):
         """Show main translator window from tray."""

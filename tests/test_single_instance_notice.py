@@ -162,14 +162,34 @@ class TestTheWatchdog:
 
 
 class TestMainTakesTheNoticePath:
-    def test_it_warns_and_returns_without_starting_the_app(self, monkeypatch):
+    """The notice is now the *fallback*: `main` asks for the window first (D4).
+
+    `signal_running_instance` is stubbed in both tests below rather than left to
+    reach the real socket. Unstubbed it would connect to LOCK_PORT for real, so
+    whether the notice path ran at all would depend on whether a CrossTrans
+    happened to be running on the machine - a test that passes or fails on the
+    state of somebody's desktop is the same trap D9 was about.
+    """
+
+    def test_it_warns_when_the_running_instance_does_not_answer(self, monkeypatch):
         warned = []
         monkeypatch.setattr(main, 'is_already_running', lambda: (True, None))
+        monkeypatch.setattr(main, 'signal_running_instance', lambda: False)
         monkeypatch.setattr(main, '_warn_already_running', lambda: warned.append(True))
         monkeypatch.setattr(main, 'setup_logging', lambda: None)
 
         assert main.main() == 0
         assert warned == [True]
+
+    def test_a_answered_signal_replaces_the_notice_entirely(self, monkeypatch):
+        warned = []
+        monkeypatch.setattr(main, 'is_already_running', lambda: (True, None))
+        monkeypatch.setattr(main, 'signal_running_instance', lambda: True)
+        monkeypatch.setattr(main, '_warn_already_running', lambda: warned.append(True))
+        monkeypatch.setattr(main, 'setup_logging', lambda: None)
+
+        assert main.main() == 0
+        assert warned == [], "the running instance raised its window; nothing to say"
 
 
 class TestItReallyExits:

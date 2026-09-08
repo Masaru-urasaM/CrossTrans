@@ -108,7 +108,16 @@ Key points:
 
 - **os._exit(0) cleanup**: `os._exit(0)` skips Python cleanup (atexit handlers, file flushes). This is intentional to bypass Tkinter's exception handling. A 0.5s sleep before `os._exit()` ensures log flushing.
 
-- **Single instance**: TCP socket lock on `127.0.0.1:47823` (see `src/utils/single_instance.py`)
+- **Single instance**: TCP socket lock on `127.0.0.1:47823` (see `src/utils/single_instance.py`).
+  The lock also **serves show requests** (D4): a second instance sends `SHOW_REQUEST` and the
+  running one raises its window plus a 2 s toast, instead of the old "look in the tray" dialog.
+  **The acknowledgement is load-bearing** - `listen()` predates the accept loop, so connecting
+  succeeds against any older build and the request just rots in the backlog (seen on 2026-09-08:
+  CLOSE_WAIT against a running 1.9.20). Only a reply distinguishes a version that will act from
+  one that will not, and without it a mid-upgrade launch would exit silently having done nothing.
+  The notice dialog and its watchdog remain, as the fallback for exactly that case.
+  Tests must pass `port=` rather than reach for `LOCK_PORT`: the developer's own CrossTrans holds
+  it, so a suite that uses it either skips or throws a window onto the screen mid-run.
 
 - **ttkbootstrap discards explicit colours on standard `tk` widgets**: it re-themes them at construction, so `tk.Label(fg='#80b8ff', bg='#363636')` comes back `fg='#ffffff'`, `bg='#222222'`. Measured, not theoretical — it is why the furigana reading colour never actually shipped before v1.9.19. Pass `autostyle=False` whenever a colour must survive - use `ruby_text.NO_AUTOSTYLE`, which guards the kwarg for the no-ttkbootstrap case. `tag_configure()` colours are **not** affected, only widget options. Leave a widget themed when it should match the frame around it.
 

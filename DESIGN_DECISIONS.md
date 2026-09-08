@@ -5,6 +5,68 @@ approaches. Newest first.
 
 ---
 
+### Decision 16 — A second instance must be acknowledged, not merely connected
+
+**Date**: 2026-09-08
+**Status**: RESOLVED
+
+**Problem**: The lock socket has always been `listen()`ing with nobody accepting, so launching
+CrossTrans twice produced a dialog pointing at the system tray (D4). Making the running instance
+raise its window instead is easy; knowing whether it *will* is not. Every build ever shipped
+accepts the connection into the backlog, because `listen(1)` predates the accept loop by years.
+
+**Options considered**:
+
+1. **Connect and assume** - if the socket accepts, the running instance got the message.
+   Pros: no protocol, no waiting. Cons: **wrong against every existing build**. The connection
+   lands in the backlog and is never read, so a user who upgrades and then double-clicks the icon
+   gets a second process that exits silently having done nothing - no window, and not even the
+   old dialog. Confirmed empirically on 2026-09-08 against the running 1.9.20: `netstat` showed
+   the suite's connection sitting in `CLOSE_WAIT`, accepted by nobody.
+2. **Wait for an acknowledgement**, and fall back to the notice when it does not come.
+   Pros: tells a version that will act from one that will not, which is the only thing that
+   matters here. Cons: the second instance waits up to `SIGNAL_TIMEOUT_S` before showing the
+   dialog in the fallback case.
+3. **Version-stamp the lock** (write the running version somewhere the second instance can read).
+   Pros: no waiting. Cons: a second source of truth that can go stale, and it still says nothing
+   about whether that build's accept loop is actually alive.
+
+**Resolution**: **Option 2.** `signal_running_instance()` returns True only on `SHOW_ACK`; `main`
+falls back to `_warn_already_running()` otherwise, so the Decision 12 dialog and its watchdog
+stay exactly as they are. 1.5 s is the whole cost, and only on the path that was already showing
+a modal dialog.
+
+Three details are load-bearing and each is pinned by a test that was verified to fail without it:
+
+- **A token, not a bare connection.** The port is on loopback, reachable by any local process; a
+  stray connect must not throw a window onto the user's screen.
+- **The ACK is sent before the window is raised**, so the second instance exits on its own
+  schedule rather than waiting on this one's UI.
+- **The accept loop outlives its handler.** A bad connection, or an exception out of the UI
+  callback, must not leave every later double-click unanswered. The thread is a daemon and ends
+  when the socket closes - it can never be the reason a process outlives its window, which is
+  the failure Decision 12 was about.
+
+**What "show yourself" means was already decided.** D4 listed it as an open question, but
+`app.show_main_window()` has answered it since the tray menu was written: it marshals itself onto
+the UI thread and, when a popup is already open, raises that instead of building a second one.
+The accept loop reuses it rather than inventing a second path - `on_second_instance` only adds
+the toast, handed over in the same `after(0, ...)`.
+
+**A toast, not silence** (the user's call): the window appearing is the real answer, but a
+two-second "CrossTrans is already running" removes any doubt about whether a second copy started.
+
+**Testability shaped the API.** `signal_running_instance` takes `port` because LOCK_PORT belongs
+to whatever CrossTrans is running on the developer's machine. Reaching for it made nine tests
+skip on this machine and would, once the running build understands the request, have raised the
+user's window mid-suite - the same class of environment dependence D9 was about.
+
+**References**: `src/utils/single_instance.py`, `main.py`, `src/app.py`
+(`on_second_instance`, `_raise_for_second_instance`, `SECOND_INSTANCE_TOAST*`),
+`tests/test_second_instance_signal.py`, `tests/test_single_instance_notice.py`, Decision 12.
+
+---
+
 ### Decision 15 — The Groq lists are curated, not mirrored; the trial pool excludes by measured behaviour
 
 **Date**: 2026-09-07

@@ -18,7 +18,11 @@ import tkinter as tk
 from tkinter import messagebox
 
 from src.utils.logging_setup import setup_logging
-from src.utils.single_instance import is_already_running
+from src.utils.single_instance import (
+    is_already_running,
+    signal_running_instance,
+    serve_show_requests,
+)
 
 # A second instance has one notice to deliver and must never outlive it. It used
 # to: ttkbootstrap's Messagebox builds its dialog with transient=<the root>, and
@@ -66,6 +70,12 @@ def main():
     # Check single instance
     already_running, lock_socket = is_already_running()
     if already_running:
+        # Somebody who launches CrossTrans twice wants the window, not a lecture
+        # about the system tray. Ask the running instance for it; only fall back
+        # to the notice when it does not answer - an older build still accepts
+        # the connection but will never act on it.
+        if signal_running_instance():
+            return 0
         _warn_already_running()
         return 0
 
@@ -73,6 +83,8 @@ def main():
         # Import and run the app from modular structure
         from src.app import TranslatorApp
         app = TranslatorApp()
+        if lock_socket:
+            serve_show_requests(lock_socket, app.on_second_instance)
         app.run()
         return 0
     except Exception as e:
