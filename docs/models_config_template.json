@@ -187,25 +187,27 @@
     ],
     "OpenRouter": [
       "openai/gpt-4o",
+      "openai/gpt-4o-mini",
       "openai/gpt-4-turbo",
       "openai/gpt-3.5-turbo",
       "openai/o1",
-      "openai/o1-mini",
-      "anthropic/claude-3.5-sonnet",
-      "anthropic/claude-3-opus",
+      "anthropic/claude-sonnet-5",
+      "anthropic/claude-opus-5",
       "anthropic/claude-3-haiku",
-      "google/gemini-2.0-flash-exp",
-      "google/gemini-pro",
-      "google/gemini-flash-1.5",
+      "google/gemini-3.8-flash",
+      "google/gemini-2.5-flash",
+      "google/gemini-2.5-flash-lite",
       "meta-llama/llama-3.3-70b-instruct",
       "meta-llama/llama-3.1-70b-instruct",
-      "meta-llama/llama-3.1-405b-instruct",
+      "meta-llama/llama-4-maverick",
       "mistralai/mistral-large",
-      "mistralai/mixtral-8x7b-instruct",
+      "mistralai/mistral-medium-3-5",
       "deepseek/deepseek-chat",
       "deepseek/deepseek-r1",
       "qwen/qwen-2.5-72b-instruct",
-      "qwen/qwq-32b-preview"
+      "qwen/qwen3.8-flash",
+      "google/gemma-4-31b-it:free",
+      "nvidia/nemotron-3.5-lightning:free"
     ],
     "HuggingFace": [
       "Qwen/Qwen2.5-72B-Instruct",
@@ -325,8 +327,8 @@
       "Qwen/Qwen2.5-72B-Instruct"
     ],
     "OpenRouter": [
-      "google/gemini-2.0-flash-exp:free",
-      "meta-llama/llama-3.3-70b-instruct:free"
+      "google/gemma-4-31b-it:free",
+      "nvidia/nemotron-3.5-lightning:free"
     ]
   },
   "provider_api_urls": {

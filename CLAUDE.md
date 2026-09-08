@@ -169,9 +169,20 @@ the static list and report `groq_source` / `gemini_source` in `cache_meta`. The 
 **`default_models_by_provider` is hand-written and the cron does NOT regenerate it**
 (`STATIC_DEFAULT_MODELS_BY_PROVIDER`). It is what auto-detection and `_try_model_rotation()`
 read when the model field is blank, so a stale entry costs a real user a silent failed attempt
-per model - which is exactly what happened to Groq and Google. Verify an entry with a real API
-call before trusting it: **presence in a provider's `/models` listing is not enough**
-(`gemini-2.5-pro` is listed and 404s on use).
+per model - which is exactly what happened to Groq, Google and OpenRouter, all three of which
+had **entirely** dead lists. Verify an entry with a real API call before trusting it:
+**presence in a provider's `/models` listing is not enough** (`gemini-2.5-pro` is listed and
+404s on use). An intermediary's listing is weaker still - OpenRouter names Groq as an upstream
+for `llama-3.3-70b-instruct`, which Groq's own catalogue does not carry at all.
+
+**A default must also identify as its own provider**, or it reaches the wrong API. Under
+`provider='Auto'` the chosen model goes back through `_identify_provider()`, which matches
+`model_provider_map` first and then falls through to prefix rules where **`google/` and
+`meta-llama/` both mean Together**. Both dead OpenRouter defaults were being mis-routed there on
+top of being retired, and the replacement `google/gemma-4-31b-it:free` did the same until it was
+listed in the map. So: **every entry in `default_models_by_provider` must also appear in
+`MODEL_PROVIDER_MAP` under the same provider.** `tests/test_default_model_routing.py` asserts the
+round-trip for all thirteen providers at tier 3, where `constants.py` is the only list there is.
 
 ### Key module: `src/core/remote_config.py`
 - Singleton `RemoteConfigManager` with thread-safe RLock

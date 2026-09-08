@@ -342,21 +342,41 @@ MODEL_PROVIDER_MAP = {
         'Pro/Qwen/Qwen2.5-7B-Instruct', 'Pro/deepseek-ai/DeepSeek-V3',
     ],
     # === OPENROUTER (aggregator - common models) ===
+    # Tier-3 fallback only: the Worker rebuilds this list from OpenRouter's live
+    # catalogue on every cron, so tiers 1 and 2 already carry ~426 current IDs.
+    # It is reached on a fresh install with no network, which is exactly when a
+    # dead entry is least recoverable - and 9 of the 20 that used to be here were
+    # dead (checked 2026-09-08 against the live catalogue AND the per-model
+    # /endpoints resource, which agreed exactly): o1-mini, claude-3.5-sonnet,
+    # claude-3-opus, gemini-2.0-flash-exp, gemini-pro, gemini-flash-1.5,
+    # llama-3.1-405b-instruct, mixtral-8x7b-instruct, qwq-32b-preview.
+    # Every ID below has at least one routable endpoint. No ':batch' variants -
+    # those are async batch endpoints and cannot serve an interactive translation.
     'OpenRouter': [
         # OpenAI
-        'openai/gpt-4o', 'openai/gpt-4-turbo', 'openai/gpt-3.5-turbo', 'openai/o1', 'openai/o1-mini',
+        'openai/gpt-4o', 'openai/gpt-4o-mini', 'openai/gpt-4-turbo',
+        'openai/gpt-3.5-turbo', 'openai/o1',
         # Anthropic
-        'anthropic/claude-3.5-sonnet', 'anthropic/claude-3-opus', 'anthropic/claude-3-haiku',
+        'anthropic/claude-sonnet-5', 'anthropic/claude-opus-5', 'anthropic/claude-3-haiku',
         # Google
-        'google/gemini-2.0-flash-exp', 'google/gemini-pro', 'google/gemini-flash-1.5',
+        'google/gemini-3.8-flash', 'google/gemini-2.5-flash', 'google/gemini-2.5-flash-lite',
         # Meta
-        'meta-llama/llama-3.3-70b-instruct', 'meta-llama/llama-3.1-70b-instruct', 'meta-llama/llama-3.1-405b-instruct',
+        'meta-llama/llama-3.3-70b-instruct', 'meta-llama/llama-3.1-70b-instruct',
+        'meta-llama/llama-4-maverick',
         # Mistral
-        'mistralai/mistral-large', 'mistralai/mixtral-8x7b-instruct',
+        'mistralai/mistral-large', 'mistralai/mistral-medium-3-5',
         # DeepSeek
         'deepseek/deepseek-chat', 'deepseek/deepseek-r1',
         # Qwen
-        'qwen/qwen-2.5-72b-instruct', 'qwen/qwq-32b-preview',
+        'qwen/qwen-2.5-72b-instruct', 'qwen/qwen3.8-flash',
+        # Free tier - these two are also the OpenRouter entries in
+        # DEFAULT_MODELS_BY_PROVIDER, and they MUST stay listed here.
+        # _identify_provider() matches this map first; miss it and
+        # 'google/gemma-4-31b-it:free' falls through to the 'google/' prefix
+        # rule, which answers Together and sends an sk-or-v1- key to the wrong
+        # API. Measured 2026-09-08 on the tier-3 path, where this list is the
+        # only one there is - and it is what the old defaults were doing.
+        'google/gemma-4-31b-it:free', 'nvidia/nemotron-3.5-lightning:free',
     ],
     # === HUGGINGFACE ===
     'HuggingFace': [

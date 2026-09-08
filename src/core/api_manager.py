@@ -45,7 +45,21 @@ DEFAULT_MODELS_BY_PROVIDER = {
     'SambaNova': ['Meta-Llama-3.3-70B-Instruct', 'Meta-Llama-3.1-70B-Instruct'],
     'Together': ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo'],
     'SiliconFlow': ['deepseek-ai/DeepSeek-V3', 'Qwen/Qwen2.5-72B-Instruct'],
-    'OpenRouter': ['google/gemini-2.0-flash-exp:free', 'meta-llama/llama-3.3-70b-instruct:free'],
+    # Both previous entries are gone: google/gemini-2.0-flash-exp:free and
+    # meta-llama/llama-3.3-70b-instruct:free are absent from OpenRouter's live
+    # catalogue AND have zero routable endpoints (checked 2026-09-08; the two
+    # public signals agreed on all 20 IDs, so either is a sound death test).
+    # Free-tier by deliberate choice - an OpenRouter key with no credit still
+    # translates. The cost of that choice, accepted knowingly: every free model
+    # OpenRouter carries has exactly ONE endpoint, which is how both entries
+    # above died. These two at least fail independently, being served by
+    # different upstreams (Google AI Studio and Nvidia).
+    # UNVERIFIED BY A REAL CALL - no OpenRouter key was available. Both were
+    # confirmed routable, which proves they are not dead but not that they
+    # translate well. Test before trusting: max_tokens is 1024 (line ~327) and
+    # both lean reasoning/agentic, so the risk to check is the qwen3 failure
+    # recorded under Groq above - budget spent inside <think>, answer truncated.
+    'OpenRouter': ['google/gemma-4-31b-it:free', 'nvidia/nemotron-3.5-lightning:free'],
 }
 
 if TYPE_CHECKING:

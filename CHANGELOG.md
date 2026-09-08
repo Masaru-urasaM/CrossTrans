@@ -4,6 +4,44 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### OpenRouter's defaults were dead too, and pointed at the wrong provider (2026-09-08)
+
+**Fixed** (narrows D11 further)
+- **Both OpenRouter defaults were gone.** `google/gemini-2.0-flash-exp:free` and
+  `meta-llama/llama-3.3-70b-instruct:free` are absent from OpenRouter's live 428-model catalogue
+  **and** have zero routable endpoints. This one needed no API key: both signals are public, and
+  they agreed on all twenty IDs checked. Now `google/gemma-4-31b-it:free` and
+  `nvidia/nemotron-3.5-lightning:free` - free tier kept by explicit choice (Decision 20), on two
+  different upstreams so they fail independently.
+- **A default that identifies as the wrong provider.** `_identify_provider()` matches
+  `model_provider_map` first and then falls through to prefix rules, in which `google/` means
+  **Together**. At tier 3 the new default `google/gemma-4-31b-it:free` identified as Together, so
+  under `provider='Auto'` an `sk-or-v1-` key would have been sent to Together's endpoint - and
+  **both dead defaults did exactly this too**, so that path was mis-routed as well as retired.
+  Every default is now listed in `MODEL_PROVIDER_MAP` for its own provider.
+- **Nine of the twenty IDs in the OpenRouter dropdown were dead**: `o1-mini`,
+  `claude-3.5-sonnet`, `claude-3-opus`, `gemini-2.0-flash-exp`, `gemini-pro`, `gemini-flash-1.5`,
+  `llama-3.1-405b-instruct`, `mixtral-8x7b-instruct`, `qwq-32b-preview`. This is tier-3 only - the
+  Worker rebuilds the list from the live catalogue on every cron - but tier 3 is a fresh install
+  with no network, which is where a dead entry is least recoverable.
+
+**Added**
+- `tests/test_default_model_routing.py` (32 tests): every default model, for all thirteen
+  providers, must identify as its own provider with only `constants.py` available. Probed by
+  reintroducing the bug and confirming the suite fails.
+
+**Not verified, and said plainly**: no OpenRouter key was available, so the two new defaults are
+confirmed *routable* but not confirmed to translate well. The risk to test when a key appears is
+the one already measured on Groq: `max_tokens` is 1024 and a model that spends it inside `<think>`
+truncates the answer - both of these lean reasoning/agentic.
+
+**A shortcut that does not work**: OpenRouter's `/endpoints` resource names the upstreams serving
+each model, which looked like a free way to verify other providers' native IDs. It lists Groq as
+serving `llama-3.3-70b-instruct` while Groq's own catalogue has no llama-3.3 at all - it describes
+OpenRouter's routing, not what a user's key can call.
+
+**Tests**: 642 -> 674.
+
 ### Google's default models were dead too (2026-09-08)
 
 **Fixed** (narrows D11)

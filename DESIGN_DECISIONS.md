@@ -5,6 +5,69 @@ approaches. Newest first.
 
 ---
 
+### Decision 20 - OpenRouter's defaults stay free, and a default must route to its own provider
+
+**Date**: 2026-09-08
+**Status**: RESOLVED
+
+**Problem**: OpenRouter's two defaults - `google/gemini-2.0-flash-exp:free` and
+`meta-llama/llama-3.3-70b-instruct:free` - were both gone. Unlike Google and Groq this needed no
+key to establish: they are absent from OpenRouter's public 428-model catalogue **and** their
+per-model `/endpoints` resource returns zero routable endpoints. The two signals agreed on all
+twenty IDs checked, so either is a sound test for death.
+
+Replacing them was not obvious, because the free tier OpenRouter had in 2024 no longer exists.
+Every recognisable brand-name free model is gone; the sixteen that remain are niche
+(nemotron, inkling, poolside, finance- and health-tuned ling, gemma-4), and **each has exactly
+one endpoint** - which is precisely how the two dead defaults died.
+
+**Options considered**:
+
+1. **Free only.** Preserves the original intent - an OpenRouter key with no credit still
+   translates. Cost: single-endpoint models, unmeasured translation quality, and a near-certain
+   repeat of this same failure.
+2. **Cheap paid only.** `meta-llama/llama-3.3-70b-instruct` has thirteen endpoints and 100%
+   one-day uptime at $0.10/$0.32 per million tokens - roughly 12,000 translations per US$1. Robust,
+   but it spends a user's money on a model they never chose.
+3. **Free first, paid fallback.** `default_models_by_provider` is a rotation list tried in order,
+   so a free entry followed by a paid one keeps the zero-cost intent and still lands somewhere
+   alive.
+
+**Resolution**: **Option 1, chosen by the developer** after the single-endpoint risk was put in
+front of them explicitly. `['google/gemma-4-31b-it:free', 'nvidia/nemotron-3.5-lightning:free']` -
+the two most general-purpose of the free set, deliberately on **different upstreams** (Google AI
+Studio and Nvidia) so that they fail independently rather than together. Option 3 was recommended
+and declined; do not re-propose a paid default without asking.
+
+**Unverified, and knowingly so**: no OpenRouter key was available, so both were confirmed
+*routable* but neither was confirmed to translate well. The specific risk to test when a key
+appears is the one already measured on Groq (Decision 15): `max_tokens` is 1024, and a model that
+spends that budget inside `<think>` truncates the answer. Both of these lean reasoning/agentic.
+
+**The second half of this decision came out of the fix.** Choosing a default is not enough - it
+must also *identify* as its own provider. `_identify_provider()` tries an exact match in
+`model_provider_map`, then a list of prefix rules in which `google/` means **Together**. The new
+default `google/gemma-4-31b-it:free` was not in the map, so at tier 3 it identified as Together
+and, under `provider='Auto'`, would have sent an `sk-or-v1-` key to Together's endpoint. **Both
+dead defaults did the same thing** - they were mis-routed as well as retired. The fix is to list
+every default in `MODEL_PROVIDER_MAP` for its provider so the exact match wins;
+`tests/test_default_model_routing.py` now asserts the round-trip for all thirteen providers, and
+the guard was probed by removing the entries and watching it fail.
+
+**A shortcut that does not work, so nobody tries it again**: OpenRouter's `/endpoints` resource
+names the upstream providers serving a model, which looks like a free way to verify the other
+providers' native model IDs. It is not. It lists **Groq** as serving
+`meta-llama/llama-3.3-70b-instruct`, while Groq's own catalogue - fetched with a real Groq key the
+same morning - contains no llama-3.3 at all. It describes OpenRouter's routing arrangements, not
+what a user's own key can call. Decision 19's lesson in a third form.
+
+**References**: `src/constants.py`, `src/core/api_manager.py` (`DEFAULT_MODELS_BY_PROVIDER`,
+`_identify_provider`), `cloudflare_worker.js` (`STATIC_DEFAULT_MODELS_BY_PROVIDER`),
+`docs/models_config_template.json`, `tests/test_default_model_routing.py`, Decisions 15 and 19,
+DEFERRED D11.
+
+---
+
 ### Decision 19 - Ask the provider. Filtering against the catalogue is theatre.
 
 **Date**: 2026-09-08
