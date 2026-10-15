@@ -4,6 +4,36 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase J7 — The main window reads what a translation placed (2026-10-15)
+
+The Reading pane under the input box had no hint at all - its comment said so: kanji-only input
+"stays plain rather than being guessed at" - so 東京大学 typed into the main window never got a
+reading, even after a translation had settled that it is Japanese. The output box, the grammar
+result and the expanded view took only the target language.
+
+**Changed**
+- **One question for the main window**: `TranslatorApp._input_source()` asks
+  `TranslationService.source_language(text)` (new, public; J6's `_source_hint` builds on it):
+  the input's own evidence, else the verdict a model or the popup's chooser gave for exactly that
+  text - looked up stripped, as translations store it. No request while typing; the pane never
+  opens a window.
+- **Reading pane**: reads kanji-only Japanese once it is placed, and a finished translation
+  schedules a refresh, since that is when the verdict arrives. Type 東京大学 → placeholder; press
+  Translate (the model says Japanese) → とうきょうだいがく.
+- **Output box** and **expanded view**: `lang_id.output_hint(source, target)` - Japanese quoted
+  in an English translation of Japanese is read. `ExpandedTranslationWindow.show(...,
+  source_language=)`.
+- **Grammar result**: read when the input's language is settled as Japanese.
+
+**Tests**: 1118 -> 1132 (+6 in `test_reading_pane.py`, +8 in `test_main_window_ruby.py`; both
+fixtures now carry a real service and an input box - the tests that say "kanji-only stays plain"
+still pass unchanged, because nothing placed their text), 0 failed, 0 skipped. Ten mutations -
+the pane ignoring the settled language or rendering without it, the verdict looked up unstripped
+or ignored, the update, the new box, the expanded view or the grammar result back on their old
+hints, the expanded view not told the source, no refresh after a translation - each made the
+suite fail and was restored (the last only after the test was made to drain the refreshes
+already queued at construction).
+
 ### Phase J6 — The popup reads kanji-only Japanese, and asks when nobody knows (2026-10-15)
 
 A kanji-only selection - 勉強, 東京大学 - never got the popup's source block: without kana there

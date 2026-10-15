@@ -484,11 +484,18 @@ STRICT RULES (DO NOT include these rules in your response):
             while len(store) > self.SOURCE_VERDICTS_MAX:
                 store.popitem(last=False)
 
+    def source_language(self, text: str) -> Optional[str]:
+        """The language of a source text as far as it is settled: its characters
+        first, else the verdict for exactly this text (Decision 22), else None.
+        Never a guess, and never a request."""
+        if not text or not text.strip():
+            return None
+        return lang_id.resolve(text, model=self.source_verdict(text.strip())).language
+
     def _source_hint(self, text: str) -> Optional[str]:
-        """The reading hint for a source text: "Japanese" when its characters or
-        the verdict for exactly this text say so (Decision 22), else None."""
-        language = lang_id.resolve(text, model=self.source_verdict(text)).language
-        return lang_id.JAPANESE if language == lang_id.JAPANESE else None
+        """The reading hint for a source text: "Japanese" when source_language()
+        says so, else None."""
+        return lang_id.JAPANESE if self.source_language(text) == lang_id.JAPANESE else None
 
     def source_verdict(self, text: str) -> Optional[str]:
         """The language a model reported for exactly this text, or None.

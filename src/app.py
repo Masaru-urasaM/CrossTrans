@@ -50,7 +50,7 @@ from src.ui.dialogs import APIErrorDialog, TrialExhaustedDialog, TrialFeatureDia
 from src.ui.history_dialog import HistoryDialog
 from src.ui.toast import ToastManager, ToastType
 from src.ui.quick_translate import QuickTranslateManager, is_error_text
-from src.core import furigana
+from src.core import furigana, lang_id
 from src.ui.ruby_text import MAX_ANNOTATE_CHARS, RubyText, insert_output
 from src.ui.tray import TrayManager
 from src.utils.updates import (
@@ -1178,11 +1178,13 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
     def _update_grammar_result(self, corrected: str):
         """Write the grammar-fix result into the output box and reset the button."""
         try:
-            # No language hint: a grammar fix keeps the source language, which
-            # is auto-detected and not known here. Japanese with kana still
-            # annotates on its own evidence.
+            # A grammar fix keeps the source language: Japanese when the input's
+            # characters or its verdict say so (J7), else no hint - kanji-only
+            # output then stays plain rather than guessed at.
+            source = self._input_source()
             self.trans_text.clear()
             insert_output(self.trans_text, tk.END, corrected,
+                          lang_hint=lang_id.JAPANESE if source == lang_id.JAPANESE else None,
                           enabled=self._ruby_enabled())
         except tk.TclError:
             return  # Popup closed mid-flight
@@ -1222,13 +1224,19 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         # Update translation text box (RubyText restores the disabled state)
         self.trans_text.clear()
         insert_output(self.trans_text, tk.END, translated,
-                      lang_hint=self.selected_language,
+                      lang_hint=lang_id.output_hint(self._input_source(),
+                                                    self.selected_language),
                       enabled=self._ruby_enabled())
         self.translate_btn.configure(text=f"Translate → {self.selected_language}",
                                      state='normal')
 
         # Update title with trial info after each translation
         self._update_popup_title_with_trial()
+
+        # The translation may have brought a verdict for the input (J4): the
+        # Reading pane can read kanji-only Japanese now.
+        if self._reading_pane_alive():
+            self._schedule_reading_refresh(delay_ms=1)
 
     def _start_translate_animation(self):
         """Start the translation button animation (dots + pulse)."""
@@ -1306,6 +1314,7 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
             parent: Frame to pack into
             translated: Text to display
             target_lang: Target language, the authoritative annotation hint
+                (with the input's settled language, `lang_id.output_hint`)
         """
         self.trans_text = RubyText(parent, height=10, wrap=tk.WORD,
                                    bg='#2b2b2b', base_fg='#ffffff',
@@ -1314,10 +1323,21 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
                                    spacing1=0, spacing3=0, cursor='xterm',
                                    padx=10, pady=10)
         insert_output(self.trans_text, '1.0', translated,
-                      lang_hint=target_lang, enabled=self._ruby_enabled())
+                      lang_hint=lang_id.output_hint(self._input_source(), target_lang),
+                      enabled=self._ruby_enabled())
         self.trans_text.config(state='disabled')  # Make read-only
         self.trans_text.pack(fill=BOTH, expand=True, pady=(5, 0))
         return self.trans_text
+
+    def _input_source(self) -> Optional[str]:
+        """The input box's language as far as it is settled: its characters,
+        else the verdict a model (or the user) gave when exactly this text was
+        translated - `TranslationService.source_language()`. No request, ever."""
+        try:
+            text = self.original_text.get('1.0', 'end-1c')
+        except tk.TclError:
+            return None
+        return self.translation_service.source_language(text)
 
     def _ruby_enabled(self) -> bool:
         """Whether result text should carry furigana (Settings toggle).
@@ -1419,10 +1439,13 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         if available <= 1:
             available = max(200, self.original_text.winfo_width() - 30)
 
-        # No lang_hint: the source language is unknown, so kanji-only text
-        # stays plain rather than being guessed at (it reads as Chinese).
-        if len(text) <= MAX_ANNOTATE_CHARS and furigana.should_annotate(text):
-            self._reading_text.set_ruby(text)
+        # The hint is the input's settled language: its own evidence, else the
+        # verdict from translating exactly this text (J7). Typing never sends a
+        # request and this pane never opens a window, so kanji-only text that
+        # nobody has placed stays plain rather than being guessed at.
+        hint = lang_id.JAPANESE if self._input_source() == lang_id.JAPANESE else None
+        if len(text) <= MAX_ANNOTATE_CHARS and furigana.should_annotate(text, hint):
+            self._reading_text.set_ruby(text, hint)
         else:
             # Mirroring unannotatable text would just duplicate the box above.
             self._reading_text.set_plain(READING_PANE_PLACEHOLDER,
@@ -1467,7 +1490,8 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         # get_plain(): get() would hand over text with every annotated word
         # deleted, so the expanded window would show a broken sentence.
         translated = self.trans_text.get_plain().strip()
-        self.expanded_window.show(translated, self.selected_language)
+        self.expanded_window.show(translated, self.selected_language,
+                                  source_language=self._input_source())
 
     def _copy_translation(self):
         """Copy translation to clipboard."""

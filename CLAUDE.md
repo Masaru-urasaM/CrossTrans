@@ -806,10 +806,10 @@ display rather than receiving pre-annotated strings through the queue.
 | Popup, grammar fix | the original's evidence or verdict | "Grammar" is a label, not a language; a fix keeps the source's language (J6) |
 | Replace preview | as the translation box | translated half only; the struck-through original stays plain |
 | Custom Prompt edit mode | — | box is flattened to plain first (I3) |
-| Main window output (`trans_text`) | `target_lang` / `selected_language` | read-only, so I3 holds by construction |
-| Expanded view | `target_language` arg | read-only since F3; a disabled `tk.Text` still selects and copies |
+| Main window output (`trans_text`) | `output_hint(input's settled language, target)`; a grammar fix: the input's language | read-only, so I3 holds by construction (J7) |
+| Expanded view | `output_hint(source_language, target_language)` args | read-only since F3; a disabled `tk.Text` still selects and copies |
 | Main window input (`original_text`) | — | editable, so it stays plain (I3) forever; its readings live in the Reading pane below |
-| Reading pane (`_reading_text`) | none | mirrors the input box; source language unknown, so kanji-only input stays plain |
+| Reading pane (`_reading_text`) | the input's settled language (`_input_source()`) | kanji-only input is read once a translation of exactly that text placed it as Japanese (J7); no request while typing, never a window |
 | Dictionary result window | the lookup's stated source, else each entry's **Source Language** field; `target_lang` for Translation/Definition/Word Type; Japanese + a non-Chinese language = Japanese throughout; Japanese/Chinese pairs cut at `→` | monospace columns preserved; Pronunciation never annotated. See below |
 | Dictionary word chips | mode language (from evidence, a model's verdict or the user since J5), applied to the whole line | a chip that cuts a compound stays bare. See below |
 | Custom lookup tags | mode language, per tag | a tag is one lookup phrase, so it is annotated on its own |
@@ -818,6 +818,10 @@ All result text goes through `ruby_text.insert_output(widget, index, text, lang_
 so the toggle is honored in one place. Read every one of these boxes with `get_plain()`.
 
 ### Reading pane (main window input, F4)
+**Its hint (J7)** is `TranslatorApp._input_source()` = `TranslationService.source_language(text)`:
+the input's own evidence, else the verdict a model (or the popup's chooser) gave for exactly that
+text, looked up stripped. A finished translation schedules a refresh, because that is when a
+verdict arrives - type 東京大学, press Translate, and とうきょうだいがく appears.
 Read-only `RubyText` under `original_text`, **shown by default** and collapsible via its
 `▼ Reading` header (the choice persists in `furigana_reading_pane`). Hidden entirely while
 `furigana_enabled` is off.

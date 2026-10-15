@@ -2,7 +2,7 @@
 
 > **Status: 🔨 IN PROGRESS** on branch `feature/japanese-language-identity` (from `main` after
 > the merge of `h1-health-review`, `f28a276`). **J0 ✅ and J1 ✅ done 2026-10-15** (§6).
-> **J2 ✅, J3 ✅, J4 ✅, J5 ✅ and J6 ✅ done 2026-10-15** (`src/core/lang_id.py`, Decision 24; the dictionary
+> **J2-J7 ✅ done 2026-10-15** (`src/core/lang_id.py`, Decision 24; the dictionary
 > result window reads the stated source and both languages of an entry; translation prompts
 > state the source or ask the model for a `[[SOURCE: ...]]` line, Decision 25).
 > **D13-D15 ✅ done 2026-10-15** at the user's request: one Dictionary mode serves both buttons
@@ -898,7 +898,12 @@ kanji-only grammar result annotated when the source resolves Japanese; no clippi
 **Manual (user):** select `東京大学` → Win+Alt+E → the popup shows 東京大学 with とうきょうだいがく
 above the translation; select `我们在学习中文。` → Win+Alt+E → no reading block.
 
-### J7 - Main-window surfaces
+### J7 - Main-window surfaces  ✅ Done (2026-10-15)
+
+> **Result:** `TranslationService.source_language(text)` + `TranslatorApp._input_source()`;
+> Reading pane, output box, grammar result and expanded view all use it; a finished translation
+> refreshes the pane. Existing "kanji-only stays plain" tests unchanged (no verdict). Tests
+> 1118 → 1132; 10 mutations killed.
 
 **Files (2):** `src/app.py` (`_refresh_reading_pane` `:1407-1436`, `_update_grammar_result`
 `:1184-1200`, `_update_translation_with_original` `:1218-1237`, `_create_translation_box`
