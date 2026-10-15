@@ -36,7 +36,7 @@ a Dictionary that knows which language it looks up. Plan and status in `TODO.md`
 | Item | Status | Notes |
 |------|--------|-------|
 | Cut 1.9.21 | 📋 Planned | Bump `VERSION`, run `build_exe.bat`, tag, write release notes. The work it would ship is already on `main` and tested |
-| Japanese language identity (`TODO.md`, phases J0–J12) | 🔨 In progress | **J0 ✅ J1 ✅ (2026-10-15)**: dictionary prompt states source → target and sends the context (Decision 21). Next: J2 `lang_id` core, after the user approves `TODO.md` §3.1 (Q1: the model decides, the user settles — Decision 22). Whether it ships in 1.9.21 or 1.9.22 is open |
+| Japanese language identity (`TODO.md`, phases J0–J12) | 🔨 In progress | **J0 ✅ J1 ✅ (2026-10-15)**: dictionary prompt states source → target and sends the context (Decision 21). **D13–D15 ✅ (2026-10-15)**: one Dictionary mode for both buttons (Decision 23), a failed lookup shows its message, no `grab_set()` in its dialogs. Next: J2 `lang_id` core (Q1: the model decides, the user settles — Decision 22). Whether it ships in 1.9.21 or 1.9.22 is open |
 
 ---
 
@@ -53,5 +53,8 @@ self-maintaining (Decision 19); OpenRouter's two were dead *and* mis-routed to T
 (Decision 20); then keys arrived for Cerebras and SambaNova, whose lists were 6/6 and 11/12 dead.
 Five providers checked, not one table clean - eight remain, each needing its own key. **D12** is
 the cross-provider model-name clash that surfaced from the same work. **D13–D15** came out of the
-language-identity work on 2026-10-15: Dictionary mode implemented twice, a failed lookup's toast
-that raises `NameError`, and the main-window dialogs' `grab_set()`. None is scheduled; each carries its own trigger condition.
+language-identity work on 2026-10-15 (Dictionary mode implemented twice, a failed lookup's toast
+that raised `NameError`, the main-window dialogs' `grab_set()`) and were **closed the same day**.
+Closing D15 surfaced **D16**: `UpdateFailedDialog` is a `grab_set()` + `transient()` +
+`wait_window()` dialog on the withdrawn root - the documented freeze trap, on the failed-update
+path. None is scheduled; each carries its own trigger condition.

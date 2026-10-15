@@ -19,13 +19,11 @@ except ImportError:
     from tkinter import ttk
     HAS_TTKBOOTSTRAP = False
 
-from src.core.dictionary_prompt import dictionary_source_language
 from src.core.furigana import RubySegment
 from src.core.nlp_manager import nlp_manager
 from src.ui.dictionary_render import overhead_px, split_dictionary_text
 from src.ui.ruby_text import (RubyText, estimate_notation_px,
                               estimate_ruby_overhead_px, insert_output)
-from src.ui.toast import ToastManager
 
 # Popup padding - SINGLE SOURCE OF TRUTH, shared by calculate_size() and the
 # furigana height estimate (both need the same wrap width).
@@ -224,7 +222,6 @@ class QuickTranslateManager:
         self.popup_attribution: Optional[ttk.Label] = None  # "Translated with ..." note
         self.popup_copy_btn: Optional[ttk.Button] = None
         self.popup_dict_btn: Optional[ttk.Button] = None
-        self.toast = ToastManager(root)  # For shake notifications
 
         # Mouse position captured when hotkey was pressed
         self._last_mouse_x = 0
@@ -263,8 +260,7 @@ class QuickTranslateManager:
         self._on_custom_prompt_send: Optional[Callable[[str], None]] = None
         self._on_open_translator: Optional[Callable[[], None]] = None
         self._on_open_settings: Optional[Callable[[], None]] = None
-        self._on_open_settings_dictionary_tab: Optional[Callable[[], None]] = None
-        self._on_dictionary_lookup: Optional[Callable[..., None]] = None
+        self._on_open_dictionary: Optional[Callable[[str, str, Optional[tk.Misc]], None]] = None
         self.popup_replace_btn: Optional[tk.Button] = None
         self.popup_retranslate_btn: Optional[tk.Button] = None
         self.popup_custom_prompt_btn: Optional[tk.Button] = None
@@ -277,8 +273,7 @@ class QuickTranslateManager:
                             on_copy_and_replace: Optional[Callable[[], None]] = None,
                             on_open_translator: Optional[Callable[[], None]] = None,
                             on_open_settings: Optional[Callable[[], None]] = None,
-                            on_open_settings_dictionary_tab: Optional[Callable[[], None]] = None,
-                            on_dictionary_lookup: Optional[Callable[..., None]] = None,
+                            on_open_dictionary: Optional[Callable[[str, str, Optional[tk.Misc]], None]] = None,
                             on_open_settings_hotkeys_tab: Optional[Callable[[], None]] = None,
                             on_re_translate: Optional[Callable[[], None]] = None,
                             on_custom_prompt_send: Optional[Callable[[str], None]] = None):
@@ -289,11 +284,9 @@ class QuickTranslateManager:
             on_copy_and_replace: Called when user clicks Replace button (copy + paste into source app)
             on_open_translator: Called when user clicks Open Translator
             on_open_settings: Called when user clicks Open Settings (error state)
-            on_open_settings_dictionary_tab: Called to open Settings directly to Dictionary tab
-            on_dictionary_lookup: Called when user performs dictionary lookup
-                (words_list, target_lang, source_lang=..., context_text=...): the
-                language to state in the prompt (None lets the model decide) and
-                the text the words were selected from
+            on_open_dictionary: Called by the Dictionary button with (text, target_lang,
+                popup window) - the shared Dictionary-mode flow
+                (DictionaryPopup.open_from_text), which opens beside the popup
             on_open_settings_hotkeys_tab: Called to open Settings directly to Hotkeys tab
             on_re_translate: Called when user clicks Re-translate button (force fresh API call)
             on_custom_prompt_send: Called with the edit-box content when user clicks Send in custom-prompt mode
@@ -302,8 +295,7 @@ class QuickTranslateManager:
         self._on_copy_and_replace = on_copy_and_replace
         self._on_open_translator = on_open_translator
         self._on_open_settings = on_open_settings
-        self._on_open_settings_dictionary_tab = on_open_settings_dictionary_tab
-        self._on_dictionary_lookup = on_dictionary_lookup
+        self._on_open_dictionary = on_open_dictionary
         self._on_open_settings_hotkeys_tab = on_open_settings_hotkeys_tab
         self._on_re_translate = on_re_translate
         self._on_custom_prompt_send = on_custom_prompt_send
@@ -569,7 +561,7 @@ class QuickTranslateManager:
         self._current_original = original
         self._current_translation = translated
         self._current_target_lang = target_lang
-        self._current_trial_info = trial_info  # Store for dictionary title bar
+        self._current_trial_info = trial_info  # Store for restoring after custom-prompt cancel
         self._current_furigana = furigana_text  # Store for restoring after custom-prompt cancel
         self._is_grammar = is_grammar  # Grammar-fix result: hide translation-only buttons
 
@@ -1300,418 +1292,17 @@ class QuickTranslateManager:
             pass  # Widget destroyed
 
     def _open_dictionary_popup(self):
-        """Open dictionary popup window with word buttons for original text.
+        """Open Dictionary mode on the popup's text, beside the popup.
 
         Opens as ADDITIONAL window - does NOT close the quick translate popup.
+        The flow itself is DictionaryPopup's, shared with the main window's
+        Dictionary button (DEFERRED D13 - this used to be a second copy of it).
         """
-        # Check if button is enabled (NLP installed)
-        if hasattr(self, '_dict_btn_enabled') and not self._dict_btn_enabled:
-            self._show_nlp_required_message()
-            return
-
-        # Double-check NLP is installed
-        if not nlp_manager.is_any_installed():
-            self._show_nlp_required_message()
-            return
-
         # Use original text if available, otherwise fall back to translation
         text_to_analyze = self._current_original if self._current_original else self._current_translation
-        if not text_to_analyze:
+        if not text_to_analyze or not self._on_open_dictionary:
             return
-
-        # Detect language
-        detected_lang, confidence = nlp_manager.detect_language(text_to_analyze)
-        CONFIDENCE_THRESHOLD = 0.7
-
-        # Check if detection is confident and NLP is installed for that language
-        if confidence >= CONFIDENCE_THRESHOLD and nlp_manager.is_installed(detected_lang):
-            # Auto-proceed with detected language
-            self._open_dictionary_with_language(text_to_analyze, detected_lang, self._current_trial_info)
-        else:
-            # Determine if language was detected but not installed
-            detected_but_not_installed = (
-                confidence >= CONFIDENCE_THRESHOLD and
-                detected_lang and
-                not nlp_manager.is_installed(detected_lang)
-            )
-            # Show language selection dialog with context
-            self._show_language_selection_dialog(
-                text_to_analyze,
-                detected_lang if confidence > 0.3 else None,
-                detected_but_not_installed=detected_but_not_installed
-            )
-
-    def _show_nlp_required_message(self):
-        """Show message that NLP pack is required with Install link."""
-        msg_popup = tk.Toplevel(self.root)
-        msg_popup.title("No Language Pack Installed")
-        msg_popup.configure(bg='#2b2b2b')
-        msg_popup.attributes('-topmost', True)
-
-        # Center and size - increased for better button visibility
-        w, h = 400, 220
-        x = self._last_mouse_x - w // 2
-        y = self._last_mouse_y - h // 2
-        msg_popup.geometry(f"{w}x{h}+{x}+{y}")
-
-        frame = ttk.Frame(msg_popup, padding=20)
-        frame.pack(fill=BOTH, expand=True)
-
-        ttk.Label(frame, text="⚠️ No Language Pack Installed",
-                  font=('Segoe UI', 12, 'bold')).pack(pady=(0, 10))
-        ttk.Label(frame, text="Dictionary mode requires NLP language packs",
-                  font=('Segoe UI', 10)).pack()
-        ttk.Label(frame, text="to tokenize text for word selection.",
-                  font=('Segoe UI', 10)).pack(pady=(0, 15))
-
-        # Open Settings button (same as main window)
-        def open_settings_dict(e=None):
-            msg_popup.destroy()
-            if self._on_open_settings_dictionary_tab:
-                self._on_open_settings_dictionary_tab()
-            elif self._on_open_settings:
-                self._on_open_settings()
-                self.root.after(300, self._try_open_dictionary_tab)
-
-        # Button frame
-        btn_frame = ttk.Frame(frame)
-        btn_frame.pack(fill=X, pady=(5, 0))
-
-        open_kwargs = {"text": "Open Dictionary Settings", "command": open_settings_dict, "width": 22}
-        if HAS_TTKBOOTSTRAP:
-            open_kwargs["bootstyle"] = "primary"
-        ttk.Button(btn_frame, **open_kwargs).pack(side=LEFT, padx=5)
-
-        close_kwargs = {"text": "Close", "command": msg_popup.destroy, "width": 10}
-        if HAS_TTKBOOTSTRAP:
-            close_kwargs["bootstyle"] = "secondary"
-        ttk.Button(btn_frame, **close_kwargs).pack(side=RIGHT, padx=5)
-
-        msg_popup.bind('<Escape>', lambda e: msg_popup.destroy())
-        msg_popup.bind('<Return>', lambda e: open_settings_dict())
-
-    def _show_language_selection_dialog(self, text_to_analyze: str, suggested_lang: str = None,
-                                         detected_but_not_installed: bool = False):
-        """Show dialog to select source language for dictionary mode.
-
-        Args:
-            text_to_analyze: Text to analyze
-            suggested_lang: Suggested language from detection
-            detected_but_not_installed: True if language was detected but pack not installed
-        """
-        installed_languages = nlp_manager.get_installed_languages()
-        if not installed_languages:
-            self._show_nlp_required_message()
-            return
-
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Select Source Language")
-        dialog.configure(bg='#2b2b2b')
-        dialog.attributes('-topmost', True)
-        dialog.lift()
-        dialog.focus_force()
-        dialog.after(100, lambda: dialog.attributes('-topmost', False) if dialog.winfo_exists() else None)
-
-        # Center on mouse position - taller if showing install prompt
-        w = 400
-        h = 340 if detected_but_not_installed else 300
-        x = self._last_mouse_x - w // 2
-        y = self._last_mouse_y - h // 2
-        dialog.geometry(f"{w}x{h}+{x}+{y}")
-
-        # Content
-        frame = ttk.Frame(dialog, padding=15)
-        frame.pack(fill=BOTH, expand=True)
-
-        def open_settings_dict():
-            dialog.destroy()
-            if self._on_open_settings_dictionary_tab:
-                self.root.after(50, self._on_open_settings_dictionary_tab)
-
-        if detected_but_not_installed and suggested_lang:
-            # Case: Language detected but not installed - show prominent install option
-            ttk.Label(frame, text=f"📖 Detected: {suggested_lang}",
-                      font=('Segoe UI', 11, 'bold')).pack(pady=(0, 5))
-
-            # Warning that pack not installed
-            warning_frame = ttk.Frame(frame)
-            warning_frame.pack(fill=X, pady=(0, 10))
-            ttk.Label(warning_frame, text=f"⚠️ {suggested_lang} language pack is not installed.",
-                      font=('Segoe UI', 10), foreground='#ffaa00').pack(anchor='w')
-
-            # Install button - prominent
-            install_frame = ttk.Frame(frame)
-            install_frame.pack(fill=X, pady=(0, 10))
-
-            install_btn_kwargs = {
-                "text": f"📥 Install {suggested_lang} Pack",
-                "command": open_settings_dict,
-                "width": 25
-            }
-            if HAS_TTKBOOTSTRAP:
-                install_btn_kwargs["bootstyle"] = "info"
-            ttk.Button(install_frame, **install_btn_kwargs).pack(pady=5)
-
-            # Separator
-            ttk.Separator(frame, orient='horizontal').pack(fill=X, pady=5)
-
-            # Alternative: select from installed
-            ttk.Label(frame, text="Or select from installed languages:",
-                      font=('Segoe UI', 10), foreground='#888888').pack(anchor='w', pady=(5, 5))
-        else:
-            # Case: Cannot detect language - show generic message
-            ttk.Label(frame, text="⚠️ Cannot detect language",
-                      font=('Segoe UI', 11, 'bold')).pack(pady=(0, 5))
-
-            # Explanation with link to Settings
-            explain_frame = ttk.Frame(frame)
-            explain_frame.pack(anchor='w', pady=(0, 8))
-            ttk.Label(explain_frame, text="Only installed language packs are shown.",
-                      font=('Segoe UI', 9), foreground='#888888').pack(side=LEFT, anchor='w')
-
-            link_label = tk.Label(explain_frame, text="Install more →",
-                                  font=('Segoe UI', 9, 'underline'), fg='#4da6ff',
-                                  bg='#2b2b2b', cursor='hand2')
-            link_label.pack(side=LEFT, padx=(5, 0))
-            link_label.bind('<Button-1>', lambda e: open_settings_dict())
-
-            ttk.Label(frame, text="Select source language:",
-                      font=('Segoe UI', 10)).pack(anchor='w', pady=(0, 5))
-
-        # Combobox for language selection
-        lang_var = tk.StringVar()
-        lang_combo = ttk.Combobox(frame, textvariable=lang_var, values=installed_languages,
-                                  font=('Segoe UI', 10), state='readonly')
-        lang_combo.pack(fill=X, pady=(0, 10))
-
-        # Set default selection
-        if suggested_lang and suggested_lang in installed_languages:
-            lang_var.set(suggested_lang)
-        elif installed_languages:
-            lang_var.set(installed_languages[0])
-
-        # Buttons
-        btn_frame = ttk.Frame(frame)
-        btn_frame.pack(fill=X)
-
-        def confirm():
-            selected = lang_var.get()
-            if selected:
-                dialog.destroy()
-                self.root.after(50, lambda: self._open_dictionary_with_language(
-                    text_to_analyze, selected, self._current_trial_info, user_chosen=True))
-
-        def cancel():
-            dialog.destroy()
-
-        confirm_kwargs = {"text": "Confirm", "command": confirm, "width": 10}
-        if HAS_TTKBOOTSTRAP:
-            confirm_kwargs["bootstyle"] = "primary"
-        ttk.Button(btn_frame, **confirm_kwargs).pack(side=LEFT, padx=5)
-
-        cancel_kwargs = {"text": "Cancel", "command": cancel, "width": 10}
-        if HAS_TTKBOOTSTRAP:
-            cancel_kwargs["bootstyle"] = "secondary"
-        ttk.Button(btn_frame, **cancel_kwargs).pack(side=RIGHT, padx=5)
-
-        dialog.bind('<Escape>', lambda e: cancel())
-        dialog.bind('<Return>', lambda e: confirm())
-
-    def _open_dictionary_with_language(self, text_to_analyze: str, language: str,
-                                        trial_info: dict = None, user_chosen: bool = False):
-        """Open dictionary popup with specified language for NLP tokenization.
-
-        Args:
-            text_to_analyze: Original text to analyze
-            language: Language for NLP tokenization
-            trial_info: Optional trial mode info dict for title bar display
-            user_chosen: True when the user picked `language` in the selection
-                dialog. Only then - or when detection proved Japanese - is it
-                stated to the lookup prompt as fact (dictionary_source_language).
-        """
-        from src.ui.dictionary_mode import WordButtonFrame
-
-        # Create popup window (ADDITIONAL - not replacing quick translate popup)
-        dict_popup = tk.Toplevel(self.root)
-
-        # Get target language for title
-        target_lang = self._current_target_lang or "Unknown"
-
-        # Set title with trial quota if in trial mode
-        if trial_info and trial_info.get('is_trial'):
-            remaining = trial_info.get('remaining', 0)
-            daily_limit = trial_info.get('daily_limit', 50)
-            dict_popup.title(f"Dictionary ({language} → {target_lang}) - Trial Mode ({remaining}/{daily_limit} left)")
-        else:
-            dict_popup.title(f"Dictionary ({language} → {target_lang})")
-        dict_popup.configure(bg='#2b2b2b')
-        dict_popup.attributes('-topmost', True)
-        dict_popup.lift()
-        dict_popup.focus_force()
-        dict_popup.after(100, lambda: dict_popup.attributes('-topmost', False) if dict_popup.winfo_exists() else None)
-
-        # Calculate size and position - offset from popup
-        popup_width = 650
-        popup_height = 350
-
-        # Get work area (excludes taskbar) for proper positioning
-        work_area = get_monitor_work_area(self._last_mouse_x, self._last_mouse_y)
-        if work_area:
-            work_left, work_top, work_right, work_bottom = work_area
-        else:
-            # Fallback
-            work_left, work_top = 0, 0
-            work_right = self.root.winfo_screenwidth()
-            work_bottom = self.root.winfo_screenheight() - 50
-
-        # Position below or beside the popup
-        if self.popup and self.popup.winfo_exists():
-            popup_x = self.popup.winfo_x()
-            popup_y = self.popup.winfo_y()
-            popup_h = self.popup.winfo_height()
-            x = popup_x
-            y = popup_y + popup_h + 10  # Below popup
-        else:
-            x = self._last_mouse_x + 20
-            y = self._last_mouse_y + 100
-
-        # Ensure within work area (respects taskbar)
-        margin = 10
-        if x + popup_width > work_right - margin:
-            x = work_right - popup_width - margin
-        if x < work_left + margin:
-            x = work_left + margin
-
-        if y + popup_height > work_bottom - margin:
-            # Try positioning above popup instead
-            if self.popup and self.popup.winfo_exists():
-                y = self.popup.winfo_y() - popup_height - 10
-            if y < work_top + margin:
-                # Pin to bottom of work area
-                y = work_bottom - popup_height - margin
-                # Reduce height if still too tall
-                max_height = work_bottom - work_top - 2 * margin
-                if popup_height > max_height:
-                    popup_height = max_height
-                    y = work_top + margin
-
-        dict_popup.geometry(f"{popup_width}x{popup_height}+{x}+{y}")
-
-        # Apply dark title bar (Windows 10/11)
-        dict_popup.update_idletasks()
-        try:
-            hwnd = ctypes.windll.user32.GetParent(dict_popup.winfo_id())
-            if not hwnd:
-                hwnd = dict_popup.winfo_id()
-            DWMWA_USE_IMMERSIVE_DARK_MODE = 20
-            value = ctypes.c_int(1)
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
-                ctypes.byref(value), ctypes.sizeof(value))
-        except Exception:
-            pass
-
-        # Main frame
-        main_frame = ttk.Frame(dict_popup, padding=15)
-        main_frame.pack(fill=BOTH, expand=True)
-
-        # Header with language info
-        ttk.Label(main_frame, text=f"Select words to look up ({language} NLP):",
-                  font=('Segoe UI', 10)).pack(anchor='w', pady=(0, 8))
-
-        # Track expanded state for toggle
-        expanded_state = [False]
-        original_geometry = [f"{popup_width}x{popup_height}+{x}+{y}"]
-
-        # Expand/Collapse function
-        def expand_dictionary():
-            if expanded_state[0]:
-                # Collapse: restore original size
-                dict_popup.geometry(original_geometry[0])
-                expanded_state[0] = False
-                dict_frame.expand_btn.configure(text="⛶ Expand")
-            else:
-                # Expand: larger size
-                expanded_state[0] = True
-                dict_popup.geometry("900x600")
-                # Center on work area
-                dict_popup.update_idletasks()
-                w = dict_popup.winfo_width()
-                h = dict_popup.winfo_height()
-                cx = work_left + (work_right - work_left - w) // 2
-                cy = work_top + (work_bottom - work_top - h) // 2
-                dict_popup.geometry(f"{w}x{h}+{cx}+{cy}")
-                dict_frame.expand_btn.configure(text="⛶ Collapse")
-
-        # What the lookup prompt is told the words are, or None to let the model decide.
-        lookup_source = dictionary_source_language(language, user_chosen)
-
-        # Word button frame with language for NLP tokenization
-        def on_lookup(selected_words):
-            """Lookup callback receives list of individual words + custom box phrases."""
-            all_words = list(selected_words)
-            all_words.extend(custom_boxes.get_all_phrases())
-            if all_words and self._on_dictionary_lookup:
-                self._on_dictionary_lookup(all_words, self._current_target_lang,
-                                           source_lang=lookup_source,
-                                           context_text=text_to_analyze)
-
-        def on_no_selection():
-            """Check custom boxes before showing warning."""
-            box_phrases = custom_boxes.get_all_phrases()
-            if box_phrases and self._on_dictionary_lookup:
-                self._on_dictionary_lookup(box_phrases, self._current_target_lang,
-                                           source_lang=lookup_source,
-                                           context_text=text_to_analyze)
-            else:
-                self.toast.show_warning_with_shake("Please select a word or enter a custom phrase")
-
-        dict_frame = WordButtonFrame(
-            main_frame,
-            text_to_analyze,
-            on_selection_change=lambda t: None,
-            on_lookup=on_lookup,
-            on_expand=expand_dictionary,
-            on_no_selection=on_no_selection,
-            language=language,  # Pass language for NLP tokenization
-            furigana_enabled=self._ruby_enabled()
-        )
-        dict_frame.set_exit_callback(dict_popup.destroy)
-        dict_frame.pack(fill=BOTH, expand=True)
-
-        # Custom word boxes (between text area and action buttons)
-        from src.ui.custom_word_boxes import CustomWordBoxesFrame
-        custom_boxes = CustomWordBoxesFrame(
-            dict_frame.frame, language=language,
-            furigana_enabled=self._ruby_enabled())
-        dict_frame.insert_custom_widget(custom_boxes.frame)
-        dict_frame.set_drop_target(custom_boxes)
-
-        # Store reference for animation control
-        self._dict_popup_frame = dict_frame
-
-        # Close on Escape
-        dict_popup.bind('<Escape>', lambda e: dict_popup.destroy())
-
-    def _try_open_dictionary_tab(self):
-        """Try to open Dictionary tab in Settings window.
-
-        This is called after settings window opens to switch to Dictionary tab.
-        """
-        # Find settings window and call open_dictionary_tab
-        for widget in self.root.winfo_children():
-            if isinstance(widget, tk.Toplevel) and 'Settings' in widget.title():
-                # Found settings window, look for notebook
-                for child in widget.winfo_children():
-                    if hasattr(child, 'winfo_children'):
-                        for subchild in child.winfo_children():
-                            if hasattr(subchild, 'select') and hasattr(subchild, 'tab'):
-                                # This is a notebook
-                                for i in range(subchild.index('end')):
-                                    if 'Dictionary' in subchild.tab(i, 'text'):
-                                        subchild.select(i)
-                                        return
-                break
+        self._on_open_dictionary(text_to_analyze, self._current_target_lang, self.popup)
 
     def close(self):
         """Close the popup."""

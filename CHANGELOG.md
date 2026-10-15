@@ -4,6 +4,64 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase D13-D15 — One Dictionary mode, and the two bugs its copies shared (2026-10-15)
+
+Dictionary mode was written twice: once for the main window's Dictionary button
+(`dictionary_popup.py`) and once more inside the quick-translate popup (`quick_translate.py`,
+~400 lines). Every change had to be made twice, and the copies had already drifted. The user asked
+for the duplication and its two bugs to be fixed before the remaining language-identity phases,
+all three of which (J3, J5, J6) would otherwise have been written twice again.
+
+**Changed**
+- **One implementation** (`DictionaryPopup`, Decision 23). The popup's Dictionary button now
+  hands its text, its target language and itself to `DictionaryPopup.open_from_text(text,
+  target_language=..., anchor=...)` through one new callback, `on_open_dictionary`. Removed from
+  `QuickTranslateManager`: `_show_nlp_required_message`, `_show_language_selection_dialog`,
+  `_open_dictionary_with_language`, `_try_open_dictionary_tab`, the `on_dictionary_lookup` and
+  `on_open_settings_dictionary_tab` callbacks and the popup's own `ToastManager`, which only that
+  code used. Removed from `app.py`: `_on_quick_translate_dictionary_lookup` and
+  `_show_quick_translate_dictionary_result` (the popup's copy of the lookup) and
+  `_show_settings_dictionary_tab` (identical to `_show_settings_tab("Dictionary")`).
+- **Where the windows go** is now two pure functions: `word_window_geometry()` - beside the popup
+  when opened from it (below, else above, else pinned to the bottom of the work area), centred on
+  the work area under the mouse otherwise - and `dialog_geometry()` - a dialog centred on the
+  pointer, inside the work area. The word window is 700x350 (1000x700 expanded) from both buttons;
+  the popup's copy used 650x350 (900x600). The main window's dialogs now open next to the pointer
+  instead of in the middle of the screen, as the popup's always did.
+- The word window's title reads the trial quota live from the service, from both buttons (the
+  popup's copy showed the count from when the translation arrived).
+- An NLP pack is checked live when the button is pressed. The main window used to trust the
+  button's state from when it was drawn, so a pack installed since then still got "No Language
+  Pack Installed".
+
+**Fixed**
+- **D14 - a failed lookup showed nothing.** Both copies ended in
+  `after(0, lambda: toast.show_error(f"Lookup failed: {e}"))`; Python unbinds `e` when the
+  `except` block ends, so Tk ran a lambda that raised `NameError` and the user saw no message. The
+  message is now bound before the callback, logged as `[Dictionary] Lookup failed: ...`, and the
+  Lookup button's "Looking up..." animation is stopped (the main window's copy never stopped it on
+  a failure; neither copy stopped it when every selected word filtered out as punctuation).
+- **D15 - the main window's two Dictionary dialogs used `transient()` + `grab_set()`**, the
+  pattern CLAUDE.md forbids. Both now use topmost + `lift()` + `focus_force()` +
+  `after(100, topmost off)`, built once in `_new_dialog()`.
+- **`DESIGN_DECISIONS.md`**: Decision 3 quoted the developer's choice in Vietnamese; it is now
+  English ("One row, widened"), per the project rule.
+
+**Found, not fixed** - recorded as `DEFERRED.md` **D16**: `UpdateFailedDialog` (shown at startup
+after a failed update) makes a `grab_set()` + `transient(root)` + `wait_window()` dialog on the
+*withdrawn* root - the exact trap in CLAUDE.md's Known Issues, which leaves an invisible modal
+window and a frozen app. Three more dialogs call `grab_set()` without `transient()`.
+`app.py` `_open_settings_dictionary_tab()` has no caller (pre-existing; left alone).
+
+**Tests**: 755 -> 780. The eleven wiring tests moved from `test_dictionary_prompt.py` to the new
+`tests/test_dictionary_flow.py` (36 tests): both buttons down to `dictionary_lookup()` - the popup
+path now through the real `TranslatorApp` callback and the shared flow - plus placement, the
+lookup's result and failure paths, and the dialogs. Fifteen mutations - the D14 lambda put back,
+`grab_set()` put back, topmost never released, the popup's target, anchor or text dropped, the
+dialog forgetting either, each geometry rule, the settings link - each made the suite fail and was
+restored. The real flow was also opened from both buttons with the real word chips and NLP
+(window 700x350 centred from the main window; directly under a 180 px popup from the popup).
+
 ### Phase J0-J1 — The dictionary knows which language it looks up (2026-10-15)
 
 First two phases of the Japanese language-identity work (`TODO.md`): furigana wherever Japanese

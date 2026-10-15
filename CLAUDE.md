@@ -32,7 +32,7 @@ Select text, press hotkey, get instant translation in a popup.
 | `src/core/update_ui_manager.py` | 259 | `UpdateUIManager` - update status checking & UI |
 | `src/core/trial_manager.py` | 131 | `TrialManager` - trial mode quota & dialogs |
 | `src/ui/screenshot_handler.py` | 222 | `ScreenshotHandler` - screenshot/vision translation |
-| `src/ui/dictionary_popup.py` | 516 | `DictionaryPopup` - dictionary word lookup UI |
+| `src/ui/dictionary_popup.py` | 632 | `DictionaryPopup` - Dictionary mode for both Dictionary buttons |
 
 ### Callback Pattern
 New modules use `configure_callbacks()` for dependency injection:
@@ -246,7 +246,8 @@ the first match, so one of the two always loses (DEFERRED D12). It only matters 
 - `dialogs.py` - Error/trial dialogs
 - `attachments.py` - File attachment widget
 - `dictionary_mode.py` - Word selection UI with right-click drag-to-box support
-- `dictionary_popup.py` - Dictionary popup manager (extracted from app.py)
+- `dictionary_popup.py` - Dictionary mode, the one implementation: detection, language dialog,
+  word window, lookup. The main window's button and the popup's both open it (Decision 23)
 - `custom_word_boxes.py` - Custom Word Boxes for manual phrase composition in Dictionary mode
 - `expanded_window.py` - Fullscreen translation view
 - `screenshot_handler.py` - Screenshot/vision translation handler
@@ -519,8 +520,13 @@ read 汽車, 工作, 床 as Chinese (3/10 each).
 - **Pronunciation by source**: Japanese = hiragana reading only, no romaji, no IPA (user's choice);
   Chinese = pinyin with tone marks; Korean = Revised Romanization; other = /IPA/ + a target
   phonetic. **Source = target** gives a monolingual (国語辞典-style) entry.
-- **Both Dictionary windows pass it** - `dictionary_popup.py` (main window) and the popup's copy
-  in `quick_translate.py` are the same flow written twice (DEFERRED D13); change them together.
+- **One flow serves both Dictionary buttons** (Decision 23): `DictionaryPopup` in
+  `dictionary_popup.py`. The popup's button only hands over its text, its target language and
+  itself (`on_open_dictionary` -> `open_from_text(text, target_language=, anchor=)`), so the word
+  window opens beside the popup; from the main window it opens centred. Until 2026-10-15 the
+  popup carried a second copy (D13) - do not bring one back; `tests/test_dictionary_flow.py`
+  asserts there is none. A failed lookup binds its message before the Tk callback (D14), and the
+  flow's dialogs never `grab_set()` (D15).
 - Logged as `[Dictionary] lookup n=.. source=.. target=.. context_chars=..` - counts, never text.
 - `tools/eval_dictionary_prompt.py` measures what real models answer (manual, real API calls on
   the configured keys; `trial` spends the daily trial quota and is opt-in). Results land in
@@ -529,7 +535,7 @@ read 汽車, 工作, 床 as Chinese (3/10 each).
 ### Word Filtering (hardcoded, no API call)
 Dictionary mode filters tokens before displaying as clickable buttons:
 - **Filter location**: `src/ui/dictionary_mode.py` `_create_word_labels()` (after tokenization)
-- **Safety net**: `src/ui/dictionary_popup.py` `_do_lookup()` + `src/app.py` `_on_quick_translate_dictionary_lookup()`
+- **Safety net**: `src/ui/dictionary_popup.py` `_do_lookup()` (the one lookup, for both buttons)
 - **Shared function**: `src/utils/ui_helpers.py` `filter_dictionary_words()`
 - **Regex**: `[^\W\d_]` with `re.UNICODE` — requires at least one Unicode letter (no pure numbers, symbols, punctuation)
 - Strips leading/trailing non-word chars: `"Done."` → `"Done"`, `"."` → filtered out
@@ -587,8 +593,8 @@ Custom lookup:
 **Files involved**:
 - `src/ui/custom_word_boxes.py` - WordTag, CustomWordBox, CustomWordBoxesFrame classes
 - `src/ui/dictionary_mode.py` - Right-click drag support on WordLabel, drop target wiring
-- `src/ui/dictionary_popup.py` - Composes CustomWordBoxesFrame, wraps lookup callback
-- `src/ui/quick_translate.py` - Same composition at secondary callsite
+- `src/ui/dictionary_popup.py` - Composes CustomWordBoxesFrame, wraps lookup callback (for both
+  Dictionary buttons)
 
 ## NLP Language Pack Install System (Important)
 

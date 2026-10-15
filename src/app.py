@@ -63,7 +63,7 @@ from src.core.file_processor import FileProcessor
 from src.ui.attachments import AttachmentArea
 from src.core.multimodal import MultimodalProcessor
 from src.core.screenshot import ScreenshotCapture
-from src.utils.ui_helpers import set_dark_title_bar, filter_dictionary_words
+from src.utils.ui_helpers import set_dark_title_bar
 from src.ui.expanded_window import ExpandedTranslationWindow
 from src.core.update_ui_manager import UpdateUIManager
 from src.core.trial_manager import TrialManager
@@ -165,8 +165,7 @@ class TranslatorApp:
             on_copy_and_replace=self._on_quick_translate_copy_and_replace,
             on_open_translator=self._on_quick_translate_open_translator,
             on_open_settings=lambda: self._show_settings_tab("API Key"),
-            on_open_settings_dictionary_tab=self._show_settings_dictionary_tab,
-            on_dictionary_lookup=self._on_quick_translate_dictionary_lookup,
+            on_open_dictionary=self._on_quick_translate_open_dictionary,
             on_open_settings_hotkeys_tab=self._show_settings_hotkeys_tab,
             on_re_translate=self._on_quick_translate_retranslate,
             on_custom_prompt_send=self._on_quick_translate_custom_prompt_send
@@ -191,8 +190,7 @@ class TranslatorApp:
         )
         self.dictionary_popup.configure_callbacks(
             on_show_settings_tab=self._show_settings_tab,
-            get_selected_language=lambda: self.selected_language,
-            get_popup=lambda: self.popup
+            get_selected_language=lambda: self.selected_language
         )
 
         # Tray manager
@@ -488,54 +486,14 @@ class TranslatorApp:
         # Clear pending screenshot (will be managed by AttachmentArea now)
         self.screenshot_handler.clear_pending_screenshot()
 
-    def _on_quick_translate_dictionary_lookup(self, words: list, target_lang: str,
-                                              source_lang: Optional[str] = None,
-                                              context_text: Optional[str] = None):
-        """Handle dictionary lookup from quick translate popup.
+    def _on_quick_translate_open_dictionary(self, text: str, target_lang: str,
+                                            anchor: Optional[tk.Misc] = None):
+        """The popup's Dictionary button: the main window's flow, beside the popup.
 
-        Uses batch lookup (single API call) for efficiency.
-
-        Args:
-            words: Words to look up
-            target_lang: Target language
-            source_lang: Language to state in the prompt, or None to let the model decide
-            context_text: The text the words were selected from
+        One Dictionary-mode implementation serves both buttons (DEFERRED D13);
+        the popup only says what to analyse, into which language, and where.
         """
-        if not words:
-            return
-
-        # Filter out punctuation, symbols, and special characters
-        filtered_words = filter_dictionary_words(words)
-        if not filtered_words:
-            self.toast.show_info("No valid words to look up (only punctuation/symbols)")
-            return
-
-        display_text = ", ".join(filtered_words[:3]) + ("..." if len(filtered_words) > 3 else "")
-        self.toast.show_info(f"Looking up {len(filtered_words)} word(s): {display_text}")
-
-        def do_lookup():
-            try:
-                # Single API call for all words (optimized batch lookup)
-                result = self.translation_service.dictionary_lookup(
-                    filtered_words, target_lang, source_language=source_lang, context=context_text)
-                # Get trial info after API call (quota may have changed)
-                trial_info = self.translation_service.get_trial_info()
-                # Show result in a new popup at mouse position (pass words for highlighting)
-                self.root.after(0, lambda: self._show_quick_translate_dictionary_result(result, target_lang, trial_info, filtered_words))
-            except Exception as e:
-                # Stop animation on error
-                self.root.after(0, lambda: self.quick_translate_manager.stop_dictionary_animation())
-                self.root.after(0, lambda: self.toast.show_error(f"Lookup failed: {str(e)}"))
-
-        import threading
-        threading.Thread(target=do_lookup, daemon=True).start()
-
-    def _show_quick_translate_dictionary_result(self, result: str, target_lang: str, trial_info: dict = None,
-                                               looked_up_words: list = None):
-        """Show dictionary result in a SEPARATE window (not replacing quick translate)."""
-        # Create a new SEPARATE dictionary result window
-        self.quick_translate_manager.capture_mouse_position()
-        self.quick_translate_manager.show_dictionary_result(result, target_lang, trial_info, looked_up_words)
+        self.dictionary_popup.open_from_text(text, target_language=target_lang, anchor=anchor)
 
     def on_second_instance(self):
         """Another CrossTrans was launched: raise this one instead of starting it.
@@ -1504,7 +1462,7 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
     def _open_dictionary_popup(self):
         """Open dictionary popup window with word buttons for original text."""
         original = self.original_text.get('1.0', tk.END).strip()
-        self.dictionary_popup.open_from_text(original, self.popup)
+        self.dictionary_popup.open_from_text(original)
 
     def _show_settings_hotkeys_tab(self):
         """Open settings window at Hotkeys tab.
@@ -1512,25 +1470,6 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         Used by popup gear icon to quickly access Replace mode toggle.
         """
         self._show_settings_tab("Hotkeys")
-
-    def _show_settings_dictionary_tab(self):
-        """Open settings window and navigate directly to Dictionary tab.
-
-        Used by popup "Install now" link to open Dictionary tab directly.
-        """
-        self.show_settings()
-        # Use multiple attempts with increasing delays to ensure window is ready
-        def try_open_tab(attempts=3):
-            if attempts <= 0:
-                return
-            if self.settings_window and hasattr(self.settings_window, 'open_dictionary_tab'):
-                self.settings_window.open_dictionary_tab()
-                # Focus the settings window after opening tab
-                self._focus_settings_window()
-            else:
-                # Retry with longer delay
-                self.root.after(200, lambda: try_open_tab(attempts - 1))
-        self.root.after(100, try_open_tab)
 
     def _focus_settings_window(self):
         """Bring Settings window to front and focus it."""

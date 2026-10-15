@@ -5,6 +5,44 @@ approaches. Newest first.
 
 ---
 
+### Decision 23 - One Dictionary mode: the popup delegates to `DictionaryPopup`
+
+**Date**: 2026-10-15
+**Status**: RESOLVED
+
+**Problem**: Dictionary mode - NLP check, language detection, the "Select Source Language"
+dialog, the word window and the lookup - existed twice: `src/ui/dictionary_popup.py` for the main
+window's button and ~400 lines inside `src/ui/quick_translate.py` for the popup's, plus a third
+copy of the lookup in `app.py`. The copies had drifted (D15: one used `grab_set()`, the other the
+safe pattern; window sizes and dialog placement differed) and shared one bug (D14). Phases J3, J5
+and J6 of the language-identity work would each have been written twice more. The user first
+chose to change both in lockstep (TODO.md Q8), then asked for the consolidation itself.
+
+**Options considered**:
+1. **Keep both, change them in lockstep** - Pros: no refactor. Cons: every change twice, and the
+   copies drift anyway; this was the state that produced D14/D15.
+2. **A new shared module** that both classes call - Pros: neutral ownership. Cons: a third place,
+   and both classes keep thin wrappers that still have to agree.
+3. **`DictionaryPopup` owns the flow; the popup only asks for it** - Pros: `DictionaryPopup` was
+   already the extracted owner of Dictionary mode (it shows its results through
+   `QuickTranslateManager` too); the popup's part shrinks to "this text, into this language,
+   beside me". Cons: the main window's and the popup's small differences (where the window opens,
+   whose target language) become parameters.
+
+**Resolution**: **Option 3.** `open_from_text(text, *, target_language=None, anchor=None)`;
+`QuickTranslateManager` gets one callback, `on_open_dictionary(text, target_lang, popup)`, which
+`TranslatorApp._on_quick_translate_open_dictionary()` forwards. Placement is the pure
+`word_window_geometry()` / `dialog_geometry()`, so the one real difference between the buttons -
+"beside the popup" vs "centred" - is tested without a window manager. Deliberately unified rather
+than parameterised: window size (700x350, the main window's), dialog position (next to the
+pointer, the popup's), the not-installed dialog (the main window's text), the dialogs' modality
+(the popup's safe pattern). `tests/test_dictionary_flow.py` asserts the popup keeps no copy.
+
+**References**: CHANGELOG "Phase D13-D15", TODO.md Q8, CLAUDE.md "Dictionary Mode",
+`tests/test_dictionary_flow.py`.
+
+---
+
 ### Decision 22 - Ambiguous kanji-only text: evidence first, then the model, then the user
 
 **Date**: 2026-10-15
@@ -1054,7 +1092,7 @@ bar, making 7 actions + close — crowded.
 2. **Two-row bar** — keep width, wrap to a second row. Adds height.
 3. **"⋯" overflow menu** — keep narrow, hide less-used actions. More code, less discoverable.
 
-**Resolution**: Developer chose **single wide bar** ("Một hàng, nới rộng") — simplest, lowest
+**Resolution**: Developer chose **single wide bar** ("One row, widened") — simplest, lowest
 risk. `MIN_WIDTH = 670` in `quick_translate.py`.
 
 **References**: `src/ui/quick_translate.py`.

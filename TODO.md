@@ -2,6 +2,9 @@
 
 > **Status: 🔨 IN PROGRESS** on branch `feature/japanese-language-identity` (from `main` after
 > the merge of `h1-health-review`, `f28a276`). **J0 ✅ and J1 ✅ done 2026-10-15** (§6).
+> **D13-D15 ✅ done 2026-10-15** at the user's request: one Dictionary mode serves both buttons
+> (Decision 23), so every later phase changes it once; a failed lookup shows its message; no
+> `grab_set()` in its dialogs. Closing D15 surfaced D16 (`UpdateFailedDialog`, DEFERRED.md).
 > The user answered Q1-Q10 on 2026-10-15 (§3, answers table first). **Q1 and Q7 were not
 > answered with the recommended option and change the design** - see §3.1, which supersedes
 > the "default" parts of §5.1 and the old J4 / J10 / J11.
@@ -87,7 +90,7 @@
 | Q5 | As recommended: History rows **yes** (J9); Replace-preview original **no**; toasts **no** |
 | Q6 | As recommended: screenshot source block yes; store the OCR text in History |
 | Q7 | **Not the recommendation: yes** - the ordinary translation prompts also learn the source language. → §3.1 (folded into the new J4) |
-| Q8 | As recommended: change both Dictionary-mode copies in lockstep; consolidation → `DEFERRED.md` D13 |
+| Q8 | As recommended: change both Dictionary-mode copies in lockstep; consolidation → `DEFERRED.md` D13. **Superseded the same day:** the user asked for D13 itself - done, one flow (Decision 23) |
 | Q9 | As recommended: real API calls allowed. The eval script is committed as `tools/eval_dictionary_prompt.py` (manual, never in CI) so later phases can re-run it |
 | Q10 | As recommended: `h1-health-review` merged into `main` (`f28a276`, `--no-ff`, not pushed); branch `feature/japanese-language-identity` |
 
@@ -804,7 +807,8 @@ and history; missing marker → no verdict; cache hit restores the verdict; hist
 3. `HistoryManager._detect_language()`: the CJK branch delegates to `lang_id`. Stored entries are
    not migrated - the label is display-only.
 4. `should_annotate()`: the §5.1 guard.
-5. D15: switch the main-window dialog off `transient` + `grab_set()` while rewording it.
+5. ~~D15: switch the main-window dialog off `transient` + `grab_set()`~~ - done 2026-10-15 with
+   D13; there is one dialog now, in `DictionaryPopup`.
 
 **Tests (~12):** every F4 row → its new expected verdict (the kana rows → Japanese 1.0, 経済 →
 Japanese, 勉強 → Unknown 0.5, 我们在学习中文。 → Chinese (Simplified), 這是我的書。 → not
@@ -959,7 +963,7 @@ something looks wrong.
 | R2 | Weak models (trial `llama-3.3-70b`) still write `Chinese` in field 2 | J3 makes the readings independent of field 2 whenever the caller knows the source; J1 eval measures compliance per provider |
 | R3 | Context raises token cost and latency (and trial quota use) | Cap (Q3); log `context_chars`; measure in J1 |
 | R4 | The dictionary now sends the sentence to the provider | Not a new exposure - the same text was already sent for translation; mention it in the CHANGELOG |
-| R5 | The two Dictionary-mode copies drift | Every J1/J3/J5 test drives both paths (Q8) |
+| R5 | ~~The two Dictionary-mode copies drift~~ | Resolved 2026-10-15: one copy (Decision 23); tests still drive both buttons |
 | R6 | Height regressions where windows are sized before the widget exists | Same hint for estimate and render; the existing `fit_height` / `estimate_ruby_overhead_px` tests extended |
 | R7 | Cost of glyph sets, History build time | Lazy per-character cache or the prewarm thread; J9 measures against its budget |
 | R8 | Tests encoding "kanji-only stays plain" | Update them deliberately (pin the default), never delete; count monotonic |
@@ -984,10 +988,9 @@ something looks wrong.
 
 Mention to the user; change nothing without approval (Rule 3).
 
-- `src/ui/dictionary_popup.py:167-168` and `:231-232` use `transient(parent)` + `grab_set()` -
-  the pattern CLAUDE.md Known Issues forbids. Not reached from a withdrawn root today (the parent
-  is the visible main window), but it is the documented trap.
-- Dictionary mode is implemented twice (Q8).
+- ~~`src/ui/dictionary_popup.py` uses `transient(parent)` + `grab_set()`~~ - fixed 2026-10-15 (D15).
+- ~~Dictionary mode is implemented twice (Q8)~~ - consolidated 2026-10-15 (D13, Decision 23).
+- `UpdateFailedDialog` makes the same trap on the withdrawn root - DEFERRED D16.
 - `TranslationService.do_translation()` (`translation.py:521`) has no live caller -
   `tests/test_callback_wiring.py:68` asserts the hotkey path no longer uses it. J6 changes its two
   siblings; it would silently stay on the old rule.

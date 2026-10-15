@@ -139,56 +139,30 @@ wrong provider, or the next time `_identify_provider()` is touched for another r
 
 ---
 
-### D13 - Dictionary mode is implemented twice
+### D16 - `UpdateFailedDialog` is a modal dialog on the withdrawn root
 
-**Found**: 2026-10-15, planning the Japanese language-identity work (TODO.md Q8).
-**Effort**: Medium - roughly 400 lines of UI flow, and both copies now have wiring tests.
+**Found**: 2026-10-15, while fixing D15 (the same pattern in the Dictionary dialogs).
+**Effort**: Small for the dialog itself; it wants a manual test of a failed update.
 
-`src/ui/dictionary_popup.py` (the main window's Dictionary button) and `src/ui/quick_translate.py`
-(`_open_dictionary_popup` -> `_open_dictionary_with_language`, the popup's) are two copies of one
-flow: language detection, the "Select Source Language" dialog, the `WordButtonFrame` +
-`CustomWordBoxesFrame` composition and the lookup callbacks. They have already drifted - the
-main-window dialog uses `transient` + `grab_set()` (D15), the popup's uses topmost + lift - and
-every change to the flow has to be made twice. Phase J1 (2026-10-15) did exactly that, with one
-wiring test per copy in `tests/test_dictionary_prompt.py`.
+`src/ui/dialogs.py` `UpdateFailedDialog.__init__` builds `tk.Toplevel(parent)`, calls
+`grab_set()`, then `transient(parent)`, then `wait_window()` - and its only caller,
+`UpdateUIManager._show_update_failed_dialog()`, passes `self.root`, which `app.py` withdraws at
+start-up. That is exactly the trap in CLAUDE.md's Known Issues: Tk withdraws a transient window
+whose master is withdrawn, so the dialog is never mapped, the grab holds every input and
+`wait_window()` waits for a click on a window nobody can see. It is reached after a failed
+self-update (`check_update_status()` -> `root.after(1000, ...)`), i.e. at the moment a user most
+needs the app to respond. **Not reproduced** - found by reading the code; it needs a failed
+update to trigger.
 
-**Decision (user, 2026-10-15)**: change both in lockstep for the language-identity work; do not
-consolidate first. **Dependency**: none. **Trigger**: the language-identity phases (TODO.md J1-J9)
-are done, or the flow needs a third change.
+Lower risk, same family - `grab_set()` without `transient()`, so the window is mapped and can be
+closed, but it holds every input of the app while open: `APIErrorDialog`,
+`TrialExhaustedDialog` and `TrialFeatureDialog` (all on the withdrawn root), `PasswordDialog`
+(`src/core/auth.py`, on the Settings window, with `transient`) and the update progress window
+(`src/ui/settings/update_manager.py`, on the Settings window, with `transient` - a visible
+master, so it maps).
 
----
-
-### D14 - A failed dictionary lookup raises NameError instead of showing its toast
-
-**Found**: 2026-10-15, by pyflakes while wiring Phase J1. **Effort**: Small.
-
-Both background lookups end in
-
-    except Exception as e:
-        ...after(0, lambda: self.toast.show_error(f"Lookup failed: {str(e)}"))
-
-(`src/ui/dictionary_popup.py` `_do_lookup`, `src/app.py` `_on_quick_translate_dictionary_lookup`).
-Python deletes `e` when the `except` block ends, so by the time Tk runs the lambda the name is gone:
-`NameError: cannot access free variable 'e' where it is not associated with a value in enclosing
-scope` (reproduced on Python 3.14), and the user sees no message at all. Rarely reached -
-`dictionary_lookup()` catches its own errors and returns `"Error: ..."` text, so only a failure
-outside it (`get_trial_info()`, the result window) lands here - which is why it went unnoticed.
-
-**Fix**: bind the message first (`msg = f"Lookup failed: {e}"`, then `lambda: ...show_error(msg)`),
-with a test that forces the exception. Left alone in J1 under Rule 3 - the lines are adjacent to
-the change, not part of it. **Trigger**: the next time either function is touched.
-
----
-
-### D15 - The main-window Dictionary dialogs still use `transient` + `grab_set()`
-
-**Found**: 2026-10-15 (TODO.md section 10). **Effort**: Small.
-
-`DictionaryPopup._show_nlp_not_installed_dialog()` and `_show_language_selection_dialog()` call
-`dialog.transient(parent)` and `dialog.grab_set()` - the pattern CLAUDE.md's Known Issues forbids,
-because on a withdrawn root it leaves an invisible modal dialog that freezes the app. It is not
-reached that way today: both are opened from the visible main window. The popup's copy of the same
-dialog already uses the safe `-topmost` + `lift()` + `focus_force()` pattern.
-
-**Trigger**: the language-identity work rewords the selection dialog (TODO.md J5) - switch it to
-the safe pattern then, with D13 in mind.
+**Fix**: for the notice on a hidden root, CLAUDE.md's rule - stdlib `tkinter.messagebox` (a
+native dialog a withdrawn owner cannot hide) or the topmost + lift + focus_force pattern without
+`grab_set()`; keep `wait_window()` only on a window that is certainly mapped. **Dependency**:
+none. **Trigger**: the next change to the update flow or to `dialogs.py`, or any report of the app
+freezing after an update.
