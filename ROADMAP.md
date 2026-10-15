@@ -19,10 +19,15 @@ The previous public release was 1.9.19 (2026-08-18, furigana everywhere).
 Every roadmap item up to and including 1.9.20 is complete and archived — nothing is
 half-finished, and there is no work in progress.
 
-**Unreleased work sits on `main`** (2026-09-07): the H1 health-review fixes — archived in
-`ROADMAP_DONE.md`, detailed in `CHANGELOG.md` → Unreleased, reasoned in Decisions 12–14. Suite
-551 → 593. **Not yet released**: no version bump, no tag, no build. That is the only thing
-outstanding.
+**Unreleased work on `main`**: the H1 health-review fixes (2026-09-07/08) — archived in
+`ROADMAP_DONE.md`, detailed in `CHANGELOG.md` → Unreleased, reasoned in Decisions 12–20. They sat
+on the unmerged branch `h1-health-review` until **2026-10-15**, when it was merged into `main`
+(`f28a276`, `--no-ff`, not pushed). Suite 551 → 676. **Not yet released**: no version bump, no
+tag, no build.
+
+**In progress** (2026-10-15): Japanese language identity — furigana on every Japanese surface and
+a Dictionary that knows which language it looks up. Plan and status in `TODO.md`; branch
+`feature/japanese-language-identity`.
 
 ---
 
@@ -31,6 +36,7 @@ outstanding.
 | Item | Status | Notes |
 |------|--------|-------|
 | Cut 1.9.21 | 📋 Planned | Bump `VERSION`, run `build_exe.bat`, tag, write release notes. The work it would ship is already on `main` and tested |
+| Japanese language identity (`TODO.md`, phases J0–J12) | 🔨 In progress | **J0 ✅ J1 ✅ (2026-10-15)**: dictionary prompt states source → target and sends the context (Decision 21). Next: J2 `lang_id` core, after the user approves `TODO.md` §3.1 (Q1: the model decides, the user settles — Decision 22). Whether it ships in 1.9.21 or 1.9.22 is open |
 
 ---
 
@@ -46,4 +52,6 @@ narrowed three times on 2026-09-08: Google's three defaults were dead and were r
 self-maintaining (Decision 19); OpenRouter's two were dead *and* mis-routed to Together
 (Decision 20); then keys arrived for Cerebras and SambaNova, whose lists were 6/6 and 11/12 dead.
 Five providers checked, not one table clean - eight remain, each needing its own key. **D12** is
-the cross-provider model-name clash that surfaced from the same work. None is scheduled; each carries its own trigger condition.
+the cross-provider model-name clash that surfaced from the same work. **D13–D15** came out of the
+language-identity work on 2026-10-15: Dictionary mode implemented twice, a failed lookup's toast
+that raises `NameError`, and the main-window dialogs' `grab_set()`. None is scheduled; each carries its own trigger condition.

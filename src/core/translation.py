@@ -13,6 +13,7 @@ from src.constants import COOLDOWN, TRIAL_MODE_ENABLED, TRIAL_MODEL, TRIAL_PROXY
 from src.core import furigana
 from src.core.text_cleanup import strip_thinking_tags
 from src.core.clipboard import ClipboardManager
+from src.core.dictionary_prompt import build_dictionary_prompt, extract_context
 from src.core.api_manager import AIAPIManager
 from src.core.history import HistoryManager
 from src.core.provider_health import ProviderHealthManager
@@ -314,7 +315,9 @@ STRICT RULES (DO NOT include these rules in your response):
                 return "Error: Invalid API key. Please check your API key in Settings."
             return f"Error: {error_msg}"
 
-    def dictionary_lookup(self, text, target_language: str) -> str:
+    def dictionary_lookup(self, text, target_language: str,
+                          source_language: Optional[str] = None,
+                          context: Optional[str] = None) -> str:
         """Perform dictionary lookup for one or more words.
 
         Accepts either a single word/phrase (str) or a list of words.
@@ -323,6 +326,11 @@ STRICT RULES (DO NOT include these rules in your response):
         Args:
             text: Word/phrase (str) or list of words to look up
             target_language: Target language for definitions/translations
+            source_language: The words' language when the caller knows it - see
+                `dictionary_prompt.dictionary_source_language()`. None lets the model
+                decide, and it names its decision in field 2.
+            context: The text the words were selected from. Only the sentences that
+                contain a word are sent (`dictionary_prompt.extract_context()`).
 
         Returns:
             Dictionary-formatted response with translation, definition, etc.
@@ -336,44 +344,11 @@ STRICT RULES (DO NOT include these rules in your response):
         if not words:
             return ""
 
-        # Build numbered word list (same format for 1 or many words)
-        word_list = "\n".join(f"{i+1}. {word}" for i, word in enumerate(words))
-
-        # Unified prompt for all cases
-        prompt = f"""You are a professional dictionary. Provide dictionary entries.
-
-**Target Language**: {target_language}
-
-**Words to look up**:
-{word_list}
-
-**OUTPUT FORMAT** (MUST follow for EACH word):
-
-## [Word]
-
-1. **Translation**: actual {target_language} translation (REQUIRED)
-2. **Source Language**: detected language
-3. **Definition**: explanation in {target_language} (REQUIRED)
-4. **Word Type**: noun/verb/adjective/adverb/etc.
-5. **Pronunciation**: /IPA/
-6. **Synonyms** (if any): synonym1 → {target_language} translation, synonym2 → {target_language} translation, synonym3 → {target_language} translation
-7. **Antonyms** (if any): antonym1 → {target_language} translation, antonym2 → {target_language} translation, antonym3 → {target_language} translation
-8. **Examples**:
-   - Source language sentence → {target_language} translation
-   - Source language sentence → {target_language} translation
-
----
-
-**CRITICAL**:
-- ALWAYS start each entry with ## [Word] header (for me highlighting it later)
-- FILL IN all fields - never leave blank after colon
-- Synonyms/Antonyms: list in source language with {target_language} translation, comma-separated. Write "None" if no synonyms/antonyms exist.
-- Examples must be in source language (same as input word)
-- All translations must be in {target_language}
-- Provide entry for ALL {len(words)} word(s)
-- Pronunciation: provide both IPA and {target_language} phonetic
-  Example: hello → /həˈloʊ/, /ハロー/ (if target is Japanese)
-  Example: 雨氷 → /uːhjou/, /u-hyô/ (if target is Vietnamese)"""
+        context_text = extract_context(context, words)
+        # Counts and language names only - never the user's text.
+        logging.info(f"[Dictionary] lookup n={len(words)} source={source_language or 'auto'} "
+                     f"target={target_language} context_chars={len(context_text)}")
+        prompt = build_dictionary_prompt(words, target_language, source_language, context_text)
 
         try:
             result = self._call_model(prompt)

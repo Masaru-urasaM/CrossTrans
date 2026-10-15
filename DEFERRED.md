@@ -136,3 +136,59 @@ Together/SiliconFlow ones exactly as they are.
 **Dependency**: none technically; it wants a decision about whether Auto-mode ambiguity is worth
 changing shared routing for. **Trigger**: a user reporting that a model they picked went to the
 wrong provider, or the next time `_identify_provider()` is touched for another reason.
+
+---
+
+### D13 - Dictionary mode is implemented twice
+
+**Found**: 2026-10-15, planning the Japanese language-identity work (TODO.md Q8).
+**Effort**: Medium - roughly 400 lines of UI flow, and both copies now have wiring tests.
+
+`src/ui/dictionary_popup.py` (the main window's Dictionary button) and `src/ui/quick_translate.py`
+(`_open_dictionary_popup` -> `_open_dictionary_with_language`, the popup's) are two copies of one
+flow: language detection, the "Select Source Language" dialog, the `WordButtonFrame` +
+`CustomWordBoxesFrame` composition and the lookup callbacks. They have already drifted - the
+main-window dialog uses `transient` + `grab_set()` (D15), the popup's uses topmost + lift - and
+every change to the flow has to be made twice. Phase J1 (2026-10-15) did exactly that, with one
+wiring test per copy in `tests/test_dictionary_prompt.py`.
+
+**Decision (user, 2026-10-15)**: change both in lockstep for the language-identity work; do not
+consolidate first. **Dependency**: none. **Trigger**: the language-identity phases (TODO.md J1-J9)
+are done, or the flow needs a third change.
+
+---
+
+### D14 - A failed dictionary lookup raises NameError instead of showing its toast
+
+**Found**: 2026-10-15, by pyflakes while wiring Phase J1. **Effort**: Small.
+
+Both background lookups end in
+
+    except Exception as e:
+        ...after(0, lambda: self.toast.show_error(f"Lookup failed: {str(e)}"))
+
+(`src/ui/dictionary_popup.py` `_do_lookup`, `src/app.py` `_on_quick_translate_dictionary_lookup`).
+Python deletes `e` when the `except` block ends, so by the time Tk runs the lambda the name is gone:
+`NameError: cannot access free variable 'e' where it is not associated with a value in enclosing
+scope` (reproduced on Python 3.14), and the user sees no message at all. Rarely reached -
+`dictionary_lookup()` catches its own errors and returns `"Error: ..."` text, so only a failure
+outside it (`get_trial_info()`, the result window) lands here - which is why it went unnoticed.
+
+**Fix**: bind the message first (`msg = f"Lookup failed: {e}"`, then `lambda: ...show_error(msg)`),
+with a test that forces the exception. Left alone in J1 under Rule 3 - the lines are adjacent to
+the change, not part of it. **Trigger**: the next time either function is touched.
+
+---
+
+### D15 - The main-window Dictionary dialogs still use `transient` + `grab_set()`
+
+**Found**: 2026-10-15 (TODO.md section 10). **Effort**: Small.
+
+`DictionaryPopup._show_nlp_not_installed_dialog()` and `_show_language_selection_dialog()` call
+`dialog.transient(parent)` and `dialog.grab_set()` - the pattern CLAUDE.md's Known Issues forbids,
+because on a withdrawn root it leaves an invisible modal dialog that freezes the app. It is not
+reached that way today: both are opened from the visible main window. The popup's copy of the same
+dialog already uses the safe `-topmost` + `lift()` + `focus_force()` pattern.
+
+**Trigger**: the language-identity work rewords the selection dialog (TODO.md J5) - switch it to
+the safe pattern then, with D13 in mind.

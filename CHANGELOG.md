@@ -4,6 +4,90 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase J0-J1 — The dictionary knows which language it looks up (2026-10-15)
+
+First two phases of the Japanese language-identity work (`TODO.md`): furigana wherever Japanese
+appears, and a Dictionary that no longer takes a Japanese word written only in kanji for Chinese.
+The user's answers to the plan's ten questions are recorded in `TODO.md` §3; Q1 (the AI model
+decides what ambiguous kanji-only text is, the user settles what it cannot) is Decision 22.
+
+**Measured before changing anything** - `tools/eval_dictionary_prompt.py`, real API calls, ten
+kanji-only words whose Japanese and Chinese senses differ (手紙 letter / toilet paper, 汽車 steam
+train / car, 床 floor / bed ...), target English. "Japanese" = field 2 said Japanese and field 1
+gave the Japanese sense:
+
+| | gemini-2.5-flash | gpt-oss-120b (Groq) | llama-3.3-70b (trial) |
+|---|---|---|---|
+| Old prompt - the headword alone | 7/10 | 7/10 | 7/10 |
+| New prompt - Japanese sentence sent, source stated | **10/10** | **10/10** | **10/10** |
+
+The old prompt failed on the same three words for all three models: 汽車 "car", 工作 "work",
+床 "bed". With the new prompt all thirty answers give the Japanese sense and a hiragana reading.
+
+**What it does not fix yet - a headword alone**, with no source stated and no context (the user
+selected 結構 by itself, and detection called it Chinese): gpt-oss-120b gave the Japanese sense
+6/10 with the new prompt against 7/10 with the old one - one run each, within noise, and no
+better, as expected: there is nothing new for the model to decide from. Gemini's numbers for this
+case are missing (its free quota on the first key ran out). That case belongs to J4/J5.
+
+**Added**
+- `src/core/dictionary_prompt.py` (pure logic): `build_dictionary_prompt()`,
+  `extract_context()`, `dictionary_source_language()`, `DICTIONARY_CONTEXT_MAX_CHARS = 600`.
+- `tools/eval_dictionary_prompt.py` - manual measurement of real models (never run in CI). Uses
+  the real `dictionary_lookup()`, one key per provider, no health manager and no rotation, so the
+  provider measured is the one that answers; never writes `config.json` (verified by hash
+  before/after every run). `trial` is opt-in because it spends the daily trial quota. Each row
+  carries a `prompt_version` hash so different wordings are never pooled.
+- `tests/test_dictionary_prompt.py`.
+
+**Changed**
+- **The dictionary prompt states the source and target language** and, for a Japanese source,
+  that a kanji-only headword is still Japanese (手紙 is "letter", not the Chinese "toilet
+  paper"). Field 2 is fixed to the stated source.
+- **It sends the context**: the sentences of the analysed text that contain a headword,
+  de-duplicated, capped at 600 characters. A phrase typed into a custom box gets none, and a
+  context that is only the headword is dropped. The text was already sent for translation, so
+  this is not new exposure - but the dictionary call now carries it too.
+- **Pronunciation follows the source**: Japanese = the reading in hiragana only, no romaji, no
+  IPA (the user's choice); Chinese = pinyin with tone marks; Korean = Revised Romanization;
+  others keep /IPA/ + a target-language phonetic.
+- **Source = target gives a monolingual entry** (国語辞典-style): definition and examples in the
+  same language, field 1 a simpler equivalent. Word Type is now written in the target language.
+- **Which language is stated** - `dictionary_source_language()`: a language the user picked in
+  the selection dialog, or an auto-detected Japanese (detection needs kana to say it). Any other
+  detection is a guess - every kanji-only text comes back "Chinese (Simplified)", every Latin
+  text the first installed European pack - so the prompt says "not given" and the model decides
+  and names its decision in field 2.
+- Both Dictionary windows pass the language and the text: `dictionary_popup.py`
+  (`_open_with_language(..., user_chosen)`, `_do_lookup(..., source_language, context_text)`),
+  the popup's copy in `quick_translate.py` (`_open_dictionary_with_language(..., user_chosen)`,
+  the lookup callback's new keywords) and `app.py` (`_on_quick_translate_dictionary_lookup`).
+- Log line `[Dictionary] lookup n=.. source=.. target=.. context_chars=..` - counts, never text.
+
+**Fixed during implementation**
+- **A tie-break that leaned Chinese.** The first wording of the "source not given" rule told the
+  model, without context, to "choose the language in which it is more commonly written exactly
+  as given". gpt-oss-120b then turned 先生 alone from Japanese "teacher" (old prompt) into
+  Chinese "Mr."; with the sentence removed it answered "teacher" again. One run each, so weak
+  evidence - but the bias is built in: Chinese text is more abundant, so "more common" means
+  Chinese for every shared spelling. The model now decides from the headword itself, and a test
+  keeps the tie-break out (Decision 21).
+
+**Repository**: `h1-health-review` was merged into `main` (`f28a276`, `--no-ff`, not pushed) and
+this work branches from it as `feature/japanese-language-identity`.
+
+**Known limits until later phases**
+- A kanji-only selection (勉強 alone) still opens the Dictionary window as "Chinese (Simplified)"
+  and its chips stay plain - J5. The lookup itself is left to the model, which without context
+  still reads 汽車, 工作 and 床 (and on the last run 結構) as Chinese.
+- The result window still takes its reading hint from the model's field 2 - J3.
+
+**Tests**: 676 -> 755 (+79 in `test_dictionary_prompt.py`), 0 failed, 0 skipped. Seventeen
+mutations - each call site's language or text dropped, the dialogs forgetting the choice was the
+user's, the trust rule trusting every detection, the context filter, the kanji rule, the
+hiragana rule, the monolingual check, the tie-break put back - each made the suite fail and was
+restored.
+
 ### Cerebras and SambaNova, and a correction (2026-09-08)
 
 Keys were supplied for Cerebras, Groq and SambaNova, so three more rows of D11 could be checked

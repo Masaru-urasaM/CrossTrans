@@ -5,6 +5,109 @@ approaches. Newest first.
 
 ---
 
+### Decision 22 - Ambiguous kanji-only text: evidence first, then the model, then the user
+
+**Date**: 2026-10-15
+**Status**: RESOLVED (principle - the user's choice). The mechanism (TODO.md §3.1) is proposed and
+awaits approval phase by phase (J4-J6).
+
+**Problem**: "Furigana everywhere Japanese appears" runs into text written only in kanji. Without
+kana it cannot always be told from Chinese: of 54 kanji-only Japanese words sampled, 32 carry a
+Japanese-only glyph (経, 気, 駅 ...) and **22 carry nothing** (勉強, 手紙, 東京大学, 先生). Today such
+text gets no readings wherever the caller does not already know the language, and
+`nlp_manager.detect_language()` calls every one of them "Chinese (Simplified)".
+
+**Options considered**:
+1. **A Settings choice** - "Text written only in kanji is: Auto / Japanese / Chinese / Unknown",
+   Auto inferred from the Windows UI language, locales and keyboard layouts (this PC: system
+   locale 0x0411 and a Japanese keyboard → Japanese). Pros: offline, deterministic, free. Cons:
+   under a Japanese default an ambiguous Chinese *word* gets Japanese readings; one more setting.
+   **Recommended in TODO.md, declined by the user.**
+2. **Keep today's rule** (no readings without proof). Cons: does not meet the request.
+3. **Always Japanese.** Cons: wrong readings on Chinese, for every user.
+4. **The AI model decides; when it cannot, the user decides in a window.** Pros: uses judgement
+   the app already pays for - a translation or lookup of that text is being made anyway. Cons:
+   depends on prompt compliance, which differs by provider and must be measured; a verdict
+   exists only after a call.
+
+**Resolution**: **Option 4, chosen by the user** (2026-10-15). The order is: what the caller
+knows (a translation's target; the user's pick) → evidence in the text (kana, Japanese-only or
+Chinese-only glyphs) → evidence in its context → the language a model call *reported* for that
+exact text → otherwise the user, through a window - but only where the app cannot continue
+without a language (Dictionary mode; a popup whose translation reported "Unknown"). Passive
+surfaces (Reading pane, History rows, word chips) never open a window; they stay plain.
+**Evidence overrides the model**: kana in the text beats a model that said "Chinese".
+
+The verdict is collected from calls already being made - dictionary field 2 (Decision 21), a
+marker line in the translation prompts for ambiguous text only (Q7, also the user's choice), a
+section in the OCR prompt - so ambiguity costs no extra call in the common case.
+
+"Blank beats a wrong reading" (Decision 8) still holds: a model verdict is consulted only for
+text the evidence cannot settle, and "Unknown" never produces a reading.
+
+**Do not re-propose** a Settings default or Windows-locale inference for this, and do not tell a
+model which language to prefer: a frequency tie-break already measured as a Chinese bias
+(Decision 21), and a Japanese tie-break would be option 1 in disguise.
+
+**References**: TODO.md §3 (Q1, Q7) and §3.1, Decision 8, Decision 21, findings F4/F9 in TODO.md.
+
+---
+
+### Decision 21 - The dictionary prompt states the source language only when it is evidence, and sends the sentence
+
+**Date**: 2026-10-15
+**Status**: RESOLVED
+
+**Problem**: The dictionary prompt carried the target language and the bare headwords, and asked
+the model to "detect" the source language in field 2. A kanji-only headword is ambiguous alone -
+手紙 is "letter" in Japanese, "toilet paper" in Chinese - and both Dictionary windows already
+knew a language (their titles said "Dictionary (Japanese → Vietnamese)") but dropped it, along
+with the sentence the word came from. Measured with the old prompt on ten false friends:
+gemini-2.5-flash, gpt-oss-120b and the trial's llama-3.3-70b each gave the Chinese sense for
+汽車, 工作 and 床 (7/10 Japanese each). A model that decides "Chinese" writes a Chinese entry, and
+the result window, which takes its reading hint from field 2, then shows it without furigana.
+
+**Options considered**:
+1. **State the window's language, always.** Simplest. Cons: the window's language is often a
+   guess - `detect_language()` answers "Chinese (Simplified)" for *any* kanji-only text and the
+   first installed European pack for any Latin text - and a guess stated as fact makes the model
+   follow it: 勉強 selected alone would be looked up as Chinese on purpose.
+2. **State it only when it is evidence** - the user picked it in the dialog, or detection proved
+   Japanese (it needs kana to say so) - otherwise say "not given" and let the model decide and
+   name its decision in field 2. Send the sentences that contain the headword either way.
+3. **Fix detection first, then the prompt.** Cons: nothing improves until the language-identity
+   core exists, and the lookup would still lose the sentence.
+
+**Resolution**: Option 2. `src/core/dictionary_prompt.py` builds the prompt as pure logic;
+`dictionary_source_language(language, user_chosen)` is the trust rule; `extract_context()` sends
+the sentences containing a headword (cap 600 characters - an educated guess); the pronunciation
+follows the source (Japanese: hiragana only, the user's choice; Chinese: pinyin; Korean: Revised
+Romanization; else /IPA/ + a target phonetic); source = target gives a monolingual entry. With a
+Japanese sentence sent and the source stated, all three providers gave the Japanese sense **10/10**.
+
+**A tie-break that looked neutral and was not.** The first wording of "not given" told the model,
+without context, to choose "the language in which it is more commonly written exactly as given".
+gpt-oss-120b then answered 先生 alone as Chinese "Mr." (the old prompt: "teacher"); without the
+sentence, "teacher" again. One run each - weak evidence - but the bias is structural: Chinese text
+is more abundant, so "more common" means Chinese for every shared spelling. Removed, with a test.
+**Do not reintroduce a frequency tie-break**, and per Decision 22 not a Japanese lean either.
+
+**Known limit**: a headword alone, with no source and no context, is no better than before
+(gpt-oss-120b 6/10 against 7/10, within noise) - there is nothing new to decide from. Decision
+22's later phases remove the case: the Dictionary opens in the language the translation's model
+verdict or the user settled, and that language is then stated.
+
+**Also seen**: the trial model translated 床 as "floor" and gave its reading as とこ (the bed/alcove
+reading; "floor" is ゆか). Field 5 is printed as text, not as furigana, so it is a wrong
+pronunciation line rather than a wrong reading over the word; no prompt fixes a weak model.
+
+**References**: `src/core/dictionary_prompt.py`, `TranslationService.dictionary_lookup()`,
+`src/ui/dictionary_popup.py`, `src/ui/quick_translate.py`, `src/app.py`,
+`tests/test_dictionary_prompt.py`, `tools/eval_dictionary_prompt.py` and its local output
+`logs/eval/dictionary_{before,after}.jsonl`, TODO.md J0/J1, Decision 22.
+
+---
+
 ### Decision 20 - OpenRouter's defaults stay free, and a default must route to its own provider
 
 **Date**: 2026-09-08

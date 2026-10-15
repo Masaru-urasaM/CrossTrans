@@ -17,6 +17,7 @@ except ImportError:
     from tkinter import ttk
     HAS_TTKBOOTSTRAP = False
 
+from src.core.dictionary_prompt import dictionary_source_language
 from src.core.nlp_manager import nlp_manager
 from src.utils.ui_helpers import set_dark_title_bar
 
@@ -323,7 +324,8 @@ class DictionaryPopup:
                 dialog.grab_release()  # Release grab before destroying
                 dialog.destroy()
                 # Delay for focus settle before opening dictionary popup
-                self.root.after(50, lambda: self._open_with_language(original_text, selected))
+                self.root.after(50, lambda: self._open_with_language(
+                    original_text, selected, user_chosen=True))
 
         def cancel():
             dialog.grab_release()
@@ -342,12 +344,16 @@ class DictionaryPopup:
         dialog.bind('<Escape>', lambda e: cancel())
         dialog.bind('<Return>', lambda e: confirm())
 
-    def _open_with_language(self, original: str, language: str) -> None:
+    def _open_with_language(self, original: str, language: str,
+                            user_chosen: bool = False) -> None:
         """Open dictionary popup with specified language for NLP tokenization.
 
         Args:
             original: Text to tokenize and display
             language: Source language for NLP processing
+            user_chosen: True when the user picked `language` in the selection
+                dialog. Only then - or when detection proved Japanese - is it
+                stated to the lookup prompt as fact (dictionary_source_language).
         """
         from src.ui.dictionary_mode import WordButtonFrame
         from src.ui.quick_translate import get_monitor_work_area
@@ -441,17 +447,22 @@ class DictionaryPopup:
                 dict_popup.geometry(f"{w}x{h}+{cx}+{cy}")
                 dict_frame.expand_btn.configure(text="⛶ Collapse")
 
+        # What the lookup prompt is told the words are, or None to let the model decide.
+        lookup_source = dictionary_source_language(language, user_chosen)
+
         # Word button frame with language for NLP tokenization
         def on_lookup(selected_words):
             all_words = list(selected_words)
             all_words.extend(custom_boxes.get_all_phrases())
             if all_words:
-                self._do_lookup(all_words, target_language)
+                self._do_lookup(all_words, target_language,
+                                source_language=lookup_source, context_text=original)
 
         def on_no_selection():
             box_phrases = custom_boxes.get_all_phrases()
             if box_phrases:
-                self._do_lookup(box_phrases, target_language)
+                self._do_lookup(box_phrases, target_language,
+                                source_language=lookup_source, context_text=original)
             else:
                 self.toast.show_warning_with_shake("Please select a word or enter a custom phrase")
 
@@ -483,7 +494,9 @@ class DictionaryPopup:
         dict_popup.bind('<Escape>', lambda e: dict_popup.destroy())
         dict_popup.focus_force()
 
-    def _do_lookup(self, words: list, target_lang: str) -> None:
+    def _do_lookup(self, words: list, target_lang: str,
+                   source_language: Optional[str] = None,
+                   context_text: Optional[str] = None) -> None:
         """Perform dictionary lookup for selected words.
 
         Uses batch lookup (single API call) for efficiency.
@@ -491,6 +504,9 @@ class DictionaryPopup:
         Args:
             words: List of words to look up
             target_lang: Target language for translation
+            source_language: Language to state in the prompt, or None to let the
+                model decide
+            context_text: The text the words were selected from
         """
         if not words:
             return
@@ -510,7 +526,8 @@ class DictionaryPopup:
         def do_lookup():
             try:
                 # Single API call for all words (optimized batch lookup)
-                result = self.translation_service.dictionary_lookup(words, target_lang)
+                result = self.translation_service.dictionary_lookup(
+                    words, target_lang, source_language=source_language, context=context_text)
                 # Get trial info after API call (quota may have changed)
                 trial_info = self.translation_service.get_trial_info()
                 # Show result in popup (pass words for highlighting)

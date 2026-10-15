@@ -9,7 +9,7 @@ import ctypes
 import queue
 import logging
 import threading
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import pyperclip
 import tkinter as tk
@@ -488,10 +488,18 @@ class TranslatorApp:
         # Clear pending screenshot (will be managed by AttachmentArea now)
         self.screenshot_handler.clear_pending_screenshot()
 
-    def _on_quick_translate_dictionary_lookup(self, words: list, target_lang: str):
+    def _on_quick_translate_dictionary_lookup(self, words: list, target_lang: str,
+                                              source_lang: Optional[str] = None,
+                                              context_text: Optional[str] = None):
         """Handle dictionary lookup from quick translate popup.
 
         Uses batch lookup (single API call) for efficiency.
+
+        Args:
+            words: Words to look up
+            target_lang: Target language
+            source_lang: Language to state in the prompt, or None to let the model decide
+            context_text: The text the words were selected from
         """
         if not words:
             return
@@ -508,7 +516,8 @@ class TranslatorApp:
         def do_lookup():
             try:
                 # Single API call for all words (optimized batch lookup)
-                result = self.translation_service.dictionary_lookup(filtered_words, target_lang)
+                result = self.translation_service.dictionary_lookup(
+                    filtered_words, target_lang, source_language=source_lang, context=context_text)
                 # Get trial info after API call (quota may have changed)
                 trial_info = self.translation_service.get_trial_info()
                 # Show result in a new popup at mouse position (pass words for highlighting)

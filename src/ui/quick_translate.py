@@ -19,6 +19,7 @@ except ImportError:
     from tkinter import ttk
     HAS_TTKBOOTSTRAP = False
 
+from src.core.dictionary_prompt import dictionary_source_language
 from src.core.furigana import RubySegment
 from src.core.nlp_manager import nlp_manager
 from src.ui.dictionary_render import overhead_px, split_dictionary_text
@@ -263,7 +264,7 @@ class QuickTranslateManager:
         self._on_open_translator: Optional[Callable[[], None]] = None
         self._on_open_settings: Optional[Callable[[], None]] = None
         self._on_open_settings_dictionary_tab: Optional[Callable[[], None]] = None
-        self._on_dictionary_lookup: Optional[Callable[[list, str], None]] = None
+        self._on_dictionary_lookup: Optional[Callable[..., None]] = None
         self.popup_replace_btn: Optional[tk.Button] = None
         self.popup_retranslate_btn: Optional[tk.Button] = None
         self.popup_custom_prompt_btn: Optional[tk.Button] = None
@@ -277,7 +278,7 @@ class QuickTranslateManager:
                             on_open_translator: Optional[Callable[[], None]] = None,
                             on_open_settings: Optional[Callable[[], None]] = None,
                             on_open_settings_dictionary_tab: Optional[Callable[[], None]] = None,
-                            on_dictionary_lookup: Optional[Callable[[list, str], None]] = None,
+                            on_dictionary_lookup: Optional[Callable[..., None]] = None,
                             on_open_settings_hotkeys_tab: Optional[Callable[[], None]] = None,
                             on_re_translate: Optional[Callable[[], None]] = None,
                             on_custom_prompt_send: Optional[Callable[[str], None]] = None):
@@ -289,7 +290,10 @@ class QuickTranslateManager:
             on_open_translator: Called when user clicks Open Translator
             on_open_settings: Called when user clicks Open Settings (error state)
             on_open_settings_dictionary_tab: Called to open Settings directly to Dictionary tab
-            on_dictionary_lookup: Called when user performs dictionary lookup (words_list, target_lang)
+            on_dictionary_lookup: Called when user performs dictionary lookup
+                (words_list, target_lang, source_lang=..., context_text=...): the
+                language to state in the prompt (None lets the model decide) and
+                the text the words were selected from
             on_open_settings_hotkeys_tab: Called to open Settings directly to Hotkeys tab
             on_re_translate: Called when user clicks Re-translate button (force fresh API call)
             on_custom_prompt_send: Called with the edit-box content when user clicks Send in custom-prompt mode
@@ -1495,7 +1499,7 @@ class QuickTranslateManager:
             if selected:
                 dialog.destroy()
                 self.root.after(50, lambda: self._open_dictionary_with_language(
-                    text_to_analyze, selected, self._current_trial_info))
+                    text_to_analyze, selected, self._current_trial_info, user_chosen=True))
 
         def cancel():
             dialog.destroy()
@@ -1514,13 +1518,16 @@ class QuickTranslateManager:
         dialog.bind('<Return>', lambda e: confirm())
 
     def _open_dictionary_with_language(self, text_to_analyze: str, language: str,
-                                        trial_info: dict = None):
+                                        trial_info: dict = None, user_chosen: bool = False):
         """Open dictionary popup with specified language for NLP tokenization.
 
         Args:
             text_to_analyze: Original text to analyze
             language: Language for NLP tokenization
             trial_info: Optional trial mode info dict for title bar display
+            user_chosen: True when the user picked `language` in the selection
+                dialog. Only then - or when detection proved Japanese - is it
+                stated to the lookup prompt as fact (dictionary_source_language).
         """
         from src.ui.dictionary_mode import WordButtonFrame
 
@@ -1636,19 +1643,26 @@ class QuickTranslateManager:
                 dict_popup.geometry(f"{w}x{h}+{cx}+{cy}")
                 dict_frame.expand_btn.configure(text="⛶ Collapse")
 
+        # What the lookup prompt is told the words are, or None to let the model decide.
+        lookup_source = dictionary_source_language(language, user_chosen)
+
         # Word button frame with language for NLP tokenization
         def on_lookup(selected_words):
             """Lookup callback receives list of individual words + custom box phrases."""
             all_words = list(selected_words)
             all_words.extend(custom_boxes.get_all_phrases())
             if all_words and self._on_dictionary_lookup:
-                self._on_dictionary_lookup(all_words, self._current_target_lang)
+                self._on_dictionary_lookup(all_words, self._current_target_lang,
+                                           source_lang=lookup_source,
+                                           context_text=text_to_analyze)
 
         def on_no_selection():
             """Check custom boxes before showing warning."""
             box_phrases = custom_boxes.get_all_phrases()
             if box_phrases and self._on_dictionary_lookup:
-                self._on_dictionary_lookup(box_phrases, self._current_target_lang)
+                self._on_dictionary_lookup(box_phrases, self._current_target_lang,
+                                           source_lang=lookup_source,
+                                           context_text=text_to_analyze)
             else:
                 self.toast.show_warning_with_shake("Please select a word or enter a custom phrase")
 

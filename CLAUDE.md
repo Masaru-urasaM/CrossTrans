@@ -15,7 +15,7 @@ Select text, press hotkey, get instant translation in a popup.
 | `src/constants.py` | VERSION, LANGUAGES, PROVIDERS (hardcoded fallbacks) |
 | `src/app.py` | Main TranslatorApp coordinator (~1630 lines) |
 | `src/core/remote_config.py` | Dynamic model/provider config (Cloudflare KV) |
-| `src/core/` | Business logic (22 modules) |
+| `src/core/` | Business logic (24 modules) |
 | `src/ui/` | UI components (20+ files) |
 | `src/ui/settings/` | Settings tabs (package) |
 | `src/utils/updates.py` | Auto-update system (check, download, install) |
@@ -65,7 +65,7 @@ self.screenshot_handler.configure_callbacks(
 | Translation logic | `src/core/translation.py` |
 | Furigana readings (generation) | `src/core/furigana.py` |
 | Furigana rendering (any surface) | `src/ui/ruby_text.py` (`RubyText`) |
-| Dictionary mode | `src/core/nlp_manager.py` + `src/ui/dictionary_mode.py` + `src/ui/custom_word_boxes.py` + `src/core/translation.py` (prompt) |
+| Dictionary mode | `src/core/nlp_manager.py` + `src/ui/dictionary_mode.py` + `src/ui/custom_word_boxes.py` + `src/core/dictionary_prompt.py` (prompt) + `src/core/translation.py` (`dictionary_lookup`) |
 | Dictionary result rendering (furigana + highlight) | `src/ui/dictionary_render.py` + `show_dictionary_result()` in `src/ui/quick_translate.py` |
 | Update system | `src/utils/updates.py` + `src/ui/settings/update_manager.py` |
 
@@ -233,6 +233,8 @@ the first match, so one of the two always loses (DEFERRED D12). It only matters 
 - `quota_manager.py` - Trial mode quota tracking
 - `trial_api.py` - Trial mode proxy API client
 - `nlp_manager.py` - NLP language pack management (install verification, subprocess fallback for EXE)
+- `dictionary_prompt.py` - The dictionary lookup prompt: source/target, context, pronunciation by
+  source language (pure logic; see "Dictionary Prompt" below)
 - `update_ui_manager.py` - Update status checking & UI feedback
 - `trial_manager.py` - Trial mode status & dialogs
 
@@ -494,9 +496,35 @@ Key settings:
 ## Dictionary Mode
 
 ### Dictionary Prompt (8-field output)
-Defined in `src/core/translation.py` method `dictionary_lookup()`:
+Built by `build_dictionary_prompt()` in `src/core/dictionary_prompt.py` (pure, no Tk/config) and
+sent by `TranslationService.dictionary_lookup(words, target, source_language=None, context=None)`:
 1. Translation, 2. Source Language, 3. Definition, 4. Word Type,
 5. Pronunciation, 6. Synonyms, 7. Antonyms, 8. Examples
+
+**The eight labels are load-bearing** - `_align_dictionary_text()` and `dictionary_render` parse
+them by number and label; `tests/test_dictionary_prompt.py` pins them for every prompt variant.
+
+**It states the source language and sends the context** (Phase J1, Decision 21). A kanji-only
+headword is ambiguous alone - 手紙 is "letter" in Japanese, "toilet paper" in Chinese. Measured
+with no source and no context (2026-10-15): gemini-2.5-flash, gpt-oss-120b and the trial model all
+read 汽車, 工作, 床 as Chinese (3/10 each).
+- **Source**: `dictionary_source_language(window_language, user_chosen)` decides what the prompt
+  is told. A language the user picked in the selection dialog is stated; an auto-detected one only
+  when it is Japanese, because `detect_language()` needs kana to say Japanese but answers
+  "Chinese (Simplified)" for **any** kanji-only text and the first installed European pack for any
+  Latin text - stating a guess as fact makes the model follow it. Otherwise `None`: the prompt
+  tells the model to decide per headword and name its decision in field 2.
+- **Context**: `extract_context()` sends only the sentences containing a headword, de-duplicated,
+  capped at `DICTIONARY_CONTEXT_MAX_CHARS` (600); a context that is just the headword is dropped.
+- **Pronunciation by source**: Japanese = hiragana reading only, no romaji, no IPA (user's choice);
+  Chinese = pinyin with tone marks; Korean = Revised Romanization; other = /IPA/ + a target
+  phonetic. **Source = target** gives a monolingual (国語辞典-style) entry.
+- **Both Dictionary windows pass it** - `dictionary_popup.py` (main window) and the popup's copy
+  in `quick_translate.py` are the same flow written twice (DEFERRED D13); change them together.
+- Logged as `[Dictionary] lookup n=.. source=.. target=.. context_chars=..` - counts, never text.
+- `tools/eval_dictionary_prompt.py` measures what real models answer (manual, real API calls on
+  the configured keys; `trial` spends the daily trial quota and is opt-in). Results land in
+  `logs/eval/dictionary_<label>.jsonl`.
 
 ### Word Filtering (hardcoded, no API call)
 Dictionary mode filters tokens before displaying as clickable buttons:
