@@ -17,7 +17,8 @@ from src.core.text_cleanup import strip_thinking_tags
 from src.core.clipboard import ClipboardManager
 from src.core.dictionary_prompt import build_dictionary_prompt, extract_context
 from src.core import lang_id
-from src.core.source_marker import parse_source_marker, source_clause, stated_clause
+from src.core.source_marker import (parse_source_marker, source_clause, stated_clause,
+                                    strip_stray_markers)
 from src.core.api_manager import AIAPIManager
 from src.core.history import HistoryManager
 from src.core.provider_health import ProviderHealthManager
@@ -454,11 +455,11 @@ STRICT RULES (DO NOT include these rules in your response):
             result = self._strip_thinking_tags(self._call_model(prompt + clause.text))
             logging.info(f"[LangID] translation verdict={clause.stated} via=user "
                          f"chars={len(text)}")
-            return result, clause.stated
+            return strip_stray_markers(result), clause.stated
         clause = source_clause(text)
         result = self._strip_thinking_tags(self._call_model(prompt + clause.text))
         if not clause.asks:
-            return result, None
+            return strip_stray_markers(result), None
         result, verdict, found = parse_source_marker(result)
         # Counts and language names only - never the user's text.
         logging.info(f"[LangID] translation verdict={verdict or 'none'} "

@@ -104,7 +104,7 @@ def test_fixture_sizes():
     ("zh_CN", CHINESE_SIMPLIFIED), ("中文简体", CHINESE_SIMPLIFIED), ("Mandarin", CHINESE_SIMPLIFIED),
     ("Chinese Traditional", CHINESE_TRADITIONAL), ("Chinese (Traditional)", CHINESE_TRADITIONAL),
     ("zh-TW", CHINESE_TRADITIONAL), ("zh-HK", CHINESE_TRADITIONAL), ("中文繁體", CHINESE_TRADITIONAL),
-    ("vi", "Vietnamese"), ("Tiếng Việt", "Vietnamese"), ("english", "English"), ("ko", "Korean"),
+    ("vi", "Vietnamese"), ("english", "English"), ("ko", "Korean"), ("한국어", "Korean"),
     ("Klingon", "Klingon"),
 ])
 def test_normalize_language(name, expected):

@@ -57,8 +57,8 @@ def test_ambiguity_is_above_zero_and_below_the_threshold():
 
 @pytest.mark.parametrize("text, expected_language", [
     ("안녕하세요", "Korean"),
-    ("Xin chào các bạn", "Vietnamese"),
     ("สวัสดีครับ", "Thai"),
+    ("Привет, как дела?", "Russian"),
 ])
 def test_other_scripts_are_untouched(text, expected_language):
     assert nlp_manager.detect_language(text)[0] == expected_language
@@ -95,7 +95,7 @@ class FakeConfig:
     ("列夫・托尔斯泰", "Chinese (Simplified)"),   # ・ is not kana
     ("안녕하세요", "Korean"),
     ("Hello there", "English"),
-    ("Xin chào", "Vietnamese"),
+    ("Привет", "Russian"),
 ])
 def test_history_labels_follow_the_evidence(text, label):
     assert HistoryManager(FakeConfig())._detect_language(text) == label

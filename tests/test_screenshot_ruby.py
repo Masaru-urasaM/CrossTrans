@@ -52,7 +52,7 @@ def test_the_prompt_names_no_favourite():
      ("東京大学", JAPANESE, "The University of Tokyo")),
     (answer("我们", "Chinese", "we"), ("我们", CHINESE_SIMPLIFIED, "we")),
     (answer("先生", "Unknown", "teacher"), ("先生", None, "teacher")),
-    (answer("Hello", "English", "Xin chào"), ("Hello", "English", "Xin chào")),
+    (answer("Hello", "English", "Bonjour"), ("Hello", "English", "Bonjour")),
     ("===ORIGINAL===\n手紙\n===TRANSLATION===\nletter", ("手紙", None, "letter")),
     ("===ORIGINAL===\n床\n===TRANSLATION===\nfloor\n===SOURCE LANGUAGE===\nJapanese.",
      ("床", JAPANESE, "floor")),

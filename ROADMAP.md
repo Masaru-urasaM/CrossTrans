@@ -25,9 +25,11 @@ on the unmerged branch `h1-health-review` until **2026-10-15**, when it was merg
 (`f28a276`, `--no-ff`, not pushed). Suite 551 → 676. **Not yet released**: no version bump, no
 tag, no build.
 
-**In progress** (2026-10-15): Japanese language identity — furigana on every Japanese surface and
-a Dictionary that knows which language it looks up. Plan and status in `TODO.md`; branch
-`feature/japanese-language-identity`.
+**Unreleased work on branch `feature/japanese-language-identity`** (2026-10-15): Japanese
+language identity — furigana on every Japanese surface and a Dictionary that knows which
+language it looks up, plus one Dictionary mode for both buttons (D13–D15). Archived in
+`ROADMAP_DONE.md` ("J"), detailed in `CHANGELOG.md` → Unreleased, reasoned in Decisions 21–27.
+Branched from `main` after the H1 merge; **not merged into `main`, not pushed**. Suite 676 → 1183.
 
 ---
 
@@ -35,8 +37,7 @@ a Dictionary that knows which language it looks up. Plan and status in `TODO.md`
 
 | Item | Status | Notes |
 |------|--------|-------|
-| Cut 1.9.21 | 📋 Planned | Bump `VERSION`, run `build_exe.bat`, tag, write release notes. The work it would ship is already on `main` and tested |
-| Japanese language identity (`TODO.md`, phases J0–J12) | 🔨 In progress | **J0 ✅ J1 ✅ (2026-10-15)**: dictionary prompt states source → target and sends the context (Decision 21). **D13–D15 ✅ (2026-10-15)**: one Dictionary mode for both buttons (Decision 23), a failed lookup shows its message, no `grab_set()` in its dialogs. **J2 ✅ (2026-10-15)**: `src/core/lang_id.py`, evidence-only language identity (Decision 24: Big5-HKSCS). **J3 ✅ (2026-10-15)**: the dictionary result reads the stated source and both languages of an entry. **J4 ✅ (2026-10-15)**: translation prompts state the source or ask the model for a `[[SOURCE: ...]]` line - 10/10 compliance on Google and Groq (Decision 25). **J5 ✅ (2026-10-15)**: one Japanese/Chinese rule for detection, History and furigana; the Dictionary opens in the model's language or asks (Decision 26). **J6 ✅ (2026-10-15)**: the popup reads kanji-only Japanese the model placed, and asks "Japanese or Chinese?" when nobody did - the answer re-translates (Decision 27). **J7 ✅ (2026-10-15)**: the Reading pane, output box, grammar result and expanded view read what a translation placed. **J8 ✅ (2026-10-15)**: a Japanese screenshot shows its OCR text with readings; History keeps the OCR text. **J9 ✅ (2026-10-15)**: History rows carry readings (one canvas per line; the dialog's own 1 s open time is D17). Next: J12 docs and release prep (Q1: the model decides, the user settles — Decision 22). Whether it ships in 1.9.21 or 1.9.22 is open |
+| Cut 1.9.21 | 📋 Planned | Bump `VERSION`, run `build_exe.bat`, tag, write release notes. The H1 work is on `main` and tested; the language-identity work is on its branch - merge it first if it ships in 1.9.21 rather than 1.9.22 (the user's call) |
 
 ---
 
@@ -57,4 +58,6 @@ language-identity work on 2026-10-15 (Dictionary mode implemented twice, a faile
 that raised `NameError`, the main-window dialogs' `grab_set()`) and were **closed the same day**.
 Closing D15 surfaced **D16**: `UpdateFailedDialog` is a `grab_set()` + `transient()` +
 `wait_window()` dialog on the withdrawn root - the documented freeze trap, on the failed-update
-path. None is scheduled; each carries its own trigger condition.
+path. The language-identity work then added **D17** (the History dialog takes ~1 s to open with
+100 entries, before any readings) and **D18** (two pieces of dead code). None is scheduled; each
+carries its own trigger condition.

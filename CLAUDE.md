@@ -67,6 +67,8 @@ self.screenshot_handler.configure_callbacks(
 | Furigana rendering (any surface) | `src/ui/ruby_text.py` (`RubyText`) |
 | Dictionary mode | `src/core/nlp_manager.py` + `src/ui/dictionary_mode.py` + `src/ui/custom_word_boxes.py` + `src/core/dictionary_prompt.py` (prompt) + `src/core/translation.py` (`dictionary_lookup`) |
 | Dictionary result rendering (furigana + highlight) | `src/ui/dictionary_render.py` + `show_dictionary_result()` in `src/ui/quick_translate.py` |
+| Japanese vs Chinese (kanji-only text) | `src/core/lang_id.py` (evidence, `resolve()`) + `src/core/source_marker.py` (what the translation prompt says / asks) - see "Language Identity" |
+| History rows | `src/ui/history_dialog.py` + `RubyLine` / `truncate_segments` in `src/ui/ruby_text.py` |
 | Update system | `src/utils/updates.py` + `src/ui/settings/update_manager.py` |
 
 ## Auto-Update System (Important)
@@ -678,6 +680,50 @@ of newly installed subpackages.
 ### Files involved:
 - `src/core/nlp_manager.py` - All install/verify/tokenize logic
 - `src/ui/settings/dictionary_tab.py` - Install UI (config update removed, handled by `install()`)
+
+## Language Identity (Japanese vs Chinese, 2026-10-15)
+
+Kanji-only text - 勉強, 手紙, 東京大学 - is valid Japanese *and* Chinese, and the meaning can differ
+(手紙 "letter" / "toilet paper", 汽車 "steam train" / "car"). Before J0-J9 every such text was
+detected as "Chinese (Simplified)", the Dictionary looked it up as Chinese, and no surface
+without a caller's hint read it. **The user's rule (Decision 22): evidence first, then the AI
+model, then the user. No Settings default, no Windows-locale inference, no "more common
+language" tie-break** - all three were measured or proposed and declined; do not re-propose.
+
+**The order** (`lang_id.resolve(text, known=, context=, model=)`): what the caller knows (a
+translation's target, the user's pick) -> kana or a glyph only one language writes, in the text
+-> the same in its context -> the language a model reported for exactly this text -> unknown.
+Evidence beats a model. A passive surface (Reading pane, History, chips) stays plain when
+unknown; a surface that needs a language asks.
+
+**Where a verdict comes from** - always from a call already being made:
+| Call | How the model reports | Code |
+|---|---|---|
+| Translation of ambiguous kanji (hotkeys, main window, Re-translate) | first line `[[SOURCE: Japanese/Chinese/Unknown]]`, read and removed | `source_marker`, `TranslationService._call_with_source()` |
+| Text whose characters settle it | nothing asked; `SOURCE LANGUAGE: the text above is X.` stated | `source_marker.source_clause()` |
+| Dictionary lookup | field 2 (Source Language) | `dictionary_prompt` (J1) |
+| Screenshot OCR | `===SOURCE LANGUAGE===` section | `screenshot_handler.ocr_prompt()` (J8) |
+| The user | the popup's "Kanji-only text - read it as: [Japanese] [Chinese]" row (re-translates, Decision 27); the Dictionary's "Kanji-only text: Japanese or Chinese?" dialog (Decision 26) | `QuickTranslateManager._build_source_chooser()`, `DictionaryPopup._open_ambiguous_kanji()` |
+
+**Where it is kept**: `TranslationService.last_source_language` (per call) and
+`source_verdict(text)` (this session, bounded, then History's `source_verdict` field).
+`TranslationService.source_language(text)` = evidence, else that verdict - the one call every
+main-window surface uses. **History's `source_lang` is a label, often a guess from the
+characters - never read it as a verdict.** The cache is not namespaced by verdict (Decision 25).
+
+**Measured** (`tools/eval_dictionary_prompt.py`, real API, ten false friends alone): the marker
+came back 10/10 on gemini-2.5-flash and gpt-oss-120b, never leaked; Unknown 3-4 in ten;
+汽車 and 工作 answered Chinese, confidently - a word alone cannot do better; context or the user
+can. Dictionary with the sentence and the source stated: 10/10 Japanese on three providers.
+
+**`TODO.md`** - the plan these phases came from (findings F1-F9, phases J0-J12) - was deleted on
+completion; code and docs that cite it mean `git show 5cc8736:TODO.md`. The summary, the
+decisions and the manual checklist are in ROADMAP_DONE.md ("J").
+
+**Traps** (Decision 24, `lang_id` docstring): "can be Japanese" = JIS X 0213, not CP932 (剝 頰 塡);
+"Japanese-only" excludes **Big5-HKSCS**, not just Big5 (Hong Kong's 衆 裏 綫 are outside Big5);
+never GBK; U+30FB "・" is not kana (Chinese names use it). A stray `[[SOURCE: ...]]` from a model
+that was not asked is still removed (`strip_stray_markers`).
 
 ## Furigana System (Japanese Reading Guides)
 

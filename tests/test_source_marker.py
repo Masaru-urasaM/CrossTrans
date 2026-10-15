@@ -190,12 +190,12 @@ class TestServiceAsksAndReads:
         assert svc.last_source_language is None
 
     def test_other_text_is_sent_byte_for_byte_as_before(self, translate, monkeypatch):
-        svc = make_service("Xin chào")
-        translate(svc, "Hello there", "Vietnamese")
+        svc = make_service("Bonjour")
+        translate(svc, "Hello there", "French")
         with_j4 = sent_prompt(svc)
         monkeypatch.setattr(translation_module, 'source_clause',
                             lambda text: SourceClause("", None, False))
-        translate(svc, "Hello there", "Vietnamese", skip_cache=True)
+        translate(svc, "Hello there", "French", skip_cache=True)
         assert with_j4 == sent_prompt(svc)
 
     def test_a_failed_call_leaves_no_stale_verdict(self, translate):
@@ -274,7 +274,37 @@ class TestHistory:
     def test_find_source_verdict_takes_the_newest_whatever_the_target(self):
         hm = HistoryManager(FakeConfig())
         hm.add_entry("先生", "Mr.", "English", source_verdict=CHINESE_SIMPLIFIED)
-        hm.add_entry("先生", "Thầy giáo", "Vietnamese", source_verdict=JAPANESE)
+        hm.add_entry("先生", "Professeur", "French", source_verdict=JAPANESE)
         assert hm.find_source_verdict("先生") == JAPANESE
         assert hm.find_source_verdict("床") is None
         assert hm.find_source_verdict("") is None
+
+
+class TestStrayMarkers:
+    """Smoke-tested 2026-10-15: a model told the language could still write the
+    marker, and nothing removed it - it reached the popup as the first line."""
+
+    @pytest.mark.parametrize("answer, expected", [
+        ("[[SOURCE: Unknown]]\nMr.", "Mr."),
+        ("Teacher\n[[SOURCE: Japanese]]", "Teacher"),
+        ("Source: English\nThe report", "Source: English\nThe report"),  # bare form: the text
+        ("Teacher", "Teacher"),
+        ("", ""),
+    ])
+    def test_strip_stray_markers(self, answer, expected):
+        from src.core.source_marker import strip_stray_markers
+        assert strip_stray_markers(answer) == expected
+
+    def test_a_stated_source_never_shows_a_marker(self):
+        svc = make_service("[[SOURCE: Unknown]]\nTeacher")
+        assert svc.translate_text("先生", "English", source_language="Japanese") == "Teacher"
+        assert svc.last_source_language == JAPANESE        # the user's answer, not the line
+
+    def test_evidence_stated_never_shows_a_marker(self, translate):
+        svc = make_service("[[SOURCE: Chinese]]\nI wrote a letter.")
+        assert translate(svc, "友達に手紙を書きました。") == "I wrote a letter."
+        assert svc.last_source_language is None
+
+    def test_other_text_never_shows_a_marker(self, translate):
+        svc = make_service("[[SOURCE: Japanese]]\nBonjour")
+        assert translate(svc, "Hello there", "French") == "Bonjour"

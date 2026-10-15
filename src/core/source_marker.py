@@ -147,3 +147,15 @@ def parse_source_marker(answer: str) -> Tuple[str, Optional[str], bool]:
         return rest.strip(), _verdict(match.group(1)), True
 
     return answer, None, False
+
+
+def strip_stray_markers(answer: str) -> str:
+    """Remove `[[SOURCE: ...]]` markers from an answer whose prompt asked for none.
+
+    A model told the language may still write the line it has seen asked for
+    before; it must never reach the user (Decision 25). Only the double-bracket
+    form is removed - a bare "SOURCE: ..." line could be the text itself.
+    """
+    if not answer or not _MARKER_RE.search(answer):
+        return answer
+    return parse_source_marker(answer)[0]

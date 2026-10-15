@@ -4,6 +4,44 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase J12 — Final check, docs and archive (2026-10-15)
+
+The last phase of the Japanese language-identity work: an end-to-end check of the whole flow,
+the documentation, and the archive. The work is complete on its branch; nothing was released.
+
+**Fixed**
+- **A stray `[[SOURCE: ...]]` line could reach the popup.** An end-to-end smoke run (real
+  widgets, a scripted model) chose "Japanese" in the popup's chooser; the re-translation was
+  told the language, the model wrote a marker anyway, and nothing removed it - the answer's
+  first line was `[[SOURCE: Unknown]]`. `source_marker.strip_stray_markers()` now removes the
+  double-bracket form from every answer `_call_with_source()` returns, whether the prompt asked
+  or not; a bare `SOURCE: ...` line is left alone when nothing asked, since it could be the text.
+- **Vietnamese test data** ("Xin chào", "Tiếng Việt", "Thầy giáo" in four new test files) broke
+  the project's no-Vietnamese rule: replaced by French, Korean and Russian samples, the two
+  Vietnamese-only detection cases by Cyrillic ones, so the count holds.
+- **The mutation runner could test the wrong mutant**: two same-size mutants written within one
+  second shared the `.pyc`'s (mtime, size) key, so the second run executed the first. Found by a
+  result that flipped between runs. The runner now deletes the module's bytecode before each
+  mutant and writes none; **every suite was re-run** - all mutations still killed (three
+  patterns had to follow later refactors), the one equivalent mutant still equivalent.
+
+**Docs**
+- README: Furigana and Dictionary Mode describe kanji-only text, the chooser and a Dictionary
+  that knows its languages.
+- CLAUDE.md: a **Language Identity** section (the order, where verdicts come from and where they
+  are kept, the measurements, the traps) and two Common Tasks rows.
+- ROADMAP_DONE.md: the "J" entry - the user's answers, every phase with its commit and test
+  count, the decisions, the leftovers and a 14-row **manual acceptance checklist**.
+  ROADMAP.md: the branch's status. DEFERRED.md: **D18** (dead code). `TODO.md` deleted, as its
+  own bookkeeping section asked once the phases were done - its last version is
+  `git show 5cc8736:TODO.md`.
+
+**Tests**: 1173 -> 1183 (+10 in `test_source_marker.py`), 0 failed, 0 skipped. Four mutations
+on the fix - stray markers kept, the bare form stripped too, either path unstripped - killed.
+
+**Not done, by design - the user's call**: no version bump, no build, no tag, no merge into
+`main`, no push. Whether this ships in 1.9.21 or 1.9.22 is open (ROADMAP.md).
+
 ### Phase J9 — History rows carry readings (2026-10-15)
 
 The History list showed Japanese in every entry and read none of it - its rows were plain

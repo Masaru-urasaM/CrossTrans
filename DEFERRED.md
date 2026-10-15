@@ -171,7 +171,7 @@ freezing after an update.
 
 ### D17 - The History dialog takes about a second to open with 100 entries
 
-**Found**: 2026-10-15, measuring the History-row readings (TODO.md J9). **Effort**: Medium.
+**Found**: 2026-10-15, measuring the History-row readings (the plan's J9; the plan, `TODO.md`, is archived: `git show 5cc8736:TODO.md`). **Effort**: Medium.
 
 With 100 entries the dialog takes **0.93-0.95 s** to open on the development PC *without*
 readings (1.6 s the first time in a process), under a ttkbootstrap root - the readings add about
@@ -185,3 +185,18 @@ dialog; the baseline alone is three times that.
 **Fix candidates**: build only the rows in view and add the rest as the list scrolls; or draw
 each row on one canvas as `RubyLine` does for its lines; or page the list. **Dependency**: none.
 **Trigger**: a user reporting a slow History window, or the next change to `history_dialog.py`.
+
+---
+
+### D18 - Dead code met during the language-identity work
+
+**Found**: 2026-10-15. **Effort**: Small.
+
+- `TranslationService.do_translation()` (`src/core/translation.py`) has no live caller -
+  `tests/test_callback_wiring.py` asserts the hotkey path uses `do_translate_or_fix()` instead.
+  It was left out of J6 on purpose (TODO.md section 10), so it still generates its source block
+  without the J6 hint; anyone reviving it would get the old rule.
+- `TranslatorApp._open_settings_dictionary_tab()` (`src/app.py`) has no caller.
+
+Both predate this work and were left alone under Rule 3. **Trigger**: the next cleanup pass, or
+anyone about to call either.
