@@ -6,6 +6,8 @@ import time
 import uuid
 from typing import List, Dict, Any, Optional
 
+from src.core import lang_id
+
 
 class HistoryManager:
     """Manages translation history with a limit on entries."""
@@ -169,12 +171,15 @@ class HistoryManager:
         if total == 0:
             return "Unknown"
 
-        if hiragana + katakana > 0:
+        if lang_id.has_kana(text):
             return "Japanese"
         if korean > total * 0.3:
             return "Korean"
         if cjk > total * 0.3:
-            return "Chinese"
+            # Kanji alone: what the glyphs prove, else unknown - 勉強 used to be
+            # labelled "Chinese" (TODO.md F5). The model's verdict, when there is
+            # one, is passed in by the caller instead (source_lang).
+            return lang_id.han_evidence(text) or "Unknown"
         if vietnamese > 0:
             return "Vietnamese"
         if cyrillic > total * 0.3:

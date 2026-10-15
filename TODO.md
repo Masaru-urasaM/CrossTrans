@@ -2,7 +2,7 @@
 
 > **Status: 🔨 IN PROGRESS** on branch `feature/japanese-language-identity` (from `main` after
 > the merge of `h1-health-review`, `f28a276`). **J0 ✅ and J1 ✅ done 2026-10-15** (§6).
-> **J2 ✅, J3 ✅ and J4 ✅ done 2026-10-15** (`src/core/lang_id.py`, Decision 24; the dictionary
+> **J2 ✅, J3 ✅, J4 ✅ and J5 ✅ done 2026-10-15** (`src/core/lang_id.py`, Decision 24; the dictionary
 > result window reads the stated source and both languages of an entry; translation prompts
 > state the source or ask the model for a `[[SOURCE: ...]]` line, Decision 25).
 > **D13-D15 ✅ done 2026-10-15** at the user's request: one Dictionary mode serves both buttons
@@ -824,7 +824,15 @@ and history; missing marker → no verdict; cache hit restores the verdict; hist
 `[LangID] ... model=Japanese`; select `我们在学习中文。` → no marker instruction in the prompt
 (evidence) - visible as `evidence=zh-glyph` in the log.
 
-### J5 - One detector: Dictionary mode, History label, the `should_annotate` guard  *(DoD3, DoD4)*
+### J5 - One detector: Dictionary mode, History label, the `should_annotate` guard  *(DoD3, DoD4)*  ✅ Done (2026-10-15)
+
+> **Result:** as planned. `detect_language()`: kana → Japanese 1.0, glyph → 0.9, else
+> `("Unknown", 0.5)`; every F4 row now has its expected verdict (tests). The Dictionary reuses a
+> model's verdict for that exact text, else asks "Kanji-only text: Japanese or Chinese?" -
+> **no identification call** (Decision 26: J4 measured 2/10 confidently wrong and 3-4/10 Unknown
+> on a word alone). `dictionary_source_language(language, trusted)` states detected Chinese too.
+> History: 勉強 → "Unknown". `should_annotate()`: Chinese-only glyph beats a Japanese hint; "・"
+> is not kana. Tests 1011 → 1071; 15 of 16 mutations killed, 1 equivalent.
 
 **Files (3):** `src/core/nlp_manager.py` (`detect_language`), `src/core/history.py`
 (`_detect_language`), `src/core/furigana.py` (`should_annotate`); tests in a new

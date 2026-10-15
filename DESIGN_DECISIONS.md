@@ -5,6 +5,36 @@ approaches. Newest first.
 
 ---
 
+### Decision 26 - Ambiguous kanji in the Dictionary: reuse a verdict, else ask - no identification call
+
+**Date**: 2026-10-15
+**Status**: RESOLVED (the user left this open in TODO.md J5; decided on J4's measurements -
+revisit if the user prefers the call)
+
+**Problem**: After J5 the Dictionary knows when kanji-only text proves nothing. Decision 22 says
+the model decides, then the user. When the text was translated, a model verdict already exists
+(J4). When the user typed into the main window and pressed Dictionary without translating, none
+does.
+
+**Options considered**:
+1. **One short identification call** ("Japanese, Chinese or Unknown?") - Pros: the model
+   decides, as Q1 asked. Cons: a request (and trial quota) and a wait before the window opens;
+   measured on a word alone (J4), 2 in 10 answers confidently wrong (汽車, 工作) and 3-4 Unknown -
+   so the user would often see the dialog anyway, or a wrong window with no prompt to fix it.
+2. **Ask the user directly** - Pros: instant, free, and the user knows what they typed. Cons:
+   one click.
+3. **Assume Japanese** - declined as Q1 option (c)-like; never.
+
+**Resolution**: **Option 2, after reusing any verdict** for that exact text
+(`TranslationService.source_verdict()`, this session or History). The dialog lists Japanese and
+the Chinese packs first and pre-selects the first, so Enter answers it - the user still confirms.
+A verdict-opened window states the language to the lookup prompt (it is the model's decision).
+
+**References**: `DictionaryPopup._open_ambiguous_kanji()`, `nlp_manager.AMBIGUOUS_CJK_CONFIDENCE`,
+CHANGELOG "Phase J5", Decision 22, Decision 25.
+
+---
+
 ### Decision 25 - How a translation prompt asks the model for the source language
 
 **Date**: 2026-10-15

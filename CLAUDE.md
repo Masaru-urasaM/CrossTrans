@@ -522,12 +522,17 @@ them by number and label; `tests/test_dictionary_prompt.py` pins them for every 
 headword is ambiguous alone - 手紙 is "letter" in Japanese, "toilet paper" in Chinese. Measured
 with no source and no context (2026-10-15): gemini-2.5-flash, gpt-oss-120b and the trial model all
 read 汽車, 工作, 床 as Chinese (3/10 each).
-- **Source**: `dictionary_source_language(window_language, user_chosen)` decides what the prompt
-  is told. A language the user picked in the selection dialog is stated; an auto-detected one only
-  when it is Japanese, because `detect_language()` needs kana to say Japanese but answers
-  "Chinese (Simplified)" for **any** kanji-only text and the first installed European pack for any
-  Latin text - stating a guess as fact makes the model follow it. Otherwise `None`: the prompt
-  tells the model to decide per headword and name its decision in field 2.
+- **Source**: `dictionary_source_language(window_language, trusted)` decides what the prompt
+  is told. Stated: a language the user picked in the selection dialog or a model reported for the
+  text (`trusted`), and a detected Japanese or Chinese - since J5 `detect_language()` says those
+  only from evidence (kana, or a glyph only one of them writes) and "Unknown" otherwise. A Latin
+  detection is the first installed European pack - a guess - and is not stated: the prompt tells
+  the model to decide per headword and name its decision in field 2.
+- **Kanji that prove nothing** (`detect_language()` -> `("Unknown", AMBIGUOUS_CJK_CONFIDENCE)`):
+  the word window opens in the language a model reported for that exact text
+  (`TranslationService.source_verdict()` - the popup's text always has one, the main window's
+  input once translated), else the selection dialog asks "Kanji-only text: Japanese or
+  Chinese?" with those listed first. **No identification call** (Decision 26).
 - **Context**: `extract_context()` sends only the sentences containing a headword, de-duplicated,
   capped at `DICTIONARY_CONTEXT_MAX_CHARS` (600); a context that is just the headword is dropped.
 - **Pronunciation by source**: Japanese = hiragana reading only, no romaji, no IPA (user's choice);
@@ -684,9 +689,10 @@ display rather than receiving pre-annotated strings through the queue.
 - **Invariant I1**: `''.join(seg.base for seg in annotate(t)) == t`. Annotation can never alter
   the text it describes; violation falls back to plain.
 - `should_annotate(text, lang_hint)` — needs kanji **plus** kana in the string, or an explicit
-  `lang_hint="Japanese"`. Kanji-only strings look identical to Chinese, and
-  `nlp_manager.detect_language()` reports Chinese for them, so a caller that knows the language
-  must say so. Pass the hint wherever it is known.
+  `lang_hint="Japanese"`. Kanji-only strings look identical to Chinese, so a caller that knows the
+  language must say so. Pass the hint wherever it is known. **A hint never overrides a kanji
+  Japanese cannot write** (我们 stays plain under a Japanese hint), and kana is `lang_id`'s - "・"
+  alone does not count (Chinese writes it in foreign names). Since J5.
 - **Provider chain**: fugashi/UniDic (per-token `feature.kana`) → pykakasi → none. The aligner
   maps a whole-token reading onto interleaved kanji/kana runs and returns `None` on any
   mismatch. **Blank beats a wrong reading** — an absent reading is visibly absent, a wrong one
@@ -799,7 +805,7 @@ display rather than receiving pre-annotated strings through the queue.
 | Main window input (`original_text`) | — | editable, so it stays plain (I3) forever; its readings live in the Reading pane below |
 | Reading pane (`_reading_text`) | none | mirrors the input box; source language unknown, so kanji-only input stays plain |
 | Dictionary result window | the lookup's stated source, else each entry's **Source Language** field; `target_lang` for Translation/Definition/Word Type; Japanese + a non-Chinese language = Japanese throughout; Japanese/Chinese pairs cut at `→` | monospace columns preserved; Pronunciation never annotated. See below |
-| Dictionary word chips | mode language, applied to the whole line | a chip that cuts a compound stays bare. See below |
+| Dictionary word chips | mode language (from evidence, a model's verdict or the user since J5), applied to the whole line | a chip that cuts a compound stays bare. See below |
 | Custom lookup tags | mode language, per tag | a tag is one lookup phrase, so it is annotated on its own |
 
 All result text goes through `ruby_text.insert_output(widget, index, text, lang_hint, enabled)`,

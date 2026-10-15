@@ -50,16 +50,17 @@ def field_line(prompt, number):
 # --------------------------------------------------------------------------- #
 class TestDictionarySourceLanguage:
     def test_detected_japanese_is_stated(self):
-        # detect_language() needs kana to say Japanese: that is proof.
+        # detect_language() needs kana or a Japanese-only glyph to say Japanese: proof.
         assert dictionary_source_language("Japanese") == "Japanese"
 
     @pytest.mark.parametrize("language", [
         "Chinese (Simplified)", "Chinese (Traditional)",
     ])
-    def test_detected_chinese_is_left_to_the_model(self, language):
-        # Every kanji-only text without kana is detected as Chinese (Simplified),
-        # 勉強 included - a guess, so the model decides instead.
-        assert dictionary_source_language(language) is None
+    def test_detected_chinese_is_stated(self, language):
+        # Since J5 detect_language() says Chinese only from a glyph Japanese cannot
+        # write, and "Unknown" for kanji that prove nothing (勉強) - evidence, so stated.
+        # Until J5 every kanji-only text came back "Chinese (Simplified)": a guess.
+        assert dictionary_source_language(language) == language
 
     @pytest.mark.parametrize("language", ["English", "French", "Korean", "Vietnamese"])
     def test_other_detected_languages_are_left_to_the_model(self, language):
@@ -69,13 +70,13 @@ class TestDictionarySourceLanguage:
     @pytest.mark.parametrize("language", [
         "Chinese (Simplified)", "English", "Japanese", "Korean",
     ])
-    def test_a_language_the_user_picked_is_stated(self, language):
-        assert dictionary_source_language(language, user_chosen=True) == language
+    def test_a_language_the_user_or_a_model_chose_is_stated(self, language):
+        assert dictionary_source_language(language, trusted=True) == language
 
     @pytest.mark.parametrize("language", [None, "", "Unknown"])
     def test_no_language_is_never_stated(self, language):
         assert dictionary_source_language(language) is None
-        assert dictionary_source_language(language, user_chosen=True) is None
+        assert dictionary_source_language(language, trusted=True) is None
 
     def test_language_key_unifies_the_two_spellings_of_chinese(self):
         assert language_key("Chinese (Simplified)") == language_key("Chinese Simplified")

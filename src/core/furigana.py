@@ -23,6 +23,7 @@ import threading
 from functools import lru_cache
 from typing import List, NamedTuple, Optional, Protocol, Sequence, Tuple
 
+from src.core import lang_id
 from src.constants import (FURIGANA_MAX_RUBY_PAIRS as MAX_RUBY_PAIRS,
                            FURIGANA_PREWARM_SAMPLE)
 
@@ -92,7 +93,10 @@ def should_annotate(text: str, lang_hint: Optional[str] = None) -> bool:
 
     Requires kanji (nothing to annotate otherwise) AND positive evidence that the
     text is Japanese rather than Chinese: either kana somewhere in the string, or
-    an explicit language hint from a caller that already knows.
+    an explicit language hint from a caller that already knows - and the hint
+    never overrides a kanji Japanese cannot write (我们 stays plain under a
+    Japanese hint, J5). Kana is `lang_id`'s: "・" alone is not kana, because
+    Chinese writes it between the parts of a foreign name (列夫・托尔斯泰).
 
     The hint matters: kanji-only strings such as "東京都" or "電源設定" are the
     normal case for a dictionary word chip, and nlp_manager.detect_language()
@@ -108,7 +112,9 @@ def should_annotate(text: str, lang_hint: Optional[str] = None) -> bool:
     """
     if not has_kanji(text):
         return False
-    return has_kana(text) or lang_hint == "Japanese"
+    if lang_id.has_kana(text):
+        return True
+    return lang_hint == "Japanese" and not lang_id.has_chinese_glyph(text)
 
 
 # --------------------------------------------------------------------------- #

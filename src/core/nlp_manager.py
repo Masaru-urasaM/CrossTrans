@@ -20,6 +20,8 @@ import logging
 from typing import Dict, List, Optional, Callable, Tuple
 from dataclasses import dataclass, field
 
+from src.core import lang_id
+
 
 def is_frozen() -> bool:
     """Check if running as PyInstaller frozen EXE."""
@@ -583,6 +585,11 @@ LANGUAGE_PACKS: Dict[str, LanguagePack] = {
 LANGUAGE_CATEGORIES = ["Asian", "European", "Scandinavian", "Middle Eastern", "Other"]
 
 # Language detection patterns
+# detect_language()'s answer for kanji that prove neither Japanese nor Chinese:
+# "Unknown" with this confidence - below the auto-open threshold, above zero, so
+# the Dictionary knows to ask a model's verdict or the user rather than give up.
+AMBIGUOUS_CJK_CONFIDENCE = 0.5
+
 UNICODE_RANGES = {
     "Vietnamese": [
         (0x1EA0, 0x1EF9),  # Vietnamese precomposed
@@ -1340,6 +1347,14 @@ class NLPManager:
     def detect_language(self, text: str) -> Tuple[str, float]:
         """Detect language of text.
 
+        Japanese vs Chinese is decided from evidence only (`lang_id`, Decision 22):
+        any kana -> ("Japanese", 1.0); a kanji only one of the languages writes ->
+        that language, 0.9; kanji that prove nothing -> ("Unknown",
+        AMBIGUOUS_CJK_CONFIDENCE), which the Dictionary settles with a model's
+        verdict or the user. It used to answer "Chinese (Simplified)" for every
+        kanji-only text and to score ordinary Japanese sentences below the
+        threshold (TODO.md F4).
+
         Args:
             text: Text to analyze
 
@@ -1394,14 +1409,16 @@ class NLPManager:
 
         confidence = min(max_count / total_chars, 1.0)
 
-        # Disambiguate Chinese vs Japanese (both use CJK)
+        # Chinese vs Japanese (both write kanji): evidence, never a guess.
         if max_lang in ["Chinese (Simplified)", "Chinese (Traditional)", "Japanese"]:
-            hiragana_count = sum(1 for c in text if 0x3040 <= ord(c) <= 0x30FF)
-            if hiragana_count > 0:
-                max_lang = "Japanese"
-                confidence = min(confidence + 0.2, 1.0)
+            if lang_id.has_kana(text):
+                max_lang, confidence = "Japanese", 1.0
             else:
-                max_lang = "Chinese (Simplified)"
+                evidence = lang_id.han_evidence(text)
+                if evidence:
+                    max_lang, confidence = evidence, 0.9
+                else:
+                    max_lang, confidence = "Unknown", AMBIGUOUS_CJK_CONFIDENCE
 
         # For pure Latin text (European languages), prioritize installed languages
         # This solves the problem where multiple languages have equal scores

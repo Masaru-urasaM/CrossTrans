@@ -18,6 +18,7 @@ Covered here:
 Everything but the geometry needs a Tk display (see the `tk_root` fixture).
 """
 import inspect
+import logging
 import re
 import time
 import tkinter as tk
@@ -176,6 +177,7 @@ def dictionary(tk_root, fake_ui):
     service = MagicMock()
     service.get_trial_info.return_value = None
     service.dictionary_lookup.return_value = "## [手紙]"
+    service.source_verdict.return_value = None          # no model verdict unless a test sets one
     config = MagicMock()
     config.get_furigana_enabled.return_value = True
     flow = DictionaryPopup(tk_root, config, service, MagicMock(), MagicMock())
@@ -254,18 +256,26 @@ class TestMainWindowWiring:
         dictionary.translation_service.dictionary_lookup.assert_called_once_with(
             ["手紙"], "English", source_language="Japanese", context=JP_TEXT)
 
-    def test_detected_chinese_lets_the_model_decide(self, dictionary):
-        dictionary._open_with_language("勉強", "Chinese (Simplified)")
-        _FakeWordFrame.created[-1].kwargs['on_lookup'](["勉強"])
+    def test_a_detected_european_language_lets_the_model_decide(self, dictionary):
+        # Latin text comes back as the first installed European pack: a guess.
+        dictionary._open_with_language("I study every day.", "English")
+        _FakeWordFrame.created[-1].kwargs['on_lookup'](["study"])
         lookup = dictionary.translation_service.dictionary_lookup.call_args
         assert lookup.kwargs['source_language'] is None
-        assert lookup.kwargs['context'] == "勉強"
+        assert lookup.kwargs['context'] == "I study every day."
 
-    def test_a_language_the_user_picked_is_stated(self, dictionary):
-        dictionary._open_with_language("勉強", "Chinese (Simplified)", user_chosen=True)
-        _FakeWordFrame.created[-1].kwargs['on_lookup'](["勉強"])
+    def test_a_detected_chinese_is_stated(self, dictionary):
+        # Since J5 detection says Chinese only from a glyph Japanese cannot write.
+        dictionary._open_with_language("我们在学习中文。", "Chinese (Simplified)")
+        _FakeWordFrame.created[-1].kwargs['on_lookup'](["学习"])
         lookup = dictionary.translation_service.dictionary_lookup.call_args
         assert lookup.kwargs['source_language'] == "Chinese (Simplified)"
+
+    def test_a_language_the_user_picked_is_stated(self, dictionary):
+        dictionary._open_with_language("I study", "German", trusted=True)
+        _FakeWordFrame.created[-1].kwargs['on_lookup'](["study"])
+        lookup = dictionary.translation_service.dictionary_lookup.call_args
+        assert lookup.kwargs['source_language'] == "German"
 
     def test_custom_box_phrases_carry_the_same_language(self, dictionary):
         _FakeBoxes.phrases = ["手紙"]
@@ -284,7 +294,7 @@ class TestMainWindowWiring:
         _invoke_button(tk_root, "Confirm")
         _pump(tk_root)
         assert opened == [(("勉強", "Japanese"),
-                           {'user_chosen': True, 'target_language': None, 'anchor': None})]
+                           {'trusted': True, 'target_language': None, 'anchor': None})]
 
     def test_the_word_window_is_centred_without_an_anchor(self, dictionary, monkeypatch):
         seen = []
@@ -306,14 +316,14 @@ class TestPopupWiring:
         dictionary.translation_service.dictionary_lookup.assert_called_once_with(
             ["手紙"], "French", source_language="Japanese", context=JP_TEXT)
 
-    def test_detected_chinese_lets_the_model_decide(self, popup, dictionary, nlp):
-        popup._current_original = "勉強"
-        nlp.detected = ("Chinese (Simplified)", 1.0)
+    def test_a_detected_european_language_lets_the_model_decide(self, popup, dictionary, nlp):
+        popup._current_original = "I study every day."
+        nlp.detected = ("English", 0.85)
         popup._open_dictionary_popup()
-        _FakeWordFrame.created[-1].kwargs['on_lookup'](["勉強"])
+        _FakeWordFrame.created[-1].kwargs['on_lookup'](["study"])
         lookup = dictionary.translation_service.dictionary_lookup.call_args
         assert lookup.kwargs['source_language'] is None
-        assert lookup.kwargs['context'] == "勉強"
+        assert lookup.kwargs['context'] == "I study every day."
 
     def test_a_language_the_user_picked_is_stated(self, tk_root, popup, dictionary, nlp):
         popup._current_original = "勉強"
@@ -367,7 +377,7 @@ class TestPopupWiring:
         popup._open_dictionary_popup()
         _invoke_button(tk_root, "Confirm")
         _pump(tk_root)
-        assert opened[0][1] == {'user_chosen': True, 'target_language': "French",
+        assert opened[0][1] == {'trusted': True, 'target_language': "French",
                                 'anchor': popup.popup}
 
 
@@ -495,3 +505,119 @@ class TestDialogs:
         popup._open_dictionary_popup()                       # from the popup's button too
         _invoke_button(tk_root, "Open Dictionary Settings")
         assert dictionary.settings_tabs == ["Dictionary"]
+
+
+# --------------------------------------------------------------------------- #
+# J5 - kanji that prove nothing: the model's verdict, else the user (Decision 22)
+# --------------------------------------------------------------------------- #
+def _combobox_values(root):
+    def walk(widget):
+        for child in widget.winfo_children():
+            if child.winfo_class() == 'TCombobox':
+                return child
+            found = walk(child)
+            if found is not None:
+                return found
+        return None
+    box = walk(root)
+    return list(box.cget('values')) if box is not None else None
+
+
+def _texts(root):
+    found = []
+
+    def walk(widget):
+        for child in widget.winfo_children():
+            try:
+                found.append(str(child.cget('text')))
+            except tk.TclError:
+                pass
+            walk(child)
+    walk(root)
+    return found
+
+
+class TestAmbiguousKanji:
+    AMBIGUOUS = ("Unknown", 0.5)
+
+    def test_the_models_verdict_opens_the_window_and_is_stated(self, dictionary, nlp, caplog):
+        nlp.detected = self.AMBIGUOUS
+        dictionary.translation_service.source_verdict.return_value = "Japanese"
+        with caplog.at_level(logging.INFO):
+            dictionary.open_from_text("勉強")
+        assert _FakeWordFrame.created[-1].kwargs['language'] == "Japanese"
+        _FakeWordFrame.created[-1].kwargs['on_lookup'](["勉強"])
+        lookup = dictionary.translation_service.dictionary_lookup.call_args
+        assert lookup.kwargs['source_language'] == "Japanese"
+        dictionary.translation_service.source_verdict.assert_called_with("勉強")
+        assert "[Dictionary] open language=Japanese via=model-verdict" in caplog.text
+
+    def test_the_popups_text_is_the_one_whose_verdict_counts(self, popup, dictionary, nlp):
+        nlp.detected = self.AMBIGUOUS
+        popup._current_original = "汽車"
+        dictionary.translation_service.source_verdict.side_effect = (
+            lambda text: "Chinese (Simplified)" if text == "汽車" else None)
+        popup._open_dictionary_popup()
+        assert _FakeWordFrame.created[-1].kwargs['language'] == "Chinese (Simplified)"
+
+    def test_a_chinese_verdict_uses_the_other_chinese_pack_when_one_is_missing(
+            self, dictionary, nlp):
+        nlp.detected = self.AMBIGUOUS
+        nlp.installed = ["Japanese", "Chinese (Traditional)"]
+        dictionary.translation_service.source_verdict.return_value = "Chinese (Simplified)"
+        dictionary.open_from_text("工作")
+        assert _FakeWordFrame.created[-1].kwargs['language'] == "Chinese (Traditional)"
+
+    def test_a_verdict_without_its_pack_offers_to_install_it(self, tk_root, dictionary, nlp):
+        nlp.detected = self.AMBIGUOUS
+        nlp.installed = ["English"]
+        dictionary.translation_service.source_verdict.return_value = "Japanese"
+        dictionary.open_from_text("勉強")
+        assert _toplevels(tk_root, "Select Source Language")
+        assert "📥 Install Japanese Pack" in _texts(tk_root)
+
+    def test_no_verdict_asks_the_user_japanese_or_chinese(self, tk_root, dictionary, nlp):
+        nlp.detected = self.AMBIGUOUS
+        nlp.installed = ["English", "Chinese (Traditional)", "Korean", "Japanese",
+                         "Chinese (Simplified)"]
+        dictionary.open_from_text("勉強")
+        assert "🈶 Kanji-only text: Japanese or Chinese?" in _texts(tk_root)
+        assert _combobox_values(tk_root)[:3] == ["Japanese", "Chinese (Simplified)",
+                                                 "Chinese (Traditional)"]
+        assert _FakeWordFrame.created == []                  # nothing opened behind it
+
+    def test_the_users_answer_is_stated_to_the_lookup(self, tk_root, dictionary, nlp):
+        nlp.detected = self.AMBIGUOUS
+        dictionary.open_from_text("勉強")
+        _invoke_button(tk_root, "Confirm")                    # Japanese: listed first
+        _pump(tk_root)
+        assert _FakeWordFrame.created[-1].kwargs['language'] == "Japanese"
+        _FakeWordFrame.created[-1].kwargs['on_lookup'](["勉強"])
+        lookup = dictionary.translation_service.dictionary_lookup.call_args
+        assert lookup.kwargs['source_language'] == "Japanese"
+
+    def test_an_unreadable_text_still_gets_the_old_dialog(self, tk_root, dictionary, nlp):
+        nlp.detected = ("Unknown", 0.0)                        # symbols, nothing to read
+        dictionary.open_from_text("!!!")
+        assert "⚠️ Cannot detect language" in _texts(tk_root)
+        assert "🈶 Kanji-only text: Japanese or Chinese?" not in _texts(tk_root)
+
+
+class TestRealDetectionOpensDirectly:
+    """DoD4 with the real detector: Japanese with kana never asks."""
+
+    @pytest.mark.parametrize("text", ["私は学生です。", "「勉強」という言葉", "Pythonで開発する",
+                                      "友達に手紙を書きました。", "毎日日本語を勉強しています。"])
+    def test_kana_opens_japanese_without_a_dialog(self, tk_root, dictionary, monkeypatch, text):
+        monkeypatch.setattr(nlp_manager, 'is_any_installed', lambda: True)
+        monkeypatch.setattr(nlp_manager, 'is_installed', lambda lang: True)
+        dictionary.open_from_text(text)
+        assert _FakeWordFrame.created[-1].kwargs['language'] == "Japanese"
+        assert not _toplevels(tk_root, "Select Source Language")
+
+    def test_kanji_only_with_a_japanese_glyph_opens_japanese(self, tk_root, dictionary,
+                                                              monkeypatch):
+        monkeypatch.setattr(nlp_manager, 'is_any_installed', lambda: True)
+        monkeypatch.setattr(nlp_manager, 'is_installed', lambda lang: True)
+        dictionary.open_from_text("経済")
+        assert _FakeWordFrame.created[-1].kwargs['language'] == "Japanese"

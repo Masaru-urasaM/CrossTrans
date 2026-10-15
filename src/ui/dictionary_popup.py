@@ -25,8 +25,9 @@ except ImportError:
     from tkinter import ttk
     HAS_TTKBOOTSTRAP = False
 
+from src.core import lang_id
 from src.core.dictionary_prompt import dictionary_source_language
-from src.core.nlp_manager import nlp_manager
+from src.core.nlp_manager import AMBIGUOUS_CJK_CONFIDENCE, nlp_manager
 from src.utils.ui_helpers import filter_dictionary_words, set_dark_title_bar
 
 # (x, y, width, height) of a window, or (left, top, right, bottom) of a work area.
@@ -202,6 +203,13 @@ class DictionaryPopup:
         # Detect language
         detected_lang, confidence = nlp_manager.detect_language(original_text)
 
+        # Kanji that prove neither Japanese nor Chinese: the model's verdict for
+        # this text, else the user (Decision 22).
+        if detected_lang == "Unknown" and confidence >= AMBIGUOUS_CJK_CONFIDENCE:
+            self._open_ambiguous_kanji(original_text, target_language=target_language,
+                                       anchor=anchor)
+            return
+
         # Check if detection is confident and NLP is installed for that language
         if confidence >= DETECTION_THRESHOLD and nlp_manager.is_installed(detected_lang):
             # Auto-proceed with detected language
@@ -222,6 +230,51 @@ class DictionaryPopup:
                 target_language=target_language,
                 anchor=anchor
             )
+
+    def _open_ambiguous_kanji(self, text: str, *, target_language: str,
+                              anchor: Optional[tk.Misc]) -> None:
+        """Kanji-only text: open in the language a model reported for it, or ask.
+
+        The verdict comes free when the text was translated - the popup's text
+        always was, the main window's input when the user pressed Translate (J4).
+        Untranslated main-window input goes straight to the user: one click,
+        where an identification call would cost a request and, measured on a
+        word alone, comes back confidently wrong 2 times in 10 and unsure 3-4
+        (Decision 26).
+        """
+        verdict = self._model_verdict(text)
+        if verdict:
+            pack = self._installed_pack(verdict)
+            if pack:
+                logging.info(f"[Dictionary] open language={pack} via=model-verdict")
+                self._open_with_language(text, pack, trusted=True,
+                                         target_language=target_language, anchor=anchor)
+                return
+            # The model named a language whose pack is missing: offer to install it.
+            self._show_language_selection_dialog(text, verdict, detected_but_not_installed=True,
+                                                 target_language=target_language, anchor=anchor)
+            return
+        logging.info("[Dictionary] open language=ask via=kanji-only")
+        self._show_language_selection_dialog(text, None, kanji_only=True,
+                                             target_language=target_language, anchor=anchor)
+
+    def _model_verdict(self, text: str) -> Optional[str]:
+        """The Japanese / Chinese verdict a model reported for exactly this text."""
+        finder = getattr(self.translation_service, 'source_verdict', None)
+        verdict = lang_id.normalize_language(finder(text)) if finder else None
+        return verdict if verdict == lang_id.JAPANESE or verdict in lang_id.CHINESE else None
+
+    @staticmethod
+    def _installed_pack(language: str) -> Optional[str]:
+        """The NLP pack to tokenize `language` with: its own, or for Chinese the
+        other variant's (both segment hanzi the same way), else None."""
+        if nlp_manager.is_installed(language):
+            return language
+        if language in lang_id.CHINESE:
+            other = next(c for c in lang_id.CHINESE if c != language)
+            if nlp_manager.is_installed(other):
+                return other
+        return None
 
     def _selected_language(self) -> str:
         """The main window's target language."""
@@ -313,6 +366,7 @@ class DictionaryPopup:
 
     def _show_language_selection_dialog(self, original_text: str, suggested_lang: str = None,
                                         detected_but_not_installed: bool = False, *,
+                                        kanji_only: bool = False,
                                         target_language: Optional[str] = None,
                                         anchor: Optional[tk.Misc] = None) -> None:
         """Show dialog to select source language for dictionary mode.
@@ -321,6 +375,8 @@ class DictionaryPopup:
             original_text: Text to analyze
             suggested_lang: Suggested language from detection
             detected_but_not_installed: True if language was detected but pack not installed
+            kanji_only: The text is kanji that could be Japanese or Chinese: say so,
+                and list Japanese and Chinese first
             target_language: Passed on to the word window
             anchor: Passed on to the word window
         """
@@ -328,6 +384,11 @@ class DictionaryPopup:
         if not installed_languages:
             self._show_nlp_not_installed_dialog()
             return
+        if kanji_only:
+            first = [lang for lang in (lang_id.JAPANESE,) + lang_id.CHINESE
+                     if lang in installed_languages]
+            installed_languages = first + [lang for lang in installed_languages
+                                           if lang not in first]
 
         # Taller if showing install prompt
         dialog = self._new_dialog("Select Source Language",
@@ -374,6 +435,15 @@ class DictionaryPopup:
             # Alternative: select from installed
             ttk.Label(frame, text="Or select from installed languages:",
                       font=('Segoe UI', 10), foreground='#888888').pack(anchor='w', pady=(5, 5))
+        elif kanji_only:
+            # Kanji the characters cannot place: the user knows, the app does not.
+            ttk.Label(frame, text="🈶 Kanji-only text: Japanese or Chinese?",
+                      font=('Segoe UI', 11, 'bold')).pack(pady=(0, 6))
+
+            ttk.Label(frame, text="These characters are written the same way in both languages,\n"
+                                  "and their meaning can differ.",
+                      font=('Segoe UI', 9), foreground='#888888',
+                      justify='left').pack(anchor='w', pady=(0, 8))
         else:
             # Case: Cannot detect language - show generic message
             ttk.Label(frame, text="⚠️ Cannot detect language",
@@ -414,7 +484,7 @@ class DictionaryPopup:
                 dialog.destroy()
                 # Delay for focus settle before opening dictionary popup
                 self.root.after(50, lambda: self._open_with_language(
-                    original_text, selected, user_chosen=True,
+                    original_text, selected, trusted=True,
                     target_language=target_language, anchor=anchor))
 
         def cancel():
@@ -447,7 +517,7 @@ class DictionaryPopup:
         return title
 
     def _open_with_language(self, original: str, language: str,
-                            user_chosen: bool = False, *,
+                            trusted: bool = False, *,
                             target_language: Optional[str] = None,
                             anchor: Optional[tk.Misc] = None) -> None:
         """Open the word window with specified language for NLP tokenization.
@@ -455,9 +525,10 @@ class DictionaryPopup:
         Args:
             original: Text to tokenize and display
             language: Source language for NLP processing
-            user_chosen: True when the user picked `language` in the selection
-                dialog. Only then - or when detection proved Japanese - is it
-                stated to the lookup prompt as fact (dictionary_source_language).
+            trusted: True when the user picked `language` in the selection
+                dialog or a model's verdict chose it. Then - or when detection
+                proved Japanese or Chinese - it is stated to the lookup prompt
+                as fact (dictionary_source_language).
             target_language: Language to look the words up into; None = the
                 main window's selected language
             anchor: The window to open beside (the quick-translate popup), or
@@ -520,7 +591,7 @@ class DictionaryPopup:
             expanded_state[0] = not expanded_state[0]
 
         # What the lookup prompt is told the words are, or None to let the model decide.
-        lookup_source = dictionary_source_language(language, user_chosen)
+        lookup_source = dictionary_source_language(language, trusted)
 
         # Word button frame with language for NLP tokenization
         def on_lookup(selected_words):

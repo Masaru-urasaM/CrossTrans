@@ -4,6 +4,47 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase J5 — The Dictionary opens in the right language; one rule for Japanese vs Chinese (2026-10-15)
+
+Three detectors gave three answers (TODO.md F5). `nlp_manager.detect_language()` called every
+kanji-only text "Chinese (Simplified)" - so 勉強 selected alone opened the Dictionary as Chinese,
+its chips without readings - and scored ordinary Japanese sentences at 0.63-0.70 against a 0.7
+threshold, so 「私は学生です。」 got "Cannot detect language" (F4). History labelled 勉強
+"Chinese". And a caller's Japanese hint could put Japanese readings on 我们.
+
+**Changed**
+- **`detect_language()`** asks `lang_id` for Japanese vs Chinese: any kana -> Japanese 1.0; a
+  kanji only one of them writes -> that language 0.9 (Traditional reported as such); kanji that
+  prove nothing -> `("Unknown", AMBIGUOUS_CJK_CONFIDENCE)` = 0.5. Re-measured F4 table: 勉強,
+  手紙, 東京大学 -> Unknown; 経済 -> Japanese; 私は学生です。, 「勉強」という言葉, Pythonで開発する,
+  友達に手紙を書きました。 -> Japanese 1.0; 我们在学习中文。 -> Chinese (Simplified); 說話 -> Chinese
+  (Traditional); 這是我的書。 -> Unknown (it was "Chinese (Simplified)", the wrong variant). The
+  Vietnamese, Latin and other-script branches are untouched.
+- **The Dictionary opens in the right language** (Q1, Decision 26). Kanji that prove nothing open
+  in the language a model reported for that exact text - the popup's translation always has one
+  (J4), the main window's input once the user pressed Translate - logged as
+  `[Dictionary] open language=.. via=model-verdict`. Without a verdict the selection dialog asks
+  **"Kanji-only text: Japanese or Chinese?"**, with Japanese and the Chinese packs listed first.
+  A Chinese verdict falls back to the other Chinese pack when only that one is installed; a
+  verdict whose pack is missing offers to install it. **No identification call**: untranslated
+  input goes straight to the user, because a word alone came back confidently wrong 2 times in
+  10 and unsure 3-4 times in J4's measurements, and one click costs nothing.
+- **What the lookup prompt is told** (`dictionary_source_language(language, trusted)`, renamed
+  from `user_chosen`): a detected Chinese is stated now too - detection says it only from a glyph
+  Japanese cannot write - as is a model's verdict or the user's pick.
+- **History's label** follows the same evidence: 勉強 is "Unknown" (shown as "→ English"), 経済
+  Japanese, 我们 Chinese (Simplified); stored entries are not migrated. A model's verdict, when
+  there is one, is the label already (J4).
+- **`furigana.should_annotate()`**: a Japanese hint no longer overrides a kanji Japanese cannot
+  write (我们, 说话 stay plain), and "・" alone no longer counts as kana - Chinese writes it between
+  the parts of a foreign name (列夫・托尔斯泰 used to be annotated).
+
+**Tests**: 1011 -> 1071 (+50 in the new `tests/test_language_detection.py`, +10 in
+`test_dictionary_flow.py`); 0 failed, 0 skipped. Nine tests updated on purpose - their premise
+was the old rule ("a detected Chinese is a guess", the `user_chosen` name). Sixteen mutations,
+fifteen killed; the sixteenth is equivalent - a model's verdict opened with `trusted=False` is
+still stated, because a verdict is always Japanese or Chinese, which are stated anyway.
+
 ### Phase J4 — Translations learn the source language, and the model says what it decided (2026-10-15)
 
 The user's answers to TODO.md Q1 and Q7: the AI model decides what ambiguous kanji-only text is,

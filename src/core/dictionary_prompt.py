@@ -39,26 +39,28 @@ def language_key(name: Optional[str]) -> str:
 
 
 def dictionary_source_language(language: Optional[str],
-                               user_chosen: bool = False) -> Optional[str]:
+                               trusted: bool = False) -> Optional[str]:
     """The source language to state in the prompt, or None to let the model decide.
 
     A Dictionary window always has a language, but it is not always evidence.
-    `nlp_manager.detect_language()` only *proves* Japanese - it needs kana to say
-    it. Its other answers are guesses: every kanji-only text without kana comes
-    back "Chinese (Simplified)" (勉強 included), and any Latin-script text comes
-    back as the first installed European pack. Stating a guess to the model as a
-    fact would make it follow the guess, which is worse than asking it to
-    decide. A language the user picked in the selection dialog is a fact.
+    Stated as fact: a language the user picked in the selection dialog, or a
+    model reported for this text (`trusted`), and a detected Japanese or Chinese
+    - since J5 `detect_language()` says either only from kana or from a glyph
+    one of the two cannot write, and answers "Unknown" otherwise. Any other
+    detection is a guess - Latin-script text comes back as the first installed
+    European pack - and stating a guess as fact would make the model follow it,
+    which is worse than asking it to decide.
 
     Args:
         language: The Dictionary window's language (nlp_manager's spelling).
-        user_chosen: True when the user picked it in the selection dialog.
+        trusted: True when the user picked it, or a model's verdict chose it.
     """
     if not language or language == 'Unknown':
         return None
-    if user_chosen:
+    if trusted:
         return language
-    return language if language_key(language) == 'japanese' else None
+    key = language_key(language)
+    return language if key == 'japanese' or key.startswith('chinese') else None
 
 
 def _split_sentences(text: str) -> List[str]:
