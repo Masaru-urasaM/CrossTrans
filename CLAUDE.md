@@ -263,7 +263,10 @@ the first match, so one of the two always loses (DEFERRED D12). It only matters 
   word window, lookup. The main window's button and the popup's both open it (Decision 23)
 - `custom_word_boxes.py` - Custom Word Boxes for manual phrase composition in Dictionary mode
 - `expanded_window.py` - Fullscreen translation view
-- `screenshot_handler.py` - Screenshot/vision translation handler
+- `screenshot_handler.py` - Screenshot/vision translation handler. The vision prompt
+  (`ocr_prompt`) also asks for `===SOURCE LANGUAGE===`; `parse_ocr_result()` reads the three
+  sections in any order. Japanese OCR text is shown with readings above the translation, the
+  verdict is recorded for the popup, and History keeps the OCR text (J8)
 - `history_dialog.py` - History viewer (no scrollbar: the wheel binding *is* the scrolling, and
   it is bound per widget - see Known Issues; no `grab_set`)
 - `toast.py` - Toast notifications
@@ -805,6 +808,7 @@ display rather than receiving pre-annotated strings through the queue.
 | Popup translation box | `lang_id.output_hint(source, target_lang)` | the target is authoritative; Japanese quoted in an English translation of Japanese is read too (J6) |
 | Popup, grammar fix | the original's evidence or verdict | "Grammar" is a label, not a language; a fix keeps the source's language (J6) |
 | Replace preview | as the translation box | translated half only; the struck-through original stays plain |
+| Screenshot popup source block | the OCR text's evidence, else the vision model's `===SOURCE LANGUAGE===` | the OCR'd Japanese with readings above the translation (J8) |
 | Custom Prompt edit mode | — | box is flattened to plain first (I3) |
 | Main window output (`trans_text`) | `output_hint(input's settled language, target)`; a grammar fix: the input's language | read-only, so I3 holds by construction (J7) |
 | Expanded view | `output_hint(source_language, target_language)` args | read-only since F3; a disabled `tk.Text` still selects and copies |

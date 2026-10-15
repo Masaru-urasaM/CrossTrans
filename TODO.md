@@ -2,7 +2,7 @@
 
 > **Status: 🔨 IN PROGRESS** on branch `feature/japanese-language-identity` (from `main` after
 > the merge of `h1-health-review`, `f28a276`). **J0 ✅ and J1 ✅ done 2026-10-15** (§6).
-> **J2-J7 ✅ done 2026-10-15** (`src/core/lang_id.py`, Decision 24; the dictionary
+> **J2-J8 ✅ done 2026-10-15** (`src/core/lang_id.py`, Decision 24; the dictionary
 > result window reads the stated source and both languages of an entry; translation prompts
 > state the source or ask the model for a `[[SOURCE: ...]]` line, Decision 25).
 > **D13-D15 ✅ done 2026-10-15** at the user's request: one Dictionary mode serves both buttons
@@ -924,7 +924,12 @@ output and expanded view hints.
 **Manual (user):** main window, type `東京大学` → the pane shows its placeholder (no verdict
 yet); press Translate → the pane shows とうきょうだいがく (the model's verdict).
 
-### J8 - Screenshot OCR source block  *(Q6)*
+### J8 - Screenshot OCR source block  *(Q6)*  ✅ Done (2026-10-15)
+
+> **Result:** as planned. `ocr_prompt()` / `parse_ocr_result()` (sections in any order); the
+> block uses evidence, else the `===SOURCE LANGUAGE===` verdict; the verdict is recorded before
+> the popup opens; History keeps the OCR text. Tests 1132 → 1154; 10 mutations killed. Not
+> measured on a real vision call (no screenshot can be taken unattended) - manual check below.
 
 **Files (1-2):** `src/ui/screenshot_handler.py` (`:195-224`), possibly a helper on
 `TranslationService`; tests: new `tests/test_screenshot_ruby.py`.

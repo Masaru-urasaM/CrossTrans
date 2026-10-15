@@ -5,9 +5,67 @@ Handles the screenshot hotkey, region capture, vision API processing,
 and translation display.
 """
 import os
+import re
 import logging
 import threading
-from typing import Optional, Callable
+from typing import Optional, Callable, Tuple
+
+from src.core import lang_id
+
+# What the popup and History show for a screenshot whose answer lost its sections.
+OCR_FALLBACK_ORIGINAL = "[Screenshot]"
+
+# `===ORIGINAL===`, `===SOURCE LANGUAGE===`, `===TRANSLATION===` - in any order.
+_SECTION_RE = re.compile(r'===\s*(ORIGINAL|SOURCE LANGUAGE|TRANSLATION)\s*===')
+
+
+def ocr_prompt(target_lang: str) -> str:
+    """The vision prompt: OCR, the text's language (J8), and the translation.
+
+    The language is asked for the same reason a text translation asks for it
+    (Decision 22): text written only in kanji can be Japanese or Chinese, and
+    the popup reads it only when it is Japanese. Neutral wording - no language
+    is named as the likelier one (Decision 21).
+    """
+    return f"""Extract and translate ALL visible text from this image to {target_lang}.
+
+Instructions:
+1. Perform OCR - extract ALL text exactly as it appears
+2. Name the language of the extracted text
+3. Translate the extracted text
+4. Return format:
+===ORIGINAL===
+[All extracted text]
+
+===SOURCE LANGUAGE===
+[The language of the extracted text, in English - one name, e.g. Japanese, Chinese,
+Korean, English. Japanese and Chinese share many characters: decide from the text
+itself. Write Unknown if you cannot tell.]
+
+===TRANSLATION===
+[Translated text in {target_lang}]
+
+5. Do NOT censor, soften, mask, or replace ANY word - including offensive, vulgar, or sensitive words; render the faithful equivalent in {target_lang}."""
+
+
+def parse_ocr_result(result: str) -> Tuple[str, Optional[str], str]:
+    """(original, source language or None, translation) from a vision answer.
+
+    Sections may come in any order. Without both ORIGINAL and TRANSLATION the
+    whole answer is the translation and the original is OCR_FALLBACK_ORIGINAL,
+    as before. The source language is the section's first line, normalized;
+    "Unknown" or a missing section is None.
+    """
+    marks = list(_SECTION_RE.finditer(result or ""))
+    sections = {}
+    for i, mark in enumerate(marks):
+        end = marks[i + 1].start() if i + 1 < len(marks) else len(result)
+        sections.setdefault(mark.group(1), result[mark.end():end].strip())
+    if 'ORIGINAL' not in sections or 'TRANSLATION' not in sections:
+        return OCR_FALLBACK_ORIGINAL, None, result
+    source_lines = sections.get('SOURCE LANGUAGE', '').splitlines()
+    source = lang_id.normalize_language(source_lines[0]) if source_lines else None
+    return sections['ORIGINAL'], source, sections['TRANSLATION']
 
 
 class ScreenshotHandler:
@@ -176,19 +234,7 @@ class ScreenshotHandler:
         def process_screenshot():
             try:
                 # Use multimodal translation with the captured image
-                prompt = f"""Extract and translate ALL visible text from this image to {target_lang}.
-
-Instructions:
-1. Perform OCR - extract ALL text exactly as it appears
-2. Translate the extracted text
-3. Return format:
-===ORIGINAL===
-[All extracted text]
-
-===TRANSLATION===
-[Translated text in {target_lang}]
-
-4. Do NOT censor, soften, mask, or replace ANY word - including offensive, vulgar, or sensitive words; render the faithful equivalent in {target_lang}."""
+                prompt = ocr_prompt(target_lang)
 
                 result = self.translation_service.api_manager.translate_multimodal(
                     prompt, [image_path], {}
@@ -202,25 +248,41 @@ Instructions:
                 self.translation_service.last_attribution =                     self.translation_service.api_manager.last_attribution
 
                 # Parse result
-                if "===ORIGINAL===" in result and "===TRANSLATION===" in result:
-                    parts = result.split("===TRANSLATION===")
-                    original = parts[0].replace("===ORIGINAL===", "").strip()
-                    translated = parts[1].strip() if len(parts) > 1 else ""
-                else:
-                    original = "[Screenshot]"
-                    translated = result
+                original, source_language, translated = parse_ocr_result(result)
+                ocr_text = original if original != OCR_FALLBACK_ORIGINAL else ""
+
+                # The model's verdict for the OCR text, recorded before the popup
+                # opens: the popup, its Dictionary and its chooser all read it (J8).
+                if ocr_text:
+                    self.translation_service._remember_source_verdict(ocr_text, source_language)
+                    logging.info(f"[LangID] screenshot verdict={source_language or 'none'} "
+                                 f"chars={len(ocr_text)}")
+
+                # The OCR'd Japanese with its readings above the translation, as the
+                # hotkey popup shows a selection (Q6). Evidence beats the verdict.
+                furigana_text = None
+                if ocr_text and self.config.get_furigana_enabled():
+                    verdict = lang_id.resolve(ocr_text, model=source_language)
+                    if verdict.language == lang_id.JAPANESE:
+                        furigana_text = self.translation_service.generate_furigana(
+                            ocr_text, lang_id.JAPANESE)
 
                 # Get trial info
                 trial_info = self.translation_service.get_trial_info()
 
                 # Show result in popup (image path preserved for "Open Translator")
                 if self._on_show_quick_translate:
-                    self.root.after(0, lambda: self._on_show_quick_translate(original, translated, target_lang, trial_info))
+                    self.root.after(0, lambda: self._on_show_quick_translate(
+                        original, translated, target_lang, trial_info, furigana_text))
 
-                # Save to history
+                # Save to history - the OCR text itself, so the entry says what was
+                # read (Q6); the placeholder only when the answer lost its sections.
                 self.translation_service.history_manager.add_entry(
-                    "[Screenshot OCR]", translated, target_lang, source_type="screenshot",
-                    model_used=self.translation_service.last_attribution or 'Auto'
+                    ocr_text or "[Screenshot OCR]", translated, target_lang,
+                    source_type="screenshot",
+                    model_used=self.translation_service.last_attribution or 'Auto',
+                    source_lang=source_language or '',
+                    source_verdict=source_language or ''
                 )
 
             except Exception as e:

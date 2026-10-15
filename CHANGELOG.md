@@ -4,6 +4,33 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase J8 — A Japanese screenshot shows what it read, with readings (2026-10-15)
+
+Win+Alt+S showed only the translation - the hotkey popup shows the selection with its readings
+above it - and History stored the literal `[Screenshot OCR]` as the original (TODO.md F7, Q6).
+
+**Changed**
+- **The vision prompt asks for the text's language** too (`ocr_prompt()`): a
+  `===SOURCE LANGUAGE===` section between `===ORIGINAL===` and `===TRANSLATION===` - neutral
+  wording, Unknown allowed (Decision 22, the J4 principle for images). `parse_ocr_result()` reads
+  the sections in any order and keeps the old fallback when the answer lost them.
+- **The OCR'd text is shown with readings** above the translation when it is Japanese: kana or a
+  Japanese-only glyph, else the section's verdict - a Chinese-only glyph beats a "Japanese"
+  verdict. Furigana off, or no sections, shows no block.
+- **The verdict is recorded** for the OCR text before the popup opens, so the popup's hint, its
+  Dictionary (J5) and its "Japanese or Chinese?" row (J6) all know it. Logged as
+  `[LangID] screenshot verdict=.. chars=..`.
+- **History keeps the OCR text** as the entry's original (Q6), with its verdict; the
+  `[Screenshot OCR]` placeholder only when the answer lost its sections. Screenshot entries keep
+  their own `source_type`, so they are still never served as a text-translation cache hit.
+
+**Tests**: 1132 -> 1154 (+22 in the new `tests/test_screenshot_ruby.py`), 0 failed, 0 skipped.
+Ten mutations - the section never asked for, the verdict not normalized, an answer without a
+translation accepted, the verdict not recorded or ignored, every OCR text read as Japanese, the
+setting ignored, History keeping the placeholder or dropping the verdict, the block never reaching
+the popup - each made the suite fail and was restored. (One run had first "killed" every mutation
+through a broken test file; the runner now reports a collection error as an error, not a kill.)
+
 ### Phase J7 — The main window reads what a translation placed (2026-10-15)
 
 The Reading pane under the input box had no hint at all - its comment said so: kanji-only input
