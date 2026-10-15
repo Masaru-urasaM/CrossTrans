@@ -15,7 +15,7 @@ Select text, press hotkey, get instant translation in a popup.
 | `src/constants.py` | VERSION, LANGUAGES, PROVIDERS (hardcoded fallbacks) |
 | `src/app.py` | Main TranslatorApp coordinator (~1630 lines) |
 | `src/core/remote_config.py` | Dynamic model/provider config (Cloudflare KV) |
-| `src/core/` | Business logic (24 modules) |
+| `src/core/` | Business logic (25 modules) |
 | `src/ui/` | UI components (20+ files) |
 | `src/ui/settings/` | Settings tabs (package) |
 | `src/utils/updates.py` | Auto-update system (check, download, install) |
@@ -235,6 +235,12 @@ the first match, so one of the two always loses (DEFERRED D12). It only matters 
 - `nlp_manager.py` - NLP language pack management (install verification, subprocess fallback for EXE)
 - `dictionary_prompt.py` - The dictionary lookup prompt: source/target, context, pronunciation by
   source language (pure logic; see "Dictionary Prompt" below)
+- `lang_id.py` - Which language CJK text is, from evidence only: `resolve(text, known=, context=,
+  model=)` (known -> kana/glyph evidence -> context -> a model's verdict -> unknown, Decision 22),
+  `normalize_language()`, `ruby_hint()` / `output_hint()`. Pure; must not import `furigana`.
+  **Glyph sets are traps** (Decision 24): "Japanese-only" = CP932 minus GB2312 minus
+  **Big5-HKSCS** (plain Big5 calls Hong Kong's 衆 裏 綫 Japanese); "cannot be Japanese" = outside
+  **JIS X 0213** (CP932 lacks the 2010 Jōyō 剝 頰 塡); never GBK (it holds everything)
 - `update_ui_manager.py` - Update status checking & UI feedback
 - `trial_manager.py` - Trial mode status & dialogs
 

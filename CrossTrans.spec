@@ -37,6 +37,12 @@ a = Analysis(
         'packaging',
         'packaging.version',
         'config',
+        # Character sets src/core/lang_id.py reads glyph evidence from. Looked up
+        # by name at run time, so nothing imports them where PyInstaller can see.
+        'encodings.euc_jis_2004',
+        'encodings.cp932',
+        'encodings.gb2312',
+        'encodings.big5hkscs',
     ],
     hookspath=[],
     hooksconfig={},

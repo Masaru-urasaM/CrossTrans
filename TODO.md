@@ -2,6 +2,7 @@
 
 > **Status: 🔨 IN PROGRESS** on branch `feature/japanese-language-identity` (from `main` after
 > the merge of `h1-health-review`, `f28a276`). **J0 ✅ and J1 ✅ done 2026-10-15** (§6).
+> **J2 ✅ done 2026-10-15** (`src/core/lang_id.py`, Decision 24).
 > **D13-D15 ✅ done 2026-10-15** at the user's request: one Dictionary mode serves both buttons
 > (Decision 23), so every later phase changes it once; a failed lookup shows its message; no
 > `grab_set()` in its dialogs. Closing D15 surfaced D16 (`UpdateFailedDialog`, DEFERRED.md).
@@ -408,6 +409,10 @@ also Japanese kyūjitai in JIS, which is why Traditional text is mostly ambiguou
 - A static scan of `tests/*.py` found exactly one test string with a non-JIS kanji (汉字,
   `test_dictionary_ruby.py:164-165`), and it already expects plain text - the §5.1 guard will not
   break it.
+- **Big5 is the wrong Traditional set for "Japanese-only"** (found in J2): Hong Kong's standard
+  forms 衆 裏 綫 衞 啓 峯 are outside Big5 and inside CP932, so 12 of 13 Hong Kong strings came out
+  Japanese. Exclude Big5-HKSCS (Decision 24) - which costs the Japanese forms HKSCS also carries
+  (駅 発 円 県 込).
 
 ---
 
@@ -706,7 +711,18 @@ detect language" dialog appears, pick Japanese; J5 removes it.)
 
 **Size:** ~120-180 production lines.
 
-### J2 - Language identity core: `src/core/lang_id.py`  *(no behaviour change yet)*
+### J2 - Language identity core: `src/core/lang_id.py`  *(no behaviour change yet)*  ✅ Done (2026-10-15)
+
+> **Result:** `resolve(text, *, known, context, model) -> Verdict(language, evidence)` plus
+> `normalize_language`, `han_evidence`, `has_kana`, `has_chinese_glyph`, `ruby_hint`,
+> `output_hint`. Glyph classes are cached per character (3,000 kanji ≈ 0.6 ms warm), no sets built
+> up front. **A third charset trap:** plain Big5 called 12 of 13 Hong Kong strings Japanese (衆 裏
+> 綫 衞 啓 峯 are outside Big5, inside CP932) - "Japanese-only" now also excludes Big5-HKSCS
+> (Decision 24), at a measured cost: 959 → 571 Japanese-only glyphs. Fixtures: 311 Japanese, 149
+> Simplified, 164 Traditional (incl. Hong Kong forms) - **0 wrong verdicts either way**; settled
+> by glyph alone 55 / 80 / 3 (23 of F9's 54, vs 32 with Big5). U+30FB "・" is not kana evidence
+> (Chinese uses it in foreign names). Missing codecs switch glyph evidence off with a warning;
+> the spec now lists them as hidden imports. Tests 780 → 903; 16 mutations killed.
 
 **Files:** new `src/core/lang_id.py`; new `tests/test_lang_id.py`; fixture lists (inline or
 `tests/fixtures/`).

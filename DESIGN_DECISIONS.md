@@ -5,6 +5,41 @@ approaches. Newest first.
 
 ---
 
+### Decision 24 - Glyph evidence: "Japanese-only" excludes Big5-HKSCS, not just Big5
+
+**Date**: 2026-10-15
+**Status**: RESOLVED
+
+**Problem**: `src/core/lang_id.py` reads evidence from single characters: a kanji only Japanese
+writes proves Japanese, one Japanese cannot write proves Chinese. "Only Japanese writes" means
+"in a Japanese character set and in no Chinese one". TODO.md F9 measured the rule with CP932
+minus GB2312 minus Big5 (959 code points) and found no Chinese word called Japanese - but its
+Traditional samples were Taiwan-style. Hong Kong writes 衆 裏 綫 衞 啓 峯 where Taiwan writes
+眾 裡 線 衛 啟 峰, and those Hong Kong forms are outside Big5 and inside CP932.
+
+**Options considered** (measured on `tests/test_lang_id.py`'s fixtures):
+1. **Big5** - Pros: 959 Japanese-only glyphs; 77 of 311 Japanese words settled by glyph.
+   Cons: **12 of 13 Hong Kong strings called Japanese** (這裏, 公衆, 路綫, 衞生 ...): Japanese
+   readings on Chinese text, the outcome Decision 8 ranks worst.
+2. **Big5-HKSCS** (a superset of Big5) - Pros: no Hong Kong string called Japanese. Cons: HKSCS
+   also carries Japanese forms (駅 発 円 県 込 鉄), so 959 -> 571 Japanese-only glyphs and 55 of
+   311 Japanese words settled by glyph; the 22 that lose it become ambiguous (never Chinese).
+3. **Big5 plus a hand-kept list of Hong Kong forms** - Pros: keeps more coverage. Cons: a
+   curated list nobody can verify is complete; it fails silently on the form it misses.
+4. **GBK / GB18030 as the Chinese set** - Cons: they hold almost every ideograph, so nothing
+   would be Japanese-only (already rejected in F9).
+
+**Resolution**: **Option 2.** "Blank beats a wrong reading" decides it: a word that loses its
+glyph evidence is still settled by kana, its context, a model's verdict or the user, while a
+Hong Kong text called Japanese would be annotated wrongly with nothing to stop it. Do not swap
+back to Big5 to "recover coverage". JIS X 0213 (not CP932) stays the "can be Japanese" set, for
+the 2010 Jōyō kanji 剝 頰 塡.
+
+**References**: `src/core/lang_id.py` (module docstring, `glyph_class()`), TODO.md F9 and J2,
+`tests/test_lang_id.py` (`test_hong_kong_forms_are_never_japanese`, `test_coverage_is_recorded`).
+
+---
+
 ### Decision 23 - One Dictionary mode: the popup delegates to `DictionaryPopup`
 
 **Date**: 2026-10-15

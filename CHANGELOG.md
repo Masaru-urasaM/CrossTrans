@@ -4,6 +4,52 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase J2 — Language identity from evidence: `src/core/lang_id.py` (2026-10-15)
+
+The core the remaining language-identity phases build on. **No behaviour changes yet** - nothing
+calls it until J3.
+
+**Added**
+- `src/core/lang_id.py` (pure logic): `resolve(text, *, known, context, model)` answers what
+  language a CJK text is, in Decision 22's order - what the caller knows, then evidence in the
+  text, then evidence in its context, then the language a model call reported - and returns
+  `Verdict(language, evidence)` saying which step answered. Evidence beats the model: kana in the
+  text wins over a model that said Chinese. Also `normalize_language()` (every spelling the app
+  meets - the hotkey list's "Chinese Simplified", nlp_manager's "Chinese (Simplified)", codes,
+  native names, what a model writes, "Unknown" -> None), `han_evidence()`, `has_kana()`,
+  `has_chinese_glyph()`, and the ruby hints `ruby_hint()` / `output_hint()` (TODO.md §5.1).
+- `tests/test_lang_id.py` (123 tests): 311 kanji-only Japanese words, 149 Simplified and 164
+  Traditional Chinese words, Chinese sentences, Japanese sentences with Chinese names.
+- `CrossTrans.spec`: the four codecs the glyph sets come from as hidden imports - they are looked
+  up by name at run time, where PyInstaller cannot see them. If one is still missing, glyph
+  evidence switches itself off with a `[LangID]` warning instead of misreading every kanji.
+
+**Evidence rules, measured on the fixtures**
+- Kana is Japanese - but not U+30FB "・", which Chinese writes between the parts of a foreign
+  name (列夫・托尔斯泰).
+- A kanji only Japanese writes is Japanese; one Japanese cannot write (outside JIS X 0213) is
+  Chinese, Simplified when GB2312 has it. Both kinds together prove nothing.
+- Result: **0** Japanese words called Chinese, **0** Chinese strings called Japanese. Settled by
+  glyph alone: Japanese 55/311 (23 of the 54 F9 words), Simplified 80/149, Traditional 3/164 -
+  the rest is ambiguous by nature and waits for context, a model's verdict or the user.
+- `han_evidence()` on 3,000 kanji: about 0.6 ms warm (budget 5 ms).
+
+**Fixed during implementation**
+- **Plain Big5 was the wrong Traditional set** - a third character-set trap, next to TODO.md
+  F9's CP932 and GBK. Hong Kong's standard forms 衆 裏 綫 衞 啓 峯 are outside Big5 but inside
+  CP932, so the first version called 12 of 13 Hong Kong strings (這裏, 公衆, 路綫, 衞生 ...)
+  Japanese - Japanese readings on Chinese text. "Japanese-only" now excludes Big5-HKSCS too
+  (Decision 24). The cost, measured: Japanese-only glyphs 959 -> 571, because HKSCS also carries
+  Japanese forms (駅 発 円 県 込); 22 of the 311 Japanese words lose their glyph evidence and
+  become ambiguous - unknown, never Chinese.
+
+**Tests**: 780 -> 903 (+123 in `tests/test_lang_id.py`), 0 failed, 0 skipped. Sixteen mutations -
+the middle dot counted as kana, plain Big5, CP932 for "can be Japanese", a conflict counted as
+Japanese, the Chinese variant flipped, the model or the context put before the text's own
+evidence, the context ignored, `known` ignored, each hint rule, "Unknown" read as a language, a
+missing codec undetected, the log line dropped - each made the suite fail and was restored.
+Coverage is written to `logs/lang_id_coverage.json` on every run.
+
 ### Phase D13-D15 — One Dictionary mode, and the two bugs its copies shared (2026-10-15)
 
 Dictionary mode was written twice: once for the main window's Dictionary button
