@@ -1348,7 +1348,7 @@ class QuickTranslateManager:
                 pass  # Frame might be destroyed
 
     def show_dictionary_result(self, result: str, target_lang: str, trial_info: dict = None,
-                               looked_up_words: list = None):
+                               looked_up_words: list = None, source_lang: str = None):
         """Show dictionary lookup result in a SEPARATE window.
 
         This creates an independent window flagged as 'Dictionary' result,
@@ -1360,6 +1360,9 @@ class QuickTranslateManager:
             target_lang: The target language
             trial_info: Optional trial mode info dict for title bar display
             looked_up_words: List of words that were looked up (for highlighting)
+            source_lang: The source language the lookup stated, or None. It
+                decides the readings over the model's own field 2 and is named
+                in the title.
         """
         # Stop lookup animation first
         self.stop_dictionary_animation()
@@ -1372,7 +1375,8 @@ class QuickTranslateManager:
         # by Text.search() afterwards (an embedded window has no characters).
         runs = split_dictionary_text(display_text, target_lang, looked_up_words,
                                      HIGHLIGHT_COLORS,
-                                     annotate=self._ruby_enabled())
+                                     annotate=self._ruby_enabled(),
+                                     source_lang=source_lang)
 
         # Calculate size based on result text (MIN_HEIGHT already in calculate_size).
         # This window renders in DICT_RESULT_FONT and has far less chrome than the
@@ -1388,13 +1392,14 @@ class QuickTranslateManager:
         # Create SEPARATE dictionary result window
         dict_result = tk.Toplevel(self.root)
 
-        # Set title with trial quota if in trial mode
+        # Title: the language pair when the source is known, with the trial quota
+        languages = f"{source_lang} → {target_lang}" if source_lang else f"{target_lang}"
         if trial_info and trial_info.get('is_trial'):
             remaining = trial_info.get('remaining', 0)
             daily_limit = trial_info.get('daily_limit', 50)
-            dict_result.title(f"Dictionary - {target_lang} ({remaining}/{daily_limit})")
+            dict_result.title(f"Dictionary - {languages} ({remaining}/{daily_limit})")
         else:
-            dict_result.title(f"Dictionary - {target_lang}")
+            dict_result.title(f"Dictionary - {languages}")
         dict_result.configure(bg='#2b2b2b')
         dict_result.attributes('-topmost', True)
         dict_result.after(100, lambda: dict_result.attributes('-topmost', False) if dict_result.winfo_exists() else None)

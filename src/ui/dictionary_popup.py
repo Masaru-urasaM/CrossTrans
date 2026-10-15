@@ -602,7 +602,8 @@ class DictionaryPopup:
                 # Get trial info after API call (quota may have changed)
                 trial_info = self.translation_service.get_trial_info()
                 # Show result in a separate window (pass words for highlighting)
-                self.root.after(0, lambda: self._show_result(result, target_lang, trial_info, words))
+                self.root.after(0, lambda: self._show_result(result, target_lang, trial_info, words,
+                                                             source_language))
             except Exception as e:
                 # Bind the message now: Python unbinds `e` when this block ends,
                 # long before Tk runs the callback (D14 - it raised NameError).
@@ -618,7 +619,7 @@ class DictionaryPopup:
         self.toast.show_error(message)
 
     def _show_result(self, result: str, target_lang: str, trial_info: dict = None,
-                     looked_up_words: list = None) -> None:
+                     looked_up_words: list = None, source_language: Optional[str] = None) -> None:
         """Show dictionary lookup result in SEPARATE window.
 
         Args:
@@ -626,7 +627,11 @@ class DictionaryPopup:
             target_lang: Target language
             trial_info: Trial mode info
             looked_up_words: Words that were looked up
+            source_language: The language the prompt was told the words are in,
+                or None - the result window then trusts each entry's field 2
         """
         # Use quick translate manager to show result in SEPARATE dictionary window
         self.quick_translate_manager.capture_mouse_position()
-        self.quick_translate_manager.show_dictionary_result(result, target_lang, trial_info, looked_up_words)
+        self.quick_translate_manager.show_dictionary_result(result, target_lang, trial_info,
+                                                            looked_up_words,
+                                                            source_lang=source_language)

@@ -791,7 +791,7 @@ display rather than receiving pre-annotated strings through the queue.
 | Expanded view | `target_language` arg | read-only since F3; a disabled `tk.Text` still selects and copies |
 | Main window input (`original_text`) | — | editable, so it stays plain (I3) forever; its readings live in the Reading pane below |
 | Reading pane (`_reading_text`) | none | mirrors the input box; source language unknown, so kanji-only input stays plain |
-| Dictionary result window | `target_lang` for Translation/Definition, the result's own **Source Language** field elsewhere | monospace columns preserved; Pronunciation never annotated. See below |
+| Dictionary result window | the lookup's stated source, else each entry's **Source Language** field; `target_lang` for Translation/Definition/Word Type; Japanese + a non-Chinese language = Japanese throughout; Japanese/Chinese pairs cut at `→` | monospace columns preserved; Pronunciation never annotated. See below |
 | Dictionary word chips | mode language, applied to the whole line | a chip that cuts a compound stays bare. See below |
 | Custom lookup tags | mode language, per tag | a tag is one lookup phrase, so it is annotated on its own |
 
@@ -830,9 +830,19 @@ Read-only `RubyText` under `original_text`, **shown by default** and collapsible
   annotated, which is what keeps `_align_dictionary_text()`'s value column aligned.
 - **Pronunciation (field 5) is never annotated** — IPA plus a target-language phonetic; hiragana
   over katakana is redundant. Matched by label *and* number, since models renumber.
-- **The result names its own source language** (`**Source Language**: Japanese`), used as the hint
-  for source-language fields, resolved **per `## [Word]` entry**. This is the one surface where
-  kanji-only text does get readings.
+- **The lookup's stated source language wins** (J3): `show_dictionary_result(...,
+  source_lang=)` gets what the prompt was told (`dictionary_source_language()`), because a model
+  that took 勉強 for Chinese writes `Chinese` in field 2 and used to switch off every reading in
+  the entry. Only when nothing was stated does each `## [Word]` entry's own **Source Language**
+  field decide (`declared_source_language()`, per entry). The window title then reads
+  `Dictionary - Japanese → English`.
+- **Two languages per entry** (`side_hints()`): Japanese paired with a language that is not
+  Chinese makes every kanji run Japanese (`lang_id.ruby_hint`) - `learn → 学習` in an English ->
+  Japanese entry is read. A Japanese/Chinese pair is cut at its arrows (`arrow_parts()`): left of
+  `→` takes the source's hint, right of it the target's; in `a → x, b → y` the middle piece splits
+  at its last separator. An unknown source never shares the Japanese hint - it might be Chinese.
+- **Target-language fields are 1, 3 and 4** (Translation, Definition, Word Type - the prompt asks
+  for Word Type in the target language since J1).
 - **`calculate_size()` must be told the font and the chrome** (fixed 2026-08-28, was D1). It
   defaults to the popup's Segoe UI 11 (20 px rows) and 100 px of chrome; this window renders
   Consolas 10 (15 px rows) and has 71 px of chrome (`DICT_RESULT_CHROME_PX`), so it passes both.

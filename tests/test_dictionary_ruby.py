@@ -21,9 +21,12 @@ import pytest
 from src.core import furigana as F
 from src.ui.dictionary_render import (
     DictRun,
+    arrow_parts,
+    declared_source_language,
     field_policy,
     overhead_px,
     runs_to_segments,
+    side_hints,
     source_language_hint,
     split_dictionary_text,
 )
@@ -332,10 +335,11 @@ def show_result(tk_root):
     opened = []
 
     def _show(result=RESULT, target_lang="English", words=("勉強",),
-              furigana_enabled=True):
+              furigana_enabled=True, source_lang=None):
         mgr = QuickTranslateManager(tk_root, FakeConfig(furigana_enabled))
         mgr._last_mouse_x, mgr._last_mouse_y = 500, 300
-        mgr.show_dictionary_result(result, target_lang, None, list(words))
+        mgr.show_dictionary_result(result, target_lang, None, list(words),
+                                   source_lang=source_lang)
         tk_root.update_idletasks()
         window = tk_root.winfo_children()[-1]
         opened.append(window)
@@ -505,3 +509,289 @@ class TestWindowFitsItsContent:
             ALIGNED, base_font=DICT_RESULT_FONT,
             vertical_padding=DICT_RESULT_CHROME_PX)[1]
         assert as_dictionary < as_popup
+
+
+# --------------------------------------------------------------------------- #
+# J3 - the caller's source language, and lines that hold two languages
+# --------------------------------------------------------------------------- #
+# TODO.md F2: the model took 勉強 for Chinese. Field 2 alone used to switch the
+# readings off for the whole entry, header and synonyms included.
+FIXTURE_A = """## 勉強
+
+1. **Translation**: study
+2. **Source Language**: Chinese
+3. **Definition**: the act of studying
+4. **Word Type**: noun
+5. **Pronunciation**: べんきょう
+6. **Synonyms**: 学習 → learning, 勉学 → study
+7. **Antonyms**: None
+8. **Examples**:
+   - 勉強会 → study group
+   - 毎日日本語を勉強しています。 → I study Japanese every day.
+"""
+
+# TODO.md F3: English -> Japanese. The Japanese sits right of the arrows, on lines
+# whose only hint used to be the source language (English).
+FIXTURE_B = """## study
+
+1. **Translation**: 勉強
+2. **Source Language**: English
+3. **Definition**: 知識や技能を学ぶこと
+4. **Word Type**: 名詞
+5. **Pronunciation**: /ˈstʌdi/, /スタディ/
+6. **Synonyms**: learn → 学習, research → 研究
+7. **Antonyms**: ignore → 無視
+8. **Examples**:
+   - Study hard → 一生懸命勉強
+"""
+
+# Japanese -> Chinese: Japanese left of each arrow, Chinese right of it.
+FIXTURE_JA_ZH = """## 勉強
+
+1. **Translation**: 学习
+2. **Source Language**: Japanese
+3. **Definition**: 学习知识或技能
+4. **Word Type**: 名词
+5. **Pronunciation**: べんきょう
+6. **Synonyms**: 学習 → 学习, 勉学 → 勤学
+7. **Antonyms**: 怠惰 → 懒惰
+8. **Examples**:
+   - 毎日日本語を勉強しています。 → 我每天都在学习日语。
+"""
+
+# Chinese -> Japanese: the mirror image.
+FIXTURE_ZH_JA = """## 学习
+
+1. **Translation**: 勉強
+2. **Source Language**: Chinese
+3. **Definition**: 知識や技能を身につけること
+4. **Word Type**: 名詞
+5. **Pronunciation**: xuéxí
+6. **Synonyms**: 学习 → 学習, 研究 → 研究
+8. **Examples**:
+   - 我们在学习中文。 → 私たちは中国語を勉強しています。
+"""
+
+# Japanese -> Japanese (TODO.md Q4): a monolingual entry, "with furigana as usual".
+FIXTURE_JA_JA = """## 勉強
+
+1. **Translation**: 学習
+2. **Source Language**: Japanese
+3. **Definition**: 知識を身につけること
+4. **Word Type**: 名詞
+5. **Pronunciation**: べんきょう
+6. **Synonyms**: 学習, 勉学
+8. **Examples**:
+   - 毎日勉強する → 毎日学ぶ
+"""
+
+
+def j3_runs(fixture, target, source=None, words=()):
+    return split_dictionary_text(_align_dictionary_text(fixture), target, list(words),
+                                 HIGHLIGHT_COLORS, source_lang=source)
+
+
+def annotated_bases(runs):
+    return [run.base for run in runs if run.ruby]
+
+
+class TestCallerSourceWins:
+    @HAS_PROVIDER
+    def test_a_stated_japanese_source_overrides_a_chinese_field_2(self):
+        runs = j3_runs(FIXTURE_A, "English", source="Japanese")
+        assert "勉強" in readings(runs_on_line(runs, "## 勉強"))
+        synonyms = readings(runs_on_line(runs, "**Synonyms**"))
+        assert "学習" in synonyms and "勉学" in synonyms
+        assert any("勉強" in base for base in annotated_bases(runs_on_line(runs, "勉強会")))
+
+    @HAS_PROVIDER
+    def test_without_a_stated_source_field_2_still_decides(self):
+        """Today's behaviour, kept: a Chinese field 2 leaves kanji-only text plain."""
+        runs = j3_runs(FIXTURE_A, "English")
+        assert not readings(runs_on_line(runs, "## 勉強"))
+        assert not readings(runs_on_line(runs, "**Synonyms**"))
+        assert not readings(runs_on_line(runs, "勉強会"))
+        assert readings(runs_on_line(runs, "毎日"))                # kana proves it anyway
+
+    @HAS_PROVIDER
+    def test_a_stated_source_covers_every_entry(self):
+        text = FIXTURE_A + "\n---\n\n" + FIXTURE_A.replace("## 勉強", "## 学習")
+        runs = j3_runs(text, "English", source="Japanese")
+        assert readings(runs_on_line(runs, "## 勉強")) and readings(runs_on_line(runs, "## 学習"))
+
+    @HAS_PROVIDER
+    def test_spellings_of_the_stated_source_are_normalized(self):
+        runs = j3_runs(FIXTURE_A, "English", source="ja")
+        assert "勉強" in readings(runs_on_line(runs, "## 勉強"))
+
+    def test_pronunciation_stays_bare_whatever_the_source(self):
+        for fixture, target, source in ((FIXTURE_A, "English", "Japanese"),
+                                        (FIXTURE_B, "Japanese", None),
+                                        (FIXTURE_JA_ZH, "Chinese Simplified", None),
+                                        (FIXTURE_ZH_JA, "Japanese", None),
+                                        (FIXTURE_JA_JA, "Japanese", "Japanese")):
+            runs = j3_runs(fixture, target, source)
+            assert not readings(runs_on_line(runs, "**Pronunciation**")), fixture[:12]
+
+    @pytest.mark.parametrize("fixture, target, source", [
+        (FIXTURE_A, "English", "Japanese"), (FIXTURE_A, "English", None),
+        (FIXTURE_B, "Japanese", None), (FIXTURE_JA_ZH, "Chinese Simplified", None),
+        (FIXTURE_ZH_JA, "Japanese", None), (FIXTURE_JA_JA, "Japanese", "Japanese"),
+    ], ids=["A-stated", "A-field2", "B", "ja-zh", "zh-ja", "ja-ja"])
+    def test_runs_still_reconstruct_the_text(self, fixture, target, source):
+        assert joined(j3_runs(fixture, target, source, ("勉強", "study"))) == \
+            _align_dictionary_text(fixture)
+
+
+class TestJapanesePairedWithANonChineseLanguage:
+    @HAS_PROVIDER
+    @pytest.mark.parametrize("source", [None, "English"])
+    def test_every_japanese_run_in_an_english_to_japanese_entry_is_read(self, source):
+        runs = j3_runs(FIXTURE_B, "Japanese", source)
+        synonyms = readings(runs_on_line(runs, "**Synonyms**"))
+        assert "学習" in synonyms and "研究" in synonyms
+        assert "無視" in readings(runs_on_line(runs, "**Antonyms**"))
+        example = annotated_bases(runs_on_line(runs, "Study hard"))
+        assert any("勉強" in base for base in example)
+
+    @HAS_PROVIDER
+    def test_word_type_is_a_target_language_field(self):
+        assert field_policy(4, "Word Type") == (True, True)
+        runs = j3_runs(FIXTURE_B, "Japanese")
+        assert "名詞" in readings(runs_on_line(runs, "**Word Type**"))
+
+    @HAS_PROVIDER
+    def test_a_monolingual_japanese_entry_is_read_throughout(self):
+        runs = j3_runs(FIXTURE_JA_JA, "Japanese", "Japanese")
+        for needle in ("## 勉強", "**Translation**", "**Definition**", "**Synonyms**", "毎日勉強"):
+            assert readings(runs_on_line(runs, needle)), needle
+
+    @HAS_PROVIDER
+    def test_the_new_readings_are_measured(self):
+        """overhead_px() sizes the window; it must count the readings J3 adds."""
+        runs = j3_runs(FIXTURE_B, "Japanese")
+        lines_j3_reads = ("**Synonyms**", "**Antonyms**", "Study hard")
+        before = []                                # the same runs, as F3 left them
+        current = []
+        for run in list(runs) + [DictRun('\n')]:
+            if run.base == '\n':
+                line = ''.join(r.base for r in current)
+                strip = any(needle in line for needle in lines_j3_reads)
+                before.extend(DictRun(r.base, None, r.color) if strip else r for r in current)
+                before.append(run)
+                current = []
+            else:
+                current.append(run)
+        before = before[:-1]
+        assert ''.join(r.base for r in before) == joined(runs)
+        width = 600
+        assert overhead_px(runs, width, base_font=DICT_RESULT_FONT) > \
+            overhead_px(before, width, base_font=DICT_RESULT_FONT)
+
+
+class TestJapaneseAndChineseInOneEntry:
+    @HAS_PROVIDER
+    def test_japanese_to_chinese_reads_only_the_japanese_side(self):
+        runs = j3_runs(FIXTURE_JA_ZH, "Chinese Simplified")
+        assert "勉強" in readings(runs_on_line(runs, "## 勉強"))
+        synonyms = readings(runs_on_line(runs, "**Synonyms**"))
+        assert "学習" in synonyms and "勉学" in synonyms
+        assert "学习" not in synonyms and "勤学" not in synonyms
+        antonyms = readings(runs_on_line(runs, "**Antonyms**"))
+        assert "怠惰" in antonyms and "懒惰" not in antonyms
+        example = runs_on_line(runs, "毎日日本語")
+        assert readings(example)
+        chinese_side = ''.join(r.base for r in example).split("→")[1]
+        assert not any(r.ruby for r in example if r.base in chinese_side and r.base.strip())
+        for field in ("**Translation**", "**Definition**", "**Word Type**"):
+            assert not readings(runs_on_line(runs, field)), field
+
+    @HAS_PROVIDER
+    def test_chinese_to_japanese_reads_only_the_japanese_side(self):
+        runs = j3_runs(FIXTURE_ZH_JA, "Japanese")
+        assert not readings(runs_on_line(runs, "## 学习"))
+        for field in ("**Translation**", "**Definition**", "**Word Type**"):
+            assert readings(runs_on_line(runs, field)), field
+        synonyms = runs_on_line(runs, "**Synonyms**")
+        assert "学習" in readings(synonyms)
+        assert annotated_bases(synonyms).count("研究") == 1      # right of the arrow only
+        example = runs_on_line(runs, "我们在学习")
+        assert readings(example)
+        assert not any(r.ruby for r in example if r.base in "我们在学习中文。")
+
+    def test_an_unknown_source_never_lends_japanese_to_the_left_side(self):
+        """Field 2 missing: the left side might be Chinese, so it gets no hint."""
+        text = FIXTURE_ZH_JA.replace("2. **Source Language**: Chinese\n", "")
+        runs = j3_runs(text, "Japanese")
+        synonyms = runs_on_line(runs, "**Synonyms**")
+        assert not any(r.ruby for r in synonyms if r.base.strip() == "学习")
+
+
+class TestLanguageParts:
+    def test_arrow_parts_cover_the_value_and_name_each_side(self):
+        value = "学習 → learning, 研究 → research"
+        parts = arrow_parts(value)
+        assert ''.join(value[s:e] for s, e, _ in parts) == value
+        sides = {value[s:e].strip(' ,→'): side for s, e, side in parts}
+        assert sides == {"学習": 'source', "learning": 'target', "研究": 'source',
+                         "research": 'target'}
+
+    @pytest.mark.parametrize("separator", ["、", "，", ";", "；", ","])
+    def test_pairs_split_at_the_last_separator(self, separator):
+        value = f"学習 → 学习{separator}勉学 → 勤学"
+        sides = {value[s:e].strip(' ,、，;；→'): side for s, e, side in arrow_parts(value)}
+        assert sides == {"学習": 'source', "学习": 'target', "勉学": 'source', "勤学": 'target'}
+
+    def test_a_target_with_commas_keeps_them_when_another_pair_follows(self):
+        value = "勉強 → study, learning, 学習 → learning"
+        assert [(value[s:e], side) for s, e, side in arrow_parts(value)] == [
+            ("勉強 →", 'source'), (" study, learning", 'target'), (", 学習 →", 'source'),
+            (" learning", 'target')]
+
+    def test_a_target_with_commas_stays_whole_when_it_is_the_last(self):
+        value = "勉強 → study, learning"
+        assert [(value[s:e], side) for s, e, side in arrow_parts(value)] == [
+            ("勉強 →", 'source'), (" study, learning", 'target')]
+
+    def test_no_arrow_no_parts(self):
+        assert arrow_parts("学習, 勉学") == []
+
+    @pytest.mark.parametrize("value, expected", [
+        ("Japanese", "Japanese"), ("Japanese (日本語)", "Japanese"), ("日本語", "Japanese"),
+        ("Chinese", "Chinese (Simplified)"), ("Chinese (Traditional)", "Chinese (Traditional)"),
+        ("中文", "Chinese (Simplified)"), ("繁體中文", "Chinese (Traditional)"),
+        ("English", "English"), ("Unknown", None), ("", None),
+    ])
+    def test_declared_source_language(self, value, expected):
+        assert declared_source_language([f"2. **Source Language**: {value}"]) == expected
+
+    @pytest.mark.parametrize("source, target, expected", [
+        ("Japanese", "English", ("Japanese", "Japanese")),
+        ("English", "Japanese", ("Japanese", "Japanese")),
+        ("Japanese", "Chinese (Simplified)", ("Japanese", None)),
+        ("Chinese (Simplified)", "Japanese", (None, "Japanese")),
+        (None, "Japanese", (None, "Japanese")),
+        ("English", "Vietnamese", (None, None)),
+    ])
+    def test_side_hints(self, source, target, expected):
+        assert side_hints(source, target) == expected
+
+
+class TestWindowNamesItsLanguages:
+    def test_the_title_names_the_stated_source(self, show_result):
+        window, _box = show_result(FIXTURE_A, "English", source_lang="Japanese")
+        assert window.title() == "Dictionary - Japanese → English"
+
+    def test_without_a_source_the_title_is_unchanged(self, show_result):
+        window, _box = show_result(FIXTURE_A, "English")
+        assert window.title() == "Dictionary - English"
+
+    @HAS_PROVIDER
+    def test_the_stated_source_reaches_the_window_and_nothing_is_clipped(self, show_result,
+                                                                         tk_root):
+        _window, box = show_result(FIXTURE_A, "English", source_lang="Japanese")
+        # 学習 and 勉学 sit only on the synonyms line, which has no kana: nothing
+        # but the stated source can give them a reading.
+        assert "学習" in ruby_bases(box) and "勉学" in ruby_bases(box)
+        assert box.get_plain() == _align_dictionary_text(FIXTURE_A)
+        assert TestWindowFitsItsContent._band(box, tk_root) >= 0

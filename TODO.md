@@ -2,7 +2,8 @@
 
 > **Status: 🔨 IN PROGRESS** on branch `feature/japanese-language-identity` (from `main` after
 > the merge of `h1-health-review`, `f28a276`). **J0 ✅ and J1 ✅ done 2026-10-15** (§6).
-> **J2 ✅ done 2026-10-15** (`src/core/lang_id.py`, Decision 24).
+> **J2 ✅ and J3 ✅ done 2026-10-15** (`src/core/lang_id.py`, Decision 24; the dictionary
+> result window reads the stated source and both languages of an entry).
 > **D13-D15 ✅ done 2026-10-15** at the user's request: one Dictionary mode serves both buttons
 > (Decision 23), so every later phase changes it once; a failed lookup shows its message; no
 > `grab_set()` in its dialogs. Closing D15 surfaced D16 (`UpdateFailedDialog`, DEFERRED.md).
@@ -749,7 +750,17 @@ which Q1's answer removed. The sentence-punctuation rule likewise has no job lef
 
 **Size:** ~150-200 lines + tests.
 
-### J3 - Dictionary result: authoritative languages, mixed lines  *(DoD2)*
+### J3 - Dictionary result: authoritative languages, mixed lines  *(DoD2)*  ✅ Done (2026-10-15)
+
+> **Result:** as planned, with one simplification - there is one Dictionary flow now (D13), so
+> the source travels `DictionaryPopup._do_lookup` -> `_show_result` -> `show_dictionary_result(...,
+> source_lang=)` once. `side_hints()` gives each entry a (source, target) hint pair; `arrow_parts()`
+> cuts `a → x, b → y` lines; `declared_source_language()` reads field 2 for any language (Japanese
+> and Chinese by substring). Word Type joined the target fields. Fixture A (field 2 "Chinese",
+> source stated Japanese) → 勉強, 学習, 勉学, 勉強会 read; with nothing stated → today's output.
+> Fixture B (English → Japanese) → 学習, 研究, 無視, 一生懸命勉強, 名詞 read. Japanese → Chinese and
+> Chinese → Japanese entries read only their Japanese side. An unknown source never shares the
+> Japanese hint. Tests 903 → 952; 12 mutations killed.
 
 **Files (4):** `src/ui/dictionary_render.py`, `src/ui/quick_translate.py`
 (`show_dictionary_result` + title), `src/ui/dictionary_popup.py` (`_show_result`), `src/app.py`

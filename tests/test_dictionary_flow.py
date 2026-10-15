@@ -407,8 +407,21 @@ class TestLookup:
                               context_text=JP_TEXT)
         _pump(tk_root, 100)
         dictionary.quick_translate_manager.show_dictionary_result.assert_called_once_with(
-            "## [手紙]", "English", None, ["手紙"])
+            "## [手紙]", "English", None, ["手紙"], source_lang="Japanese")
         assert callback_errors == []
+
+    def test_an_unstated_source_reaches_the_result_window_as_none(self, tk_root, dictionary):
+        dictionary._do_lookup(["勉強"], "English")
+        _pump(tk_root, 100)
+        result = dictionary.quick_translate_manager.show_dictionary_result.call_args
+        assert result.kwargs['source_lang'] is None
+
+    def test_the_word_windows_source_reaches_the_result_window(self, tk_root, dictionary):
+        dictionary._open_with_language(JP_TEXT, "Japanese")
+        _FakeWordFrame.created[-1].kwargs['on_lookup'](["手紙"])
+        _pump(tk_root, 100)
+        result = dictionary.quick_translate_manager.show_dictionary_result.call_args
+        assert result.kwargs['source_lang'] == "Japanese"
 
     def test_a_failed_lookup_shows_its_message(self, tk_root, dictionary, callback_errors):
         dictionary.translation_service.dictionary_lookup.side_effect = RuntimeError("quota")

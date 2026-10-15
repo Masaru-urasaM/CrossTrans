@@ -25,12 +25,27 @@ because a plain run can be split anywhere, and a ruby pair is coloured whole.
 `split_dictionary_text()` returns runs covering the text exactly once, so
 `''.join(run.base for run in runs)` is the input string - the same "annotation
 never alters text" guarantee the engine gives (I1).
+
+**Which language each part is in** (Phase J3). An entry holds two languages:
+the source (the headword's) and the target (the explanation's). The source is
+the caller's when the lookup stated one - the model's field 2 may disagree,
+and a model that took 勉強 for Chinese would otherwise switch every reading in
+the entry off - and each entry's own field 2 when it did not. Then:
+
+* Japanese paired with a language that is not Chinese: every kanji run in the
+  entry is Japanese (`lang_id.ruby_hint`), so `learn → 学習` and
+  `Study hard → 一生懸命勉強` are annotated in an English -> Japanese entry.
+* Otherwise each side takes its own language, and a `source → target` line is
+  cut at its arrows (`arrow_parts`): in a Japanese -> Chinese entry 学習 left of
+  the arrow is read as Japanese and 学习 right of it is left alone.
 """
 import re
 from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 from src.core import furigana
 from src.core.furigana import RubySegment
+from src.core.lang_id import (CHINESE_SIMPLIFIED, CHINESE_TRADITIONAL, JAPANESE,
+                              normalize_language, ruby_hint)
 from src.ui.ruby_text import MAX_ANNOTATE_CHARS, measure_px, tk_layout_model
 
 # `1. **Translation**:` plus the alignment padding that follows it. The padding
@@ -42,9 +57,10 @@ ENTRY_PREFIX = '## '
 
 # Fields the prompt requires to be written in the target language, so the target
 # language is an authoritative hint there. It is what lets a kanji-only
-# translation such as 犬 get a reading at all.
-TARGET_LANGUAGE_FIELDS = (1, 3)
-TARGET_LANGUAGE_LABELS = ('translation', 'definition')
+# translation such as 犬 get a reading at all. Word Type joined them when the
+# prompt started asking for it in the target language (J1).
+TARGET_LANGUAGE_FIELDS = (1, 3, 4)
+TARGET_LANGUAGE_LABELS = ('translation', 'definition', 'word type')
 
 # Field holding a phonetic transcription; see the module docstring.
 PRONUNCIATION_FIELD = 5
@@ -54,7 +70,15 @@ PRONUNCIATION_LABELS = ('pronunciation',)
 # the source-language fields annotate kanji-only text: without a hint, kanji
 # with no kana is indistinguishable from Chinese and is left plain.
 SOURCE_LANGUAGE_LABELS = ('source language',)
+# Field 2 is matched by substring: models decorate it ("Japanese (日本語)").
 JAPANESE_MARKERS = ('japanese', '日本語', 'nihongo')
+CHINESE_MARKERS = ('chinese', '中文', '汉语', '漢語', '中国語', 'mandarin')
+TRADITIONAL_MARKERS = ('traditional', '繁')
+
+# `学習 → learning`: a source-language part, then its target-language rendering.
+ARROW = '→'
+# What separates one `a → x` pair from the next inside a list.
+PAIR_SEPARATOR_RE = re.compile('[,，、;；]')
 
 
 class DictRun(NamedTuple):
@@ -92,12 +116,12 @@ def field_policy(number: int, label: str) -> Tuple[bool, bool]:
     return True, False
 
 
-def source_language_hint(lines: Sequence[str]) -> Optional[str]:
-    """Read the entry's declared source language, if it is one we can annotate.
+def declared_source_language(lines: Sequence[str]) -> Optional[str]:
+    """The language an entry's **Source Language** field names, normalized.
 
-    Returns "Japanese" when the **Source Language** field says so, else None.
-    Only Japanese matters - it is the only language the engine annotates - and
-    an unrecognized value degrades to no hint, i.e. today's behaviour.
+    Japanese and Chinese are found by substring; any other value goes through
+    `lang_id.normalize_language()`. None when there is no such field, or it
+    names no language.
     """
     for line in lines:
         match = FIELD_RE.match(line)
@@ -106,11 +130,79 @@ def source_language_hint(lines: Sequence[str]) -> Optional[str]:
         if not any(w in match.group(2).strip().lower()
                    for w in SOURCE_LANGUAGE_LABELS):
             continue
-        value = line[match.end():].strip().lower()
-        if any(marker in value for marker in JAPANESE_MARKERS):
-            return 'Japanese'
-        return None
+        value = line[match.end():].strip()
+        folded = value.lower()
+        if any(marker in folded for marker in JAPANESE_MARKERS):
+            return JAPANESE
+        if any(marker in folded for marker in CHINESE_MARKERS):
+            if any(marker in folded for marker in TRADITIONAL_MARKERS):
+                return CHINESE_TRADITIONAL
+            return CHINESE_SIMPLIFIED
+        return normalize_language(value)
     return None
+
+
+def source_language_hint(lines: Sequence[str]) -> Optional[str]:
+    """Read the entry's declared source language, if it is one we can annotate.
+
+    Returns "Japanese" when the **Source Language** field says so, else None.
+    Only Japanese matters - it is the only language the engine annotates - and
+    an unrecognized value degrades to no hint, i.e. today's behaviour.
+    """
+    return JAPANESE if declared_source_language(lines) == JAPANESE else None
+
+
+def side_hints(source: Optional[str],
+               target: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    """(hint for the source-language parts, hint for the target-language parts).
+
+    Japanese paired with a language that is not Chinese makes every kanji run
+    in the entry Japanese, so both sides take the Japanese hint. Otherwise each
+    side takes its own language - Japanese, or no hint. An unknown source never
+    joins the shared rule: it might be Chinese.
+
+    Args:
+        source: The entry's source language, normalized, or None.
+        target: The target language, normalized, or None.
+    """
+    if source and ruby_hint(source, target) == JAPANESE:
+        return JAPANESE, JAPANESE
+    return (JAPANESE if source == JAPANESE else None,
+            JAPANESE if target == JAPANESE else None)
+
+
+def arrow_parts(value: str) -> List[Tuple[int, int, str]]:
+    """Cut a `source → target` value into (start, end, side) parts.
+
+    Left of an arrow is 'source', right of it 'target'. In a list of pairs
+    (`学習 → 学习, 勉学 → 勤学`) the text between two arrows holds one pair's
+    target and the next pair's source, cut at its last separator. The parts
+    cover `value` exactly; each arrow travels with the part before it. Returns
+    [] when there is no arrow.
+    """
+    pieces = value.split(ARROW)
+    if len(pieces) < 2:
+        return []
+    parts: List[Tuple[int, int, str]] = []
+    position = 0
+    last = len(pieces) - 1
+    for i, piece in enumerate(pieces):
+        start = position
+        end = start + len(piece) + (len(ARROW) if i < last else 0)
+        if i == 0:
+            parts.append((start, end, 'source'))
+        elif i == last:
+            parts.append((start, end, 'target'))
+        else:
+            separators = [m.start() for m in PAIR_SEPARATOR_RE.finditer(piece)]
+            if separators:
+                cut = start + separators[-1]
+                parts.append((start, cut, 'target'))
+                parts.append((cut, end, 'source'))
+            else:
+                parts.append((start, end, 'target'))
+        position = end
+    return parts
 
 
 def _line_policy(line: str) -> Tuple[int, bool, bool]:
@@ -218,30 +310,35 @@ def _annotate(text: str, hint: Optional[str],
     return furigana.annotate(text, hint)
 
 
-def _entry_hints(lines: Sequence[str]) -> Dict[int, Optional[str]]:
-    """Per-line source-language hint, resolved per `## [Word]` entry.
+def _entry_sources(lines: Sequence[str],
+                   stated: Optional[str]) -> Dict[int, Optional[str]]:
+    """Per-line source language.
 
-    A multi-word lookup returns several entries and each declares its own source
-    language, so the hint cannot be global.
+    The caller's for every line when it stated one; otherwise each `## [Word]`
+    entry's own field 2 - a multi-word lookup returns several entries, and each
+    declares its own language, so the answer cannot be global.
     """
-    hints: Dict[int, Optional[str]] = {}
+    if stated:
+        return {i: stated for i in range(len(lines))}
+    sources: Dict[int, Optional[str]] = {}
     start = 0
     for index, line in enumerate(lines):
         if index and line.startswith(ENTRY_PREFIX):
-            hint = source_language_hint(lines[start:index])
+            language = declared_source_language(lines[start:index])
             for i in range(start, index):
-                hints[i] = hint
+                sources[i] = language
             start = index
-    hint = source_language_hint(lines[start:])
+    language = declared_source_language(lines[start:])
     for i in range(start, len(lines)):
-        hints[i] = hint
-    return hints
+        sources[i] = language
+    return sources
 
 
 def split_dictionary_text(display_text: str, target_lang: Optional[str] = None,
                           looked_up_words: Optional[Sequence[str]] = None,
                           colors: Sequence[str] = (),
-                          annotate: bool = True) -> Tuple[DictRun, ...]:
+                          annotate: bool = True,
+                          source_lang: Optional[str] = None) -> Tuple[DictRun, ...]:
     """Turn an aligned dictionary result into coloured, annotated runs.
 
     Args:
@@ -253,13 +350,16 @@ def split_dictionary_text(display_text: str, target_lang: Optional[str] = None,
         colors: Palette indexed by word position.
         annotate: False disables furigana entirely (Settings toggle), leaving
             the highlighting intact.
+        source_lang: The source language the lookup stated, if any. It wins
+            over each entry's field 2; None falls back to field 2.
 
     Returns:
         Runs whose `base` concatenates back to `display_text` exactly.
     """
     words = [w for w in (looked_up_words or []) if w]
     lines = display_text.split('\n')
-    hints = _entry_hints(lines) if annotate else {}
+    target = normalize_language(target_lang)
+    sources = _entry_sources(lines, normalize_language(source_lang)) if annotate else {}
     runs: List[DictRun] = []
 
     for index, line in enumerate(lines):
@@ -274,9 +374,17 @@ def split_dictionary_text(display_text: str, target_lang: Optional[str] = None,
         value = line[label_len:]
         if not value:
             continue
-        hint = target_lang if use_target else hints.get(index)
-        segments = _annotate(value, hint, annotate and annotate_value)
-        runs.extend(_paint(segments, ranges, label_len))
+        source_hint, target_hint = side_hints(sources.get(index), target)
+        if use_target:
+            parts = [(0, len(value), target_hint)]
+        elif source_hint != target_hint and ARROW in value:
+            parts = [(start, end, source_hint if side == 'source' else target_hint)
+                     for start, end, side in arrow_parts(value)]
+        else:
+            parts = [(0, len(value), source_hint)]
+        for start, end, hint in parts:
+            segments = _annotate(value[start:end], hint, annotate and annotate_value)
+            runs.extend(_paint(segments, ranges, label_len + start))
 
     return tuple(runs)
 

@@ -4,6 +4,41 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase J3 — The dictionary result reads the language it was asked in (2026-10-15)
+
+The result window took its reading hint from one place only: the model's own **Source Language**
+field. A model that decided 勉強 was Chinese therefore switched off every reading in the entry -
+headword, synonyms, examples - even when the lookup had told it the word was Japanese (TODO.md
+F2). And an English -> Japanese entry left `learn → 学習` plain, because each line had one hint:
+the source language, English (F3).
+
+**Changed**
+- **The stated source wins.** `show_dictionary_result(..., source_lang=)` receives the language
+  the prompt was told (J1's `dictionary_source_language()`); each entry's field 2 decides only
+  when nothing was stated - today's behaviour, kept for that case. The title names the pair:
+  `Dictionary - Japanese → English`.
+- **Both languages of an entry are read** (`dictionary_render.side_hints()`). Japanese paired
+  with a language that is not Chinese makes every kanji run Japanese - the prompt keeps an entry
+  to its two languages - so synonyms, antonyms and examples are read on both sides of the arrow.
+  A Japanese/Chinese pair is cut at its arrows (`arrow_parts()`): the Japanese side is read, the
+  Chinese side is left alone. In a Japanese -> Chinese entry the Chinese half of a Japanese
+  example line used to get Japanese readings, because the whole line carried kana.
+- Field 2 is read for any language (`declared_source_language()`), not only Japanese.
+- **Word Type is a target-language field** (fields 1, 3, 4), as the J1 prompt asks for it.
+
+**Measured on the fixtures** (`tests/test_dictionary_ruby.py`): Fixture A with the source stated
+→ 勉強[べんきょう], 学習[がくしゅう], 勉学[べんがく], 勉強会[べんきょうかい]; Fixture B → 学習, 研究, 無視,
+一生懸命, 勉強, 名詞 all read; a Japanese -> Chinese entry → 学習, 勉学, 怠惰 read and 学习, 勤学,
+懒惰 plain; the mirror image likewise. `overhead_px()` already measured whatever it was given, so
+the window grows with the new readings unchanged - a test asserts it.
+
+**Tests**: 903 -> 952 (+46 in `tests/test_dictionary_ruby.py`, +3 in `test_dictionary_flow.py`;
+one flow assertion updated on purpose - the result window now also receives `source_lang`), 0
+failed, 0 skipped. Twelve mutations - the shared Japanese rule removed or extended to an unknown
+source, the stated source ignored, no arrow cut, the first separator instead of the last, the
+sides swapped, Word Type back to a source field, Traditional unrecognised, the title or the
+window or the lookup dropping the source - each made the suite fail and was restored.
+
 ### Phase J2 — Language identity from evidence: `src/core/lang_id.py` (2026-10-15)
 
 The core the remaining language-identity phases build on. **No behaviour changes yet** - nothing
