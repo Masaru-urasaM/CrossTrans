@@ -168,7 +168,8 @@ class TranslatorApp:
             on_open_dictionary=self._on_quick_translate_open_dictionary,
             on_open_settings_hotkeys_tab=self._show_settings_hotkeys_tab,
             on_re_translate=self._on_quick_translate_retranslate,
-            on_custom_prompt_send=self._on_quick_translate_custom_prompt_send
+            on_custom_prompt_send=self._on_quick_translate_custom_prompt_send,
+            on_choose_source=self._on_quick_translate_choose_source
         )
 
         # Screenshot handler
@@ -334,7 +335,8 @@ class TranslatorApp:
 
     def show_quick_translate(self, original: str, translated: str, target_lang: str,
                              trial_info: dict = None, furigana_text: str = None,
-                             is_grammar: bool = False, model_info: str = None):
+                             is_grammar: bool = False, model_info: str = None,
+                             source_lang: str = None):
         """Show compact popup near mouse cursor with translation result.
 
         Args:
@@ -348,9 +350,14 @@ class TranslatorApp:
                 Defaults to whoever served the result that just arrived, which is what
                 every caller wants - the screenshot handler and the translation queue both
                 reach this method after the service has recorded it.
+            source_lang: The language settled for `original`. Defaults to the verdict
+                the service holds for exactly that text (J4) - read here, like the
+                credit, rather than carried through the queue.
         """
         if model_info is None:
             model_info = self.translation_service.last_attribution
+        if source_lang is None:
+            source_lang = self.translation_service.source_verdict(original)
 
         self.current_original = original
         self.current_translated = translated
@@ -363,7 +370,7 @@ class TranslatorApp:
 
         self.quick_translate_manager.show(translated, target_lang, trial_info, original,
                                           furigana_text=furigana_text, is_grammar=is_grammar,
-                                          model_info=model_info)
+                                          model_info=model_info, source_lang=source_lang)
 
     def close_quick_translate(self):
         """Close the quick translate popup."""
@@ -395,6 +402,26 @@ class TranslatorApp:
 
         def worker():
             self.translation_service.redo_translation(text, target_lang)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_quick_translate_choose_source(self, language: str):
+        """The popup's "Kanji-only text - read it as" answer: translate again, stated.
+
+        The model could not place the text, so its translation may carry the
+        other language's sense; the user's answer goes to the model and becomes
+        the text's verdict (J6, Decision 27).
+        """
+        text = self.current_original
+        target_lang = self.current_target_lang
+        if not text:
+            return
+        logging.info(f"[LangID] user chose source={language} chars={len(text)}")
+        self.quick_translate_manager.show_loading(target_lang)
+
+        def worker():
+            self.translation_service.redo_translation(text, target_lang,
+                                                      source_language=language)
 
         threading.Thread(target=worker, daemon=True).start()
 

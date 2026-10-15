@@ -2,7 +2,7 @@
 
 > **Status: 🔨 IN PROGRESS** on branch `feature/japanese-language-identity` (from `main` after
 > the merge of `h1-health-review`, `f28a276`). **J0 ✅ and J1 ✅ done 2026-10-15** (§6).
-> **J2 ✅, J3 ✅, J4 ✅ and J5 ✅ done 2026-10-15** (`src/core/lang_id.py`, Decision 24; the dictionary
+> **J2 ✅, J3 ✅, J4 ✅, J5 ✅ and J6 ✅ done 2026-10-15** (`src/core/lang_id.py`, Decision 24; the dictionary
 > result window reads the stated source and both languages of an entry; translation prompts
 > state the source or ask the model for a `[[SOURCE: ...]]` line, Decision 25).
 > **D13-D15 ✅ done 2026-10-15** at the user's request: one Dictionary mode serves both buttons
@@ -867,7 +867,14 @@ the existing `test_furigana_core.py` assertions unchanged (`:37-54`).
 directly as Japanese (the translation's verdict) and the 勉強 chip carries べんきょう. Select
 `私は学生です。` → **Dictionary** → no "Cannot detect language" dialog.
 
-### J6 - Quick-translate popup surfaces
+### J6 - Quick-translate popup surfaces  ✅ Done (2026-10-15)
+
+> **Result:** source block hint = evidence, else the verdict for that text; translation box =
+> `output_hint(source, target)`; grammar fix = the original's language; the height budget uses
+> the same hint. **Step 3 decided** (Decision 27): the "Kanji-only text - read it as: [Japanese]
+> [Chinese]" row re-translates with the stated source - J4 measured unplaced translations with
+> the other language's sense, so readings alone would mislead. `SOURCE_CHOOSER_PX = 36`
+> (measured). `do_translation()` left alone (§10). Tests 1071 → 1118; 15 mutations killed.
 
 **Files (2):** `src/core/translation.py` (`do_translate_or_fix` `:619-624`, `redo_translation`
 `:675-679`), `src/ui/quick_translate.py` (`_ruby_hint`, the height budget at `:533-537`, the

@@ -102,6 +102,16 @@ def source_clause(text: Optional[str]) -> SourceClause:
         None, True)
 
 
+def stated_clause(language: str) -> SourceClause:
+    """The clause for a source language the user settled (the popup's chooser, J6).
+
+    Stated, never asked: the user's answer is the end of the question.
+    """
+    stated = normalize_language(language)
+    name = "Chinese" if stated in CHINESE else stated
+    return SourceClause(f"\n\nSOURCE LANGUAGE: the text above is {name}.", stated, False)
+
+
 def _verdict(value: str) -> Optional[str]:
     """A marker's value as a language: Japanese, a Chinese variant, or None."""
     language = normalize_language(value)

@@ -4,6 +4,45 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase J6 — The popup reads kanji-only Japanese, and asks when nobody knows (2026-10-15)
+
+A kanji-only selection - 勉強, 東京大学 - never got the popup's source block: without kana there
+was no hint, and the block needs one. A grammar fix of kanji-only text stayed plain, and Japanese
+quoted inside an English translation (`The word 東京 means Tokyo.`) too.
+
+**Changed**
+- **The source block** takes its hint from the text's evidence, else the verdict the model gave
+  for exactly that text (J4): 勉強 called Japanese gets 勉強[べんきょう] above the translation;
+  called Chinese or Unknown, no block. (`TranslationService._source_hint()`, used by
+  `do_translate_or_fix()` and `redo_translation()`.)
+- **The translation box** uses `lang_id.output_hint(source, target)`: the target as before, plus
+  Japanese runs in a translation *of* Japanese into a non-Chinese language. A **grammar fix**
+  keeps its source's language: read when the original's characters or verdict say Japanese.
+  The height budget and the box use the same hint, so nothing clips.
+- `TranslatorApp.show_quick_translate(..., source_lang=)` defaults to
+  `translation_service.source_verdict(original)` - read on arrival, like the model credit, not
+  carried through the queue (Decision 11's pattern).
+
+**Added**
+- **"Kanji-only text - read it as: [Japanese] [Chinese]"** - a row above the popup's buttons,
+  shown when a translation of kanji that prove nothing came back without a verdict (Unknown, a
+  missing marker, or a cache entry from before J4). Answering **re-translates with that source
+  stated** (`redo_translation(text, target, source_language=)`) and records it as the text's
+  verdict, so the Dictionary (J5) and History see it too. Decision 27: J4 measured that an
+  unplaced translation can carry the other language's sense (先生 → "Mr."), so adding readings
+  alone would put べんきょう-style readings above a Chinese meaning. One more request, only when the
+  user asks for it. A row, not a dialog: nothing is blocked while the question stands.
+  `SOURCE_CHOOSER_PX = 36` (measured: 28 px row + 8 px gap) joins the height budget only then.
+- `source_marker.stated_clause()` and `translate_text(..., source_language=)`.
+- `tests/test_popup_source_language.py` (47 tests).
+
+**Tests**: 1071 -> 1118 (+47), 0 failed, 0 skipped. Fifteen mutations - the verdict ignored by
+the source hint, either block built without a hint, the user's source ignored, the stated clause
+naming the variant, the grammar fix or the translation box back to their old hints, the chooser
+ignoring a verdict, never built, out of the height budget or with its answers swapped, the app
+forgetting the verdict or re-translating without the answer, custom-prompt cancel and the
+replace preview dropping the verdict - each made the suite fail and was restored.
+
 ### Phase J5 — The Dictionary opens in the right language; one rule for Japanese vs Chinese (2026-10-15)
 
 Three detectors gave three answers (TODO.md F5). `nlp_manager.detect_language()` called every

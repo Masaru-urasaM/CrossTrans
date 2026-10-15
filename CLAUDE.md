@@ -528,6 +528,12 @@ read 汽車, 工作, 床 as Chinese (3/10 each).
   only from evidence (kana, or a glyph only one of them writes) and "Unknown" otherwise. A Latin
   detection is the first installed European pack - a guess - and is not stated: the prompt tells
   the model to decide per headword and name its decision in field 2.
+- **The popup's "Kanji-only text - read it as: [Japanese] [Chinese]" row** (J6, Decision 27):
+  shown above the buttons when a translation of kanji that prove nothing came back without a
+  verdict (`QuickTranslateManager._asks_source`); `SOURCE_CHOOSER_PX` joins the height budget only
+  then. An answer re-translates with that source stated (`redo_translation(...,
+  source_language=)`) and becomes the text's verdict - readings alone would sit above a meaning
+  the model may have taken from the other language.
 - **Kanji that prove nothing** (`detect_language()` -> `("Unknown", AMBIGUOUS_CJK_CONFIDENCE)`):
   the word window opens in the language a model reported for that exact text
   (`TranslationService.source_verdict()` - the popup's text always has one, the main window's
@@ -795,10 +801,10 @@ display rather than receiving pre-annotated strings through the queue.
 ### Which surfaces annotate, and with what hint
 | Surface | Hint used | Notes |
 |---------|-----------|-------|
-| Popup source block | none (pipeline notation) | kanji-only source stays plain: it cannot be told from Chinese |
-| Popup translation box | `target_lang` | authoritative, so kanji-only output *does* annotate |
-| Popup, grammar fix | none | "Grammar" is a label, not a language; kana-bearing text still qualifies |
-| Replace preview | `target_lang` | translated half only; the struck-through original stays plain |
+| Popup source block | the text's evidence, else the model's verdict for it (`TranslationService._source_hint`) | kanji-only source is read when the model called it Japanese (J6); otherwise plain |
+| Popup translation box | `lang_id.output_hint(source, target_lang)` | the target is authoritative; Japanese quoted in an English translation of Japanese is read too (J6) |
+| Popup, grammar fix | the original's evidence or verdict | "Grammar" is a label, not a language; a fix keeps the source's language (J6) |
+| Replace preview | as the translation box | translated half only; the struck-through original stays plain |
 | Custom Prompt edit mode | — | box is flattened to plain first (I3) |
 | Main window output (`trans_text`) | `target_lang` / `selected_language` | read-only, so I3 holds by construction |
 | Expanded view | `target_language` arg | read-only since F3; a disabled `tk.Text` still selects and copies |

@@ -5,6 +5,33 @@ approaches. Newest first.
 
 ---
 
+### Decision 27 - The popup's answer to "Japanese or Chinese?" re-translates; it does not just add readings
+
+**Date**: 2026-10-15
+**Status**: RESOLVED (TODO.md J6 left the choice to this phase; decided on J4's measurements)
+
+**Problem**: When a hotkey translation of kanji-only text comes back without a source language
+(the model said Unknown, or wrote no marker), the popup offers "Japanese / Chinese". What should
+an answer do?
+
+**Options considered**:
+1. **Re-translate with the stated source** - Pros: the meaning follows the answer; the readings
+   and the translation agree. Cons: one more request (only when the user answers).
+2. **Only add the readings** - Pros: free, instant. Cons: J4 measured that a translation the
+   model could not place may carry the other language's sense (Groq: 先生 → "Mr.", 床 → "bed/floor";
+   Gemini: 結構 → "Structure") - readings for せんせい above "Mr." would look right and be wrong.
+
+**Resolution**: **Option 1.** The answer is stated in the prompt (`stated_clause`) and stored as
+the text's verdict (`source_verdict` in memory and History), so the Dictionary and later lookups
+of the same text need not ask again. The question is a row inside the popup, not a dialog:
+the translation stays readable and nothing is blocked while it stands.
+
+**References**: `QuickTranslateManager._asks_source()` / `_build_source_chooser()`,
+`TranslatorApp._on_quick_translate_choose_source()`, `TranslationService.redo_translation()`,
+CHANGELOG "Phase J6", Decisions 22 and 25.
+
+---
+
 ### Decision 26 - Ambiguous kanji in the Dictionary: reuse a verdict, else ask - no identification call
 
 **Date**: 2026-10-15

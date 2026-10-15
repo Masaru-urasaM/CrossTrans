@@ -19,8 +19,10 @@ except ImportError:
     from tkinter import ttk
     HAS_TTKBOOTSTRAP = False
 
+from src.core import lang_id
 from src.core.furigana import RubySegment
 from src.core.nlp_manager import nlp_manager
+from src.core.source_marker import source_clause
 from src.ui.dictionary_render import overhead_px, split_dictionary_text
 from src.ui.ruby_text import (RubyText, estimate_notation_px,
                               estimate_ruby_overhead_px, insert_output)
@@ -51,6 +53,12 @@ def is_error_text(translated: str) -> str:
     return bool(translated) and (translated.startswith("Error:")
                                  or translated.startswith("No text"))
 
+
+# The "Kanji-only text - read it as: [Japanese] [Chinese]" row (J6), shown when a
+# translation of kanji-only text came back without a source language. Added to the
+# popup's height budget only when the row is shown, like ATTRIBUTION_PX.
+SOURCE_CHOOSER_FONT = ('Segoe UI', 9)
+SOURCE_CHOOSER_PX = 36
 
 # Dictionary result window font. Monospace is load-bearing: _align_dictionary_text
 # pads the labels with spaces so every value starts at the same column.
@@ -222,6 +230,7 @@ class QuickTranslateManager:
         self.popup_attribution: Optional[ttk.Label] = None  # "Translated with ..." note
         self.popup_copy_btn: Optional[ttk.Button] = None
         self.popup_dict_btn: Optional[ttk.Button] = None
+        self.popup_source_chooser: Optional[ttk.Frame] = None  # Japanese / Chinese row
 
         # Mouse position captured when hotkey was pressed
         self._last_mouse_x = 0
@@ -242,6 +251,7 @@ class QuickTranslateManager:
         self._current_target_lang = ""
         self._current_trial_info = None  # Store trial info for title bar
         self._current_furigana = None  # Store furigana for restoring after custom-prompt cancel
+        self._current_source_lang = None  # Verdict for the original text (Decision 22)
         self._main_frame = None  # Reference to main frame for dictionary mode
         self._dict_popup_frame = None  # Reference to dict popup's WordButtonFrame for animation
 
@@ -261,6 +271,7 @@ class QuickTranslateManager:
         self._on_open_translator: Optional[Callable[[], None]] = None
         self._on_open_settings: Optional[Callable[[], None]] = None
         self._on_open_dictionary: Optional[Callable[[str, str, Optional[tk.Misc]], None]] = None
+        self._on_choose_source: Optional[Callable[[str], None]] = None
         self.popup_replace_btn: Optional[tk.Button] = None
         self.popup_retranslate_btn: Optional[tk.Button] = None
         self.popup_custom_prompt_btn: Optional[tk.Button] = None
@@ -276,7 +287,8 @@ class QuickTranslateManager:
                             on_open_dictionary: Optional[Callable[[str, str, Optional[tk.Misc]], None]] = None,
                             on_open_settings_hotkeys_tab: Optional[Callable[[], None]] = None,
                             on_re_translate: Optional[Callable[[], None]] = None,
-                            on_custom_prompt_send: Optional[Callable[[str], None]] = None):
+                            on_custom_prompt_send: Optional[Callable[[str], None]] = None,
+                            on_choose_source: Optional[Callable[[str], None]] = None):
         """Configure callback functions for quick translate actions.
 
         Args:
@@ -290,6 +302,8 @@ class QuickTranslateManager:
             on_open_settings_hotkeys_tab: Called to open Settings directly to Hotkeys tab
             on_re_translate: Called when user clicks Re-translate button (force fresh API call)
             on_custom_prompt_send: Called with the edit-box content when user clicks Send in custom-prompt mode
+            on_choose_source: Called with "Japanese" or "Chinese (Simplified)" when the user
+                answers the kanji-only chooser - re-translate with that source (J6)
         """
         self._on_copy = on_copy
         self._on_copy_and_replace = on_copy_and_replace
@@ -299,6 +313,7 @@ class QuickTranslateManager:
         self._on_open_settings_hotkeys_tab = on_open_settings_hotkeys_tab
         self._on_re_translate = on_re_translate
         self._on_custom_prompt_send = on_custom_prompt_send
+        self._on_choose_source = on_choose_source
 
     def _apply_noactivate(self):
         """Apply WS_EX_NOACTIVATE to popup window so it doesn't steal focus from source app."""
@@ -483,7 +498,7 @@ class QuickTranslateManager:
 
     def show(self, translated: str, target_lang: str, trial_info: dict = None, original: str = "",
              furigana_text: str = None, is_grammar: bool = False,
-             model_info: str = None):
+             model_info: str = None, source_lang: str = None):
         """Show popup with translation result.
 
         Args:
@@ -499,11 +514,18 @@ class QuickTranslateManager:
                 the very top. None leaves the note off entirely - which is what happens for
                 a cache hit whose stored entry predates the credit being recorded, because
                 naming the model that merely ran most recently would be a lie.
+            source_lang: The language a model (or the user) settled for `original`,
+                or None. Decides the readings on kanji-only text (J6), and whether
+                the Japanese / Chinese chooser is offered.
         """
         self.close()
 
         # Check if this is an error message
         is_error = is_error_text(translated)
+
+        # One hint for the height budget and the box alike, or the box clips.
+        ruby_hint = self._ruby_hint(target_lang, is_grammar, original, source_lang)
+        ask_source = self._asks_source(original, source_lang, is_grammar, is_error)
 
         # Calculate size (MIN_HEIGHT already handled in calculate_size)
         width, height = self.calculate_size(translated)
@@ -517,6 +539,9 @@ class QuickTranslateManager:
         if trial_info and trial_info.get('is_trial') and not is_error:
             height += 35  # Extra space for trial header row
 
+        if ask_source:
+            height += SOURCE_CHOOSER_PX
+
         # Add extra height for the furigana section. Measured from real font
         # metrics at the wrap width the block will actually get: an annotated
         # display row is far taller than a plain one (47px vs 28px on Tk 8.6),
@@ -529,7 +554,7 @@ class QuickTranslateManager:
         if not is_error and self._ruby_enabled():
             height += estimate_ruby_overhead_px(
                 translated, width - HORIZONTAL_PADDING,
-                lang_hint=self._ruby_hint(target_lang, is_grammar),
+                lang_hint=ruby_hint,
                 base_font=('Segoe UI', 11), line_spacing=0)
 
         # Create popup window
@@ -563,6 +588,7 @@ class QuickTranslateManager:
         self._current_target_lang = target_lang
         self._current_trial_info = trial_info  # Store for restoring after custom-prompt cancel
         self._current_furigana = furigana_text  # Store for restoring after custom-prompt cancel
+        self._current_source_lang = source_lang
         self._is_grammar = is_grammar  # Grammar-fix result: hide translation-only buttons
 
         # Bind dragging events
@@ -773,6 +799,10 @@ class QuickTranslateManager:
             close_btn_kwargs["bootstyle"] = "secondary"
         ttk.Button(self._btn_frame, **close_btn_kwargs).pack(side=RIGHT)
 
+        # Above the buttons: kanji-only text whose language nobody settled
+        if ask_source:
+            self._build_source_chooser(main_frame)
+
         # Furigana section (if available)
         if furigana_text and not is_error:
             self._render_furigana(main_frame, furigana_text,
@@ -811,7 +841,7 @@ class QuickTranslateManager:
         # Error text is excluded, matching the height budget above: a diagnostic
         # needs no readings, and annotating it would overflow the box.
         insert_output(self.popup_text, '1.0', translated,
-                      lang_hint=self._ruby_hint(target_lang, is_grammar),
+                      lang_hint=ruby_hint,
                       enabled=self._ruby_enabled() and not is_error)
         self.popup_text.config(state='disabled')
         self.popup_text.pack(side=TOP, fill=BOTH, expand=True)
@@ -841,15 +871,58 @@ class QuickTranslateManager:
         return bool(self.config and self.config.get_furigana_enabled())
 
     @staticmethod
-    def _ruby_hint(target_lang: str, is_grammar: bool = False) -> Optional[str]:
+    def _ruby_hint(target_lang: str, is_grammar: bool = False, original: str = "",
+                   source_lang: Optional[str] = None) -> Optional[str]:
         """Language hint for annotating output text, or None when unknown.
 
-        The target language is authoritative for a translation. A grammar fix
-        returns the *source* language, which nobody in this class knows, so it
-        gets no hint - Japanese with kana still annotates on its own evidence,
-        and kanji-only output stays plain rather than guessing.
+        A translation is in its target language - and, by the language-set rule
+        (`lang_id.output_hint`), Japanese quoted in, say, English output is
+        Japanese when the source was. A grammar fix keeps the source's language:
+        Japanese when the original's characters or its verdict say so (J6), else
+        no hint - kanji-only output then stays plain rather than guessing.
         """
-        return None if is_grammar else target_lang
+        source = lang_id.resolve(original, model=source_lang).language if original else None
+        if is_grammar:
+            return lang_id.JAPANESE if source == lang_id.JAPANESE else None
+        return lang_id.output_hint(source, target_lang)
+
+    @staticmethod
+    def _asks_source(original: str, source_lang: Optional[str], is_grammar: bool,
+                     is_error: bool) -> bool:
+        """Whether to offer the Japanese / Chinese chooser: a translation of kanji
+        that neither the characters nor a model settled (Decision 22)."""
+        if is_grammar or is_error or not original or source_lang:
+            return False
+        return source_clause(original).asks
+
+    def _build_source_chooser(self, parent) -> None:
+        """"Kanji-only text - read it as: [Japanese] [Chinese]", above the buttons.
+
+        A row, not a dialog: the translation is already on screen, and nothing
+        is blocked while the question stands. Answering re-translates with the
+        chosen source - a translation the model could not place may carry the
+        other language's sense (先生 came back "Mr."), so readings alone would sit
+        above the wrong meaning.
+        """
+        row = ttk.Frame(parent)
+        row.pack(side=BOTTOM, fill=X, pady=(8, 0))
+        row.bind("<Button-1>", self._start_move)
+        row.bind("<B1-Motion>", self._on_drag)
+        ttk.Label(row, text="Kanji-only text - read it as:", font=SOURCE_CHOOSER_FONT,
+                  foreground='#bbbbbb').pack(side=LEFT)
+        for language, label in ((lang_id.JAPANESE, "Japanese"),
+                                (lang_id.CHINESE_SIMPLIFIED, "Chinese")):
+            tk.Button(row, text=label,
+                      command=lambda chosen=language: self._handle_choose_source(chosen),
+                      autostyle=False, bg='#495057', fg='#ffffff',
+                      activebackground='#5a6268', activeforeground='#ffffff',
+                      font=SOURCE_CHOOSER_FONT, relief='flat', padx=10, pady=2,
+                      cursor='hand2').pack(side=LEFT, padx=(6, 0))
+        self.popup_source_chooser = row
+
+    def _handle_choose_source(self, language: str) -> None:
+        if self._on_choose_source:
+            self._on_choose_source(language)
 
     def _render_furigana(self, parent, furigana_text: str, available_px: int):
         """Render the read-only furigana guide above the translation.
@@ -1089,7 +1162,8 @@ class QuickTranslateManager:
         """Cancel custom-prompt mode - restore the normal result popup."""
         self.show(self._current_translation, self._current_target_lang,
                   self._current_trial_info, self._current_original,
-                  furigana_text=self._current_furigana)
+                  furigana_text=self._current_furigana,
+                  source_lang=self._current_source_lang)
 
     def _show_replace_preview(self):
         """Transform popup to show replace preview with strikethrough original and translated text."""
@@ -1122,7 +1196,8 @@ class QuickTranslateManager:
         self.popup_text.insert_plain(tk.END, '\n\n→\n\n', 'arrow')
         insert_output(
             self.popup_text, tk.END, translated,
-            lang_hint=self._ruby_hint(self._current_target_lang, self._is_grammar),
+            lang_hint=self._ruby_hint(self._current_target_lang, self._is_grammar,
+                                      self._current_original, self._current_source_lang),
             enabled=self._ruby_enabled(), tags='translated', kanji_fg='#4ec9b0')
 
         self.popup_text.config(state='disabled')
@@ -1177,7 +1252,8 @@ class QuickTranslateManager:
         if self.popup_text.has_ruby:
             new_height += estimate_ruby_overhead_px(
                 translated, new_width - HORIZONTAL_PADDING,
-                lang_hint=self._ruby_hint(self._current_target_lang, self._is_grammar),
+                lang_hint=self._ruby_hint(self._current_target_lang, self._is_grammar,
+                                          self._current_original, self._current_source_lang),
                 base_font=('Segoe UI', 11), line_spacing=0)
 
         if self.popup:
@@ -1331,6 +1407,7 @@ class QuickTranslateManager:
             self.popup_replace_btn = None
             self._replace_gear_btn = None
             self.popup_dict_btn = None
+            self.popup_source_chooser = None
             self._btn_frame = None
             self._main_frame = None
 
