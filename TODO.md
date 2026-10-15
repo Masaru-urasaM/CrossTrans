@@ -2,7 +2,7 @@
 
 > **Status: 🔨 IN PROGRESS** on branch `feature/japanese-language-identity` (from `main` after
 > the merge of `h1-health-review`, `f28a276`). **J0 ✅ and J1 ✅ done 2026-10-15** (§6).
-> **J2-J8 ✅ done 2026-10-15** (`src/core/lang_id.py`, Decision 24; the dictionary
+> **J2-J9 ✅ done 2026-10-15** (`src/core/lang_id.py`, Decision 24; the dictionary
 > result window reads the stated source and both languages of an entry; translation prompts
 > state the source or ask the model for a `[[SOURCE: ...]]` line, Decision 25).
 > **D13-D15 ✅ done 2026-10-15** at the user's request: one Dictionary mode serves both buttons
@@ -947,7 +947,14 @@ Chinese → `None`; the fallback → `None`; furigana OFF → `None`.
 **Manual (user):** Win+Alt+S over Japanese text on screen → the popup shows the OCR'd Japanese with
 readings above the translation.
 
-### J9 - History rows  *(Q5)*
+### J9 - History rows  *(Q5)*  ✅ Done (2026-10-15)
+
+> **Result:** readings on both lines of a row (original: evidence, else `source_verdict` - not
+> `source_lang`, which is a guess; translation: `output_hint`); cut by segments
+> (`truncate_segments`); click and wheel over every part. **Step 4 measured:** `RubyRow` per line
+> = 4.1 s for 100 Japanese entries; a canvas per line (`RubyLine`) with shared fonts = 1.27-1.30 s
+> vs 0.93-0.95 s without readings - the dialog's own baseline is over the 300 ms budget
+> (DEFERRED D17). Tests 1154 → 1173; 10 mutations killed.
 
 **Files (1-2):** `src/ui/history_dialog.py` (`_create_history_item` `:247-295`), possibly a
 segment-truncation helper in `src/ui/ruby_text.py`; tests in `tests/test_history_dialog.py`.

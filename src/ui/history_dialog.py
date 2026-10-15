@@ -5,6 +5,7 @@ import ctypes
 import tkinter as tk
 from tkinter import BOTH, X, Y, LEFT, RIGHT, TOP, BOTTOM, W, E, NW
 from datetime import datetime
+from typing import Optional
 
 try:
     import ttkbootstrap as ttk
@@ -13,6 +14,19 @@ try:
 except ImportError:
     from tkinter import ttk
     HAS_TTKBOOTSTRAP = False
+
+from src.core import furigana, lang_id
+from src.core.furigana import RubySegment
+from src.ui.ruby_text import RubyLine, truncate_segments
+
+# A row shows a line whole up to LINE_MAX characters, else its first LINE_CUT and "...".
+LINE_MAX = 60
+LINE_CUT = 57
+# Readings are generated for this much of a line - more than is shown, so a word
+# that straddles the cut is read in its context - but never for a whole document.
+LINE_ANNOTATE_CHARS = 120
+# The rows' text, as before J9.
+ROW_FONT = ('Segoe UI', 10)
 
 
 def set_dark_title_bar(window):
@@ -37,9 +51,11 @@ def set_dark_title_bar(window):
 class HistoryDialog:
     """Dialog to view and manage translation history."""
 
-    def __init__(self, parent, history_manager, on_load_callback):
+    def __init__(self, parent, history_manager, on_load_callback, furigana_enabled=False):
         self.history_manager = history_manager
         self.on_load_callback = on_load_callback
+        # Readings on the rows (J9) - the Settings toggle, read when the dialog opens.
+        self.furigana_enabled = furigana_enabled
         self.search_var = None
         self.all_history = []  # Cache for filtering
 
@@ -274,25 +290,65 @@ class HistoryDialog:
 
         ttk.Label(top_row, text=time_str, foreground='#888888', font=('Segoe UI', 8)).pack(side=RIGHT)
 
-        # Content
-        original = item.get('original', '').replace('\n', ' ')
-        if len(original) > 60: original = original[:57] + "..."
+        # Content - with readings when it is Japanese (J9): the original by its
+        # own evidence, else the verdict a model gave for it (never History's
+        # source_lang label, which has always been a guess from the characters);
+        # the translation by the language-set rule.
+        original = item.get('original', '')
+        source = lang_id.resolve(original, model=item.get('source_verdict')).language
+        clickable = [frame]
+        clickable += self._content_line(frame, original,
+                                        lang_id.JAPANESE if source == lang_id.JAPANESE else None,
+                                        fg='#cccccc')
+        clickable += self._content_line(frame, item.get('translated', ''),
+                                        lang_id.output_hint(source, item.get('target_lang')),
+                                        prefix="→ ", fg='#ffffff', pady=(2, 0))
 
-        translated = item.get('translated', '').replace('\n', ' ')
-        if len(translated) > 60: translated = translated[:57] + "..."
-
-        ttk.Label(frame, text=original, font=('Segoe UI', 10), foreground='#cccccc').pack(anchor=W)
-        ttk.Label(frame, text=f"→ {translated}", font=('Segoe UI', 10), foreground='#ffffff').pack(anchor=W, pady=(2, 0))
-
-        # Click to load
-        frame.bind("<Button-1>", lambda e, i=item: self._load_item(i))
-        for child in frame.winfo_children():
-            child.bind("<Button-1>", lambda e, i=item: self._load_item(i))
+        # Click to load - on every part: a reading label is a grandchild of the
+        # row, and a click on it never reaches the row's own binding.
+        for widget in clickable + [top_row]:
+            widget.bind("<Button-1>", lambda e, i=item: self._load_item(i))
 
         # Delete button (small 'x' on right, but tricky with layout, let's put it in top row)
         del_btn = ttk.Label(top_row, text="✕", foreground='#dc3545', cursor="hand2")
         del_btn.pack(side=RIGHT, padx=(0, 10))
         del_btn.bind("<Button-1>", lambda e, i=item: self._delete_item(i))
+
+    def _content_line(self, parent, text: str, hint: Optional[str], prefix: str = "",
+                      fg: str = '#cccccc', pady=(0, 0)) -> list:
+        """One line of a row - a RubyLine when it carries a reading, else the plain
+        label it always was. Returns the widgets a click must reach.
+
+        Cut by segments to LINE_CUT characters plus "..." when longer than
+        LINE_MAX, never through a ruby pair.
+        """
+        line = text.replace('\n', ' ')
+        segments = ()
+        if self.furigana_enabled and furigana.should_annotate(line[:LINE_ANNOTATE_CHARS], hint):
+            segments = furigana.annotate(line[:LINE_ANNOTATE_CHARS], hint)
+        if any(segment.ruby for segment in segments):
+            if len(line) > LINE_MAX:
+                segments, _cut = truncate_segments(segments, LINE_CUT)
+                segments += (RubySegment("...", None),)
+            line_widget = RubyLine(parent, (RubySegment(prefix, None),) + segments
+                                   if prefix else segments,
+                                   base_font=ROW_FONT, bg=self._row_bg(), base_fg=fg)
+            line_widget.pack(anchor=W, pady=pady)
+            return [line_widget]
+
+        if len(line) > LINE_MAX:
+            line = line[:LINE_CUT] + "..."
+        label = ttk.Label(parent, text=f"{prefix}{line}", font=ROW_FONT, foreground=fg)
+        label.pack(anchor=W, pady=pady)
+        return [label]
+
+    def _row_bg(self) -> str:
+        """The rows' background, for the canvas a RubyLine is drawn on
+        (ttkbootstrap would re-theme it, so it takes it explicitly)."""
+        try:
+            return ttk.Style().lookup('TFrame', 'background') or '#2b2b2b'
+        except tk.TclError:
+            return '#2b2b2b'
 
     def _load_item(self, item):
         """Load item into main translator."""

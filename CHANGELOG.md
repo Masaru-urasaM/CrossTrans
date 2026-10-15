@@ -4,6 +4,43 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase J9 — History rows carry readings (2026-10-15)
+
+The History list showed Japanese in every entry and read none of it - its rows were plain
+labels, a non-goal in 2026-08 that the user brought into scope (TODO.md Q5).
+
+**Added**
+- **Readings on the rows**: the original by its own evidence, else the verdict a model gave for
+  it (J4's `source_verdict` - never the entry's `source_lang`, which has always been a guess from
+  the characters); the translation by `lang_id.output_hint`. A line is still cut at 57
+  characters plus "...", now by segments (`ruby_text.truncate_segments()`): a plain run may be
+  cut, a ruby pair is kept whole or dropped - half of 東京 under とうきょう would be a wrong reading.
+  Readings are generated for the first 120 characters, so a word that straddles the cut is read
+  in context. Furigana OFF keeps exactly the labels the rows always had.
+- **`ruby_text.RubyLine`**: one canvas per annotated line, text and readings drawn as canvas
+  items. Each ruby pair takes a slot as wide as the wider of base and reading, so とうきょう never
+  runs into its neighbour. Fonts and character widths are shared across lines.
+- Clicking anywhere on an annotated line - the reading row included - loads the entry; the wheel
+  scrolls over it (it is bound per widget, as the 2026-09 fix requires, never `bind_all`).
+- `HistoryDialog(..., furigana_enabled=)`, passed by the app from the Settings toggle.
+
+**Fixed during implementation**
+- **A frame and two labels per segment made the dialog take 4.1 s** to open with 100 Japanese
+  entries (~4,500 widgets; on Windows every Tk widget is a native window). Drawing each line on
+  one canvas brought it to 3.3 s - and **a Font object per line was 1.9 s of that**: Tk searched
+  for a CJK fallback font afresh on every measure (0.7 ms a call). Shared fonts and per-character
+  widths: **1.27-1.30 s, against 0.93-0.95 s for the same dialog without readings.** That
+  baseline is the dialog's own and is over the 300 ms the plan budgeted - recorded as
+  `DEFERRED.md` **D17**, not changed here.
+
+**Tests**: 1154 -> 1173 (+19 in `tests/test_history_dialog.py`: truncation by segments, each
+hint, the old label never trusted, click and wheel over a reading, search, a wide reading
+never overlapping, shared fonts, the app passing the setting, and 100 Japanese rows within a
+generous time bound), 0 failed, 0 skipped. Ten mutations - a pair split or a plain run dropped
+by the cut, the setting ignored, the label trusted, the translation hinted by its target only,
+the click unbound, readings overlapping, a Font per line, the app not passing the setting, long
+lines uncut - each made the suite fail and was restored.
+
 ### Phase J8 — A Japanese screenshot shows what it read, with readings (2026-10-15)
 
 Win+Alt+S showed only the translation - the hotkey popup shows the selection with its readings

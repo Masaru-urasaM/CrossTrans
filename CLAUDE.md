@@ -253,7 +253,9 @@ the first match, so one of the two always loses (DEFERRED D12). It only matters 
 
 ## UI Components (src/ui/)
 
-- `ruby_text.py` - `RubyText` widget: the single place furigana is drawn (+ `get_plain()` readback)
+- `ruby_text.py` - `RubyText` widget: the single place furigana is drawn (+ `get_plain()` readback);
+  `RubyLine` - one canvas per line with readings, for long lists (History rows, J9): a widget per
+  line instead of two labels per segment, fonts and character widths shared across lines
 - `quick_translate.py` - QuickTranslateManager (translation popup with Copy, Replace, Dictionary, Open Translator, furigana rendering)
 - `tray.py` - System tray manager
 - `dialogs.py` - Error/trial dialogs
@@ -817,6 +819,7 @@ display rather than receiving pre-annotated strings through the queue.
 | Dictionary result window | the lookup's stated source, else each entry's **Source Language** field; `target_lang` for Translation/Definition/Word Type; Japanese + a non-Chinese language = Japanese throughout; Japanese/Chinese pairs cut at `→` | monospace columns preserved; Pronunciation never annotated. See below |
 | Dictionary word chips | mode language (from evidence, a model's verdict or the user since J5), applied to the whole line | a chip that cuts a compound stays bare. See below |
 | Custom lookup tags | mode language, per tag | a tag is one lookup phrase, so it is annotated on its own |
+| History rows | original: its evidence, else its `source_verdict` (never `source_lang`); translation: `output_hint` | `RubyLine` per annotated line, cut by segments to 57 characters; furigana OFF keeps the plain labels (J9) |
 
 All result text goes through `ruby_text.insert_output(widget, index, text, lang_hint, enabled)`,
 so the toggle is honored in one place. Read every one of these boxes with `get_plain()`.

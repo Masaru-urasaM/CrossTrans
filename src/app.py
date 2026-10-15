@@ -1547,7 +1547,8 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
     def _open_history(self):
         """Open history dialog."""
         if self.popup:
-            HistoryDialog(self.popup, self.translation_service.history_manager, self._load_history_item)
+            HistoryDialog(self.popup, self.translation_service.history_manager, self._load_history_item,
+                          furigana_enabled=self._ruby_enabled())
 
     def _load_history_item(self, item):
         """Load a history item into the translator."""
