@@ -4,7 +4,401 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Cerebras and SambaNova, and a correction (2026-09-08)
+
+Keys were supplied for Cerebras, Groq and SambaNova, so three more rows of D11 could be checked
+against the real APIs.
+
+**Fixed**
+- **Cerebras: all six models in the dropdown and both defaults were dead.** `llama-3.3-70b` and
+  `llama3.1-70b` answered `404 Model does not exist` to a real request. Cerebras now serves
+  exactly three models. Defaults are `gpt-oss-120b`, `qwen-3.8-27b`.
+- **SambaNova: eleven of twelve dropdown models and one of two defaults were gone** - every
+  DeepSeek-R1 variant, the whole Llama 3.1/3.2 line, all three Qwen entries.
+  `Meta-Llama-3.3-70B-Instruct` survived and stays first; `gemma-4-31B-it` replaces the dead
+  `Meta-Llama-3.1-70B-Instruct`.
+- **A Cerebras key was being read as Google.** `csk-` was missing from `API_KEY_PATTERNS`, and
+  `_detect_provider_from_key()` falls back to Google, so a Cerebras user with Provider on 'Auto'
+  and a blank model field was handed `gemini-2.5-flash` and sent it to `api.cerebras.ai`. Silent,
+  and indistinguishable from a dead model. SambaNova cannot be fixed the same way - its keys are
+  bare UUIDs with no prefix to match.
+
+**Confirmed working** - Groq's defaults, by real translation: `openai/gpt-oss-120b` 0.7 s and
+`openai/gpt-oss-20b` 0.6 s, both returning clean Japanese with their reasoning in a *separate*
+`reasoning` field rather than inline in the content.
+
+**Corrected**: earlier entries said reasoning models risk truncation because `api_manager` sends
+`max_tokens: 1024`. That is wrong - `_call_generic_openai_style` sends **no** `max_tokens`, and
+the 1024 cap belongs to `_call_anthropic` alone. The measurements and the conclusion are
+unchanged (qwen3.6-27b really does take 509 completion tokens and 1.3 s against gpt-oss's 134 and
+0.7 s, with `<think>` inline in content); only the mechanism was misstated. The real hard limit
+on that path is `timeout=10`.
+
+**Evidence quality, stated per provider** - the point of D11 is not to guess twice:
+- *Cerebras* - strong. It validates the model **before** it checks billing, so `404` and `402` are
+  a real distinction: 404 proves gone, 402 proves the model exists. The account has no credit, so
+  the three live models could not be translated with.
+- *SambaNova* - weak, and marked as such. It returns `402` **before** validating the model - even
+  for a model absent from its own catalogue - so the listing is the only evidence and no model
+  was called.
+- *Groq* - strong. Real translations, end to end.
+
+**Tests**: 674 -> 676.
+
+### OpenRouter's defaults were dead too, and pointed at the wrong provider (2026-09-08)
+
+**Fixed** (narrows D11 further)
+- **Both OpenRouter defaults were gone.** `google/gemini-2.0-flash-exp:free` and
+  `meta-llama/llama-3.3-70b-instruct:free` are absent from OpenRouter's live 428-model catalogue
+  **and** have zero routable endpoints. This one needed no API key: both signals are public, and
+  they agreed on all twenty IDs checked. Now `google/gemma-4-31b-it:free` and
+  `nvidia/nemotron-3.5-lightning:free` - free tier kept by explicit choice (Decision 20), on two
+  different upstreams so they fail independently.
+- **A default that identifies as the wrong provider.** `_identify_provider()` matches
+  `model_provider_map` first and then falls through to prefix rules, in which `google/` means
+  **Together**. At tier 3 the new default `google/gemma-4-31b-it:free` identified as Together, so
+  under `provider='Auto'` an `sk-or-v1-` key would have been sent to Together's endpoint - and
+  **both dead defaults did exactly this too**, so that path was mis-routed as well as retired.
+  Every default is now listed in `MODEL_PROVIDER_MAP` for its own provider.
+- **Nine of the twenty IDs in the OpenRouter dropdown were dead**: `o1-mini`,
+  `claude-3.5-sonnet`, `claude-3-opus`, `gemini-2.0-flash-exp`, `gemini-pro`, `gemini-flash-1.5`,
+  `llama-3.1-405b-instruct`, `mixtral-8x7b-instruct`, `qwq-32b-preview`. This is tier-3 only - the
+  Worker rebuilds the list from the live catalogue on every cron - but tier 3 is a fresh install
+  with no network, which is where a dead entry is least recoverable.
+
+**Added**
+- `tests/test_default_model_routing.py` (32 tests): every default model, for all thirteen
+  providers, must identify as its own provider with only `constants.py` available. Probed by
+  reintroducing the bug and confirming the suite fails.
+
+**Not verified, and said plainly**: no OpenRouter key was available, so the two new defaults are
+confirmed *routable* but not confirmed to translate well. The risk to test when a key appears is
+**latency**: `_call_generic_openai_style` sends no `max_tokens` but does use `timeout=10`, and
+both of these lean reasoning/agentic - on Groq the comparable model took 1.3 s against gpt-oss's
+0.7 s.
+
+**A shortcut that does not work**: OpenRouter's `/endpoints` resource names the upstreams serving
+each model, which looked like a free way to verify other providers' native IDs. It lists Groq as
+serving `llama-3.3-70b-instruct` while Groq's own catalogue has no llama-3.3 at all - it describes
+OpenRouter's routing, not what a user's key can call.
+
+**Tests**: 642 -> 674.
+
+### Google's default models were dead too (2026-09-08)
+
+**Fixed** (narrows D11)
+- **All three of Google's auto-pick models answered 404.** `gemini-2.0-flash`,
+  `gemini-1.5-flash` and `gemini-1.5-pro` are retired. This is the app's **primary** provider and
+  `default_models_by_provider` is not a fallback - it is what auto-detection and
+  `_try_model_rotation()` read whenever the model field is left blank, so a user with a Gemini key
+  and no model chosen got three silent failures and nothing else. Now
+  `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-flash-latest`: the old intent (a mid-tier
+  flash model), a faster one to rotate to when the first is busy, and an alias that cannot rot.
+- **Six of the eight models in the Google dropdown were dead** as well - the whole 2.0 line,
+  `gemini-3-flash` (the live name is `gemini-3-flash-preview`) and
+  `gemini-2.5-flash-preview-image`. Replaced with twelve verified IDs.
+
+**Added**
+- **`fetchGeminiModels()` in the Worker**, mirroring `fetchGroqModels()`: Google's catalogue now
+  comes from Google (Step 5.6) instead of from OpenRouter, which lags it badly - on 2026-09-08
+  OpenRouter still listed `gemini-2.0-flash`. `supportedGenerationMethods` alone cannot be the
+  filter, because the same endpoint serves tts, image, transcribe, robotics, computer-use, lyria
+  (music), nano-banana (image) and the agentic deep-research / antigravity families, so
+  `GEMINI_NON_CHAT_PATTERNS` subtracts them: 22 of 40 excluded, 18 general chat models kept.
+  `gemini_source` is reported beside `groq_source`.
+
+**Rejected, after simulating it** (Decision 19): filtering the curated defaults against
+`model_provider_map`, which is what D11 suggested and what `getProviderModels()` does for the
+trial pool. Run across all thirteen providers it would have *kept* `gemini-2.0-flash`, because
+the map comes from OpenRouter and OpenRouter still lists it; for the nine OpenRouter-derived
+providers the catalogue is exactly as stale as the thing it would check. It would have looked
+like a safeguard and removed nothing - the same false-green failure Decision 18 guards against,
+one layer down.
+
+**Worth writing down: presence in a listing is not usability.** `gemini-2.5-pro` appears in
+Google's own `/models` output and answers `404 no longer available to new users`. Every model
+named here was checked with a real translation request, reading the reply code rather than
+counting it - `404` is dead, `503` is busy, `429` is out of quota, and two models that looked
+dead at first were neither.
+
+**Still open**: nine providers whose defaults have never been checked, because each needs its own
+API key - see DEFERRED D11, which now carries the table of what is verified and what is not.
+
+**Tests**: 642 -> 642 (no test asserted these tables). Verified by hand instead: every new Google
+ID routes to Google at tier 3, all three tiers agree, and the shipped `fetchGeminiModels` was run
+under Node against Google's real payload - 18 models kept, and all four failure paths return null
+so the static list survives.
+
+### The suite runs somewhere other than one desk (2026-09-08)
+
+**Added** (closes D10)
+- **`.github/workflows/tests.yml`** - the full suite on `windows-latest` for every push and pull
+  request, plus manual dispatch. Windows only: the app registers global hotkeys, reads the
+  registry and clipboard through pywin32, and draws Tk widgets, so a Linux job would test nothing
+  the app does.
+- **`tools/check_test_counts.py`, and it is the point of the change.** `conftest.py`'s `tk_root`
+  fixture skips when Tk cannot open a display, and **312 of the 630 tests need one** - so a runner
+  without a desktop session would skip half the suite, pytest would exit 0, and the badge would be
+  green over an untested half. That is worse than no CI: no CI is a known gap, a false green is a
+  believed one. The guard reads the JUnit XML and fails the build when more tests were skipped
+  than a healthy run explains, or when barely anything was collected. It runs with `if: always()`
+  so the counts are reported even when pytest itself failed. See Decision 18.
+
+**Tests**: 630 -> 642. `tests/test_ci_guard.py` (12) pins the guard itself, including the headless
+scenario fed as a synthetic report with 312 skips - a check that quietly stops working is exactly
+what is being guarded against. The workflow's own commands were run locally end to end:
+`pytest --junitxml --cov` then the guard, 642 passed, guard OK.
+
+**Not verified**: whether the GitHub runner has a usable Tk display. That needs a push to find
+out. Both outcomes are handled - a diagnostic step reports Tk's availability, and the guard turns
+the bad one into a clear failure instead of a quiet pass.
+
+### The log file became machine-readable (2026-09-08)
+
+**Changed** (closes D5)
+- **The file log is JSON Lines**, one `{"ts","level","tag","msg"}` object per line, as global
+  Rule 10 asks. **The console is not** - `python main.py` prints to a terminal with a human in
+  front of it.
+- **Not one of the ~458 logging calls changed.** D5 was deferred because the format "touches
+  every call site"; it does not, if the tag is derived from the record. 55 messages already open
+  with a bracketed tag - `[ModelRotation]`, `[Trial]`, `[TOKENIZE]` - and those are better tags
+  than any file name, so the formatter lifts them into `tag` and drops them from `msg`. Everything
+  else gets `record.module`, and `mod` is added only when it differs. Writing
+  `logging.info("[Thing] ...")` remains the way to set a tag. See Decision 17.
+- **The log rotates by size as well as by age.** Retention bounds a quiet app but not one runaway
+  loop inside a single day, so today's file is now capped at `LOG_MAX_BYTES` with
+  `LOG_BACKUP_COUNT` siblings.
+
+**Fixed**
+- **Rotation would have leaked past retention.** `prune_old_logs` globbed `translator_*.log` and
+  matched a regex anchored on `.log`, so the `translator_20260908.log.1` files the new handler
+  creates were neither found nor eligible - unbounded growth *within* a day would simply have
+  become unbounded growth *across* days. Both patterns widened; `.bak`, `.logged` and
+  `translator_2026.log.1` are still spared, and a test says so.
+
+**Deliberately not done**: buffered writes, which Rule 10 also suggests. Every ending this app
+has skips cleanup - the updater's `os._exit(0)`, the crash hook, the already-running watchdog -
+so a buffer would drop exactly the lines worth having. `delay=True` is used instead, which also
+stops a run that never logs from leaving an empty file behind.
+
+**Tests**: 610 -> 630. Five probes were run rather than assumed: removing the tag extraction fails
+3, `ensure_ascii=True` fails the Japanese-legibility test, `delay=False` fails the empty-file
+test, restoring the old prune regex fails the rotated-sibling test, and dropping `.astimezone()`
+fails the timestamp test. The Japanese test was tightened first - it originally asserted a round
+trip, which `json.loads` satisfies either way, and so proved nothing.
+
+### Launching CrossTrans twice now shows you CrossTrans (2026-09-08)
+
+**Changed** (closes D4)
+- **A second instance asks the running one for its window instead of pointing at the tray.**
+  The lock socket on `127.0.0.1:47823` had been `listen()`ing since single-instance detection was
+  written and nobody ever accepted; all a second launch could do was fail to bind and show a
+  dialog telling the user to go hunting in the system tray. It now sends a show request, and the
+  running instance raises its window - which is what double-clicking the icon means - plus a
+  two-second toast, "CrossTrans is already running", so nobody wonders whether a second copy
+  started.
+- **What "show yourself" means was not a new decision.** D4 listed it as an open question;
+  `app.show_main_window()` has answered it since the tray menu was written. It already marshals
+  itself onto the UI thread, and already raises an open popup rather than building a second one.
+  The accept loop reuses it. That is what took D4 from Medium to Small.
+
+**Added**
+- `single_instance.signal_running_instance()` and `serve_show_requests()`.
+- `TranslatorApp.on_second_instance()` / `_raise_for_second_instance()`.
+
+**The acknowledgement is the load-bearing part** (Decision 16). Connecting proves nothing:
+`listen()` predates the accept loop, so a connection against *any* older build succeeds and then
+rots in the backlog. Seen for real on 2026-09-08 while writing the tests - `netstat` showed the
+suite's connection sitting in `CLOSE_WAIT` against the running 1.9.20. Without waiting for a
+reply, a user who upgraded and double-clicked the icon would get a second process that exits
+silently having done nothing at all - no window, and not even the old dialog. The notice and its
+Decision 12 watchdog therefore stay, as the fallback for exactly that case.
+
+**Tests**: 594 -> 610. New `tests/test_second_instance_signal.py` (15). Three probes were run
+rather than assumed: trusting a bare connection instead of the ACK fails the older-build test;
+dropping the token check lets any stray local connect raise the window and fails another; and
+calling the handler straight off the socket thread - a cross-thread Tk call - fails two more.
+`TestMainTakesTheNoticePath` was split in two and both halves now stub
+`signal_running_instance`: unstubbed it reached the real socket, so whether the notice path ran
+depended on whether a CrossTrans happened to be running on the machine.
+
+### The clipboard tests stop borrowing a global (2026-09-07)
+
+**Fixed** (closes D9)
+- **`TestCopySelection` no longer reads the Windows clipboard.** Its `_copy()` helper wrote a
+  sentinel, fired `<<Copy>>`, then read the value back with `clipboard_get()` - and the clipboard
+  is a global any other process can take between those two steps. It cost one failure in six
+  full-suite runs, always passing in isolation; the production code was never implicated. The
+  helper now captures what the handler writes, by intercepting the widget's own
+  `clipboard_clear` / `clipboard_append` for the duration of the call. The event still fires, the
+  binding still resolves and `RubyText._on_copy` still runs - only the round trip through a
+  shared OS resource is gone. D9 named one test; **five** shared that helper.
+
+**Added**
+- `test_it_really_reaches_the_windows_clipboard` - one deliberate round trip, kept so something
+  still proves Tk hands the text to Windows. It **skips** on `TclError` instead of failing, so a
+  stolen clipboard can never redden the suite again.
+
+**Verified as regression tests** (both probes run, not assumed):
+- Making `_on_copy` call `get()` instead of `get_plain()` - the original bug, annotated words
+  dropping out of the copy - fails **4** tests, three of them the hermetic ones.
+- Removing `return 'break'` fails **2**. Notably it does *not* fail the hermetic ones, and the
+  helper's docstring says so: `tk_textCopy` writes through the Tcl `clipboard` command, not
+  through the widget's Python methods, so an interception at that level cannot see the default
+  binding overwrite anything. That contract is pinned directly by
+  `test_the_handler_stops_tk_from_overwriting_it`, which asserts the return value itself.
+
+**Tests**: 593 -> 594.
+
+### Dead code removed (2026-09-07)
+
+**Removed** (closes D8)
+- **`src/ui/progress_dialog.py`** (196 lines). A modal progress dialog for long file
+  translations that was never wired to anything: no importer in `src/`, `tests/`, `main.py`,
+  `src/ui/__init__.py` or the spec file's `hiddenimports`, and no dynamic import reaches it
+  either - the only `importlib` in the project loads NLP language packs. The only references to
+  `ProgressDialog` were inside the file: its own class statement, its docstring example, and a
+  `show_quick_progress()` helper nothing called.
+- **`TranslationService._is_dictionary_query()`** (35 lines), unused since auto-dictionary
+  detection was taken out - `translate()` stopped switching to dictionary mode for short text,
+  and lookup has gone through the Dictionary button ever since.
+- **`SENTENCE_PUNCTUATION`** (20 lines) went with it. The removed method was its only reader, so
+  leaving it would have replaced one orphan with another.
+
+Both were listed as deliberately-not-done under the "touch only what the task requires" rule;
+this is the cleanup pass their trigger asked for. `CLAUDE.md` now records the deletion rather
+than describing `_is_dictionary_query()` as present-but-unused, so it is not reintroduced later
+to "restore" behaviour that was removed on purpose.
+
+**Tests**: 593 -> 593, no regressions - nothing referenced either symbol. Verified beyond the
+suite: `pyflakes` reports no orphaned import left in `translation.py`, the module still compiles,
+and an import smoke test loads `src.app`, `src.ui`, `src.ui.quick_translate`,
+`src.ui.dictionary_popup` and `src.ui.settings` with the UI module gone.
+
+### Every Groq model the app knew about was gone (2026-09-07)
+
+**Fixed**
+- **Groq's whole Llama line is decommissioned, and every list in the project still named it.**
+  Checked against Groq's own `/models` endpoint on 2026-09-07: of the 17 IDs hardcoded in
+  `constants.py`, **15 return nothing**, and the 2 survivors were `whisper-large-v3` and
+  `whisper-large-v3-turbo` - speech-to-text models that were never translation candidates. The
+  usable count was zero. Gone with them: `mixtral-8x7b-32768`, `gemma-7b-it`, `gemma2-9b-it`,
+  every `llama-3.2-*-preview`, `llama3-70b-8192`, and `distil-whisper-large-v3-en`, which had
+  been sitting in the model dropdown as something to translate with. What Groq still serves that
+  is a general chat model is four IDs: `openai/gpt-oss-120b`, `openai/gpt-oss-20b`,
+  `qwen/qwen3.6-27b`, `qwen/qwen3.8-27b`.
+- **Auto-pick was choosing a dead model, and this was live, not a fallback.** The list behind
+  auto-detection and `_try_model_rotation()` is `default_models_by_provider`, served from KV -
+  and KV takes it from a table hardcoded in the Worker, which the 12-hourly cron never
+  regenerates. Its Groq entry was `['llama-3.3-70b-versatile', 'llama-3.1-8b-instant']`. A user
+  with a Groq key and a blank model field had both attempts fail before the app gave up. The
+  same three-dead-models bug sat in `api_manager.DEFAULT_MODELS_BY_PROVIDER` for the tier-3 path.
+- **Screenshot translation could never pick a Groq model.** `VISION_MODELS['groq']` matched
+  `llama-3.2-*-vision-*`, `llava-*` and `meta-llama/llama-4-*` - three patterns that now match
+  nothing Groq serves. Measured by POSTing a 2x2 PNG to each live model: **`qwen/qwen3.6-27b`
+  accepts images**; `openai/gpt-oss-*`, `groq/compound*` and `allam-2-7b` answer
+  `400 content must be a string`. The pattern is now `qwen/qwen3*`.
+- **The trial proxy's Groq pool started with a 4k-context Arabic specialist.** `getProviderModels()`
+  carried a "curated defaults first" safeguard, but it selects with `models.includes(m)` against
+  the live catalog - and both curated names were decommissioned, so the filter matched nothing,
+  the branch never ran, and the trial fell through to the raw list sorted alphabetically:
+  `allam-2-7b` first, then the two agentic `groq/compound*` systems. The safeguard now fires
+  because the names in it exist.
+- **Reasoning and agentic models are kept out of the trial pool** (closes D6). New
+  `TRIAL_MODEL_DENY_PATTERNS` filters `*compound*` (agentic - plans and calls tools, routinely
+  outlives the 15 s proxy timeout), `*qwen3*`, `*deepseek-r1*`, `*-r1` (measured: qwen3.6 spent
+  239 completion tokens on "Good morning", nearly all inside `<think>`; under a smaller
+  `max_tokens` it truncates before reaching the answer, which then arrives empty once the block
+  is stripped) and `*allam*`. **`openai/gpt-oss-*` is deliberately not filtered** even though D6
+  named it - measured at 46-84 tokens in ~0.8 s with no reasoning preamble, and excluding it
+  would leave Groq's trial pool empty. The filter fails open: if it would empty a pool, the
+  unfiltered list is kept.
+- **`reasoning_format: 'hidden'` is now sent to Groq**, so a reasoning model's monologue is
+  suppressed server-side rather than stripped after the fact. It rides on a new per-provider
+  `extraBody`, spread into the request body, so Cerebras and SambaNova - which share
+  `callOpenAIAPI` - never receive a non-OpenAI-standard field.
+
+**Changed**
+- `src/constants.py` - `MODEL_PROVIDER_MAP['Groq']` (17 -> 4), `VISION_MODELS['groq']`.
+- `src/core/api_manager.py` - `DEFAULT_MODELS_BY_PROVIDER['Groq']` (3 dead -> the 2 measured to
+  answer directly). qwen3 is offered in the dropdown but kept out of auto-pick: it spends ~4x the
+  completion tokens inside `<think>`. *(Corrected 2026-09-08: this originally said qwen3 exhausts
+  a 1024-token `max_tokens` budget. That path sends no `max_tokens` - the cap is Anthropic-only.
+  The token measurements and the conclusion are unchanged.)*
+- `cloudflare_worker.js` - `PROVIDERS.groq.defaultModels`, `STATIC_DEFAULT_MODELS_BY_PROVIDER`,
+  `STATIC_PROVIDER_MODELS['Groq']`, `STATIC_VISION_PATTERNS['groq']`, and nine dead Groq entries
+  in `PROVIDER_MODEL_OVERRIDES` (the `llama-3.2-90b-vision` entry went entirely - Groq was its
+  only mapping). Deployed; the KV `models_config` was patched with the two fields the cron
+  derives from those tables so the fix applied immediately instead of at the next 12-hourly run,
+  and the cron reproduces exactly those values.
+- `docs/models_config_template.json` - the same three Groq lists.
+
+**Tests**: 593 -> 593, no regressions. No test asserted the contents of these tables; the three
+Groq assertions in `test_api_manager.py` route through `_identify_provider`'s suffix patterns
+(`-8192`, `-32768`, `gemma-`), not the model map, so they are unaffected. Verified by hand
+instead, against tier-3 (hardcoded) config: all four live IDs now resolve to Groq, where before
+the change `openai/gpt-oss-120b` fell through to `OpenAI` (step 5, `'gpt' in name`) and
+`qwen/qwen3.6-27b` to `SiliconFlow` (step 10, `'qwen' in name`) whenever no API key was passed.
+The Worker's shipped `getProviderModels`, `globMatch` and deny list were executed under Node
+against the real live catalog: Groq's trial order is now `gpt-oss-120b, gpt-oss-20b`, Cerebras is
+untouched, and a fully-blocked pool falls open rather than empty.
+
+### A second instance that leaves, a log that survives, clean vision output (2026-09-07)
+
+**Fixed**
+- **A second CrossTrans no longer hangs forever, invisibly.** Launching the app while it was
+  already running left a process resident with no window at all: on the machine this was found,
+  one had been sitting there since 2026-08-19 - nineteen days - holding 30 MB and its own
+  PyInstaller temp directory. The notice is built by ttkbootstrap's `Messagebox`, which parents
+  its dialog with `transient=<the root>`, and `main.py` withdraws that root; Tk withdraws a
+  transient window whose master is withdrawn, so the dialog was never mapped and `show()` sat in
+  `wait_window()` waiting for a click nobody could give it. Confirmed with py-spy against a live
+  hang, and it is the same family as the `grab_set()` trap already in CLAUDE.md's Known Issues.
+  The notice is now the stdlib messagebox - a native Windows dialog (class `#32770`), which a
+  withdrawn root cannot hide - and a daemon watchdog force-exits the process after
+  `ALREADY_RUNNING_TIMEOUT_S`, so no future dialog trouble can strand one either.
+- **The EXE writes its log somewhere it can be read.** `setup_logging()` derived the directory
+  from `__file__`, which under a onefile build resolves inside the temporary `_MEIxxxxx`
+  extraction directory - the one PyInstaller deletes on exit. Every log the shipped app ever
+  wrote was thrown away, which is precisely the log anyone asks for after a crash. Measured
+  2026-09-07: six orphaned `_MEI*` directories (202 MB), each holding a `logs/translator_*.log`
+  nobody could have found. The frozen app now logs to `%APPDATA%/CrossTrans/logs`, beside the
+  config file support already asks for; running from source is unchanged.
+- **Reasoning tags no longer reach screenshot, image and PDF results.** `<think>...</think>` was
+  stripped on all five text paths but on none of the vision ones - `app.py` (image and file
+  translation), `screenshot_handler.py` (Win+Alt+S) and `pdf_ocr.py` all call the API manager
+  directly, without passing through `TranslationService`. A reasoning model, which the user can
+  select and which rotation can substitute on its own, would have printed its whole monologue
+  over the screenshot, or fed it into the text a scanned PDF is translated from. The cleanup now
+  sits in `_generate_content` / `_generate_content_multimodal` - the two dispatch points every
+  call in the class funnels through, the same place the model credit is recorded and for the
+  same reason: one site instead of eight return statements.
+
+**Added**
+- `src/core/text_cleanup.py` - `strip_thinking_tags()`, the single implementation.
+- `logging_setup.resolve_log_dir()` / `is_frozen()` / `prune_old_logs()`. The move to `%APPDATA%`
+  creates growth nothing cleans up, so daily logs older than `LOG_RETENTION_DAYS` (14) are
+  deleted at startup. Only files matching the exact `translator_YYYYMMDD.log` name are eligible,
+  and one that cannot be deleted - another instance holding it open - is skipped, not fatal.
+
+**Changed**
+- `main.py` no longer imports ttkbootstrap at all; the already-running branch is one call to
+  `_warn_already_running()`.
+- `TranslationService._strip_thinking_tags()` delegates to the shared function. It stays because
+  the trial proxy does not go through the API manager. Its `import re` went with the old body.
+
+**Tests**: 551 -> 593. New `tests/test_single_instance_notice.py` (11): the notice is the stdlib
+messagebox and never ttkbootstrap, the watchdog is armed as a daemon before the dialog and
+disarmed after it - including when the dialog raises - and it force-exits with `os._exit`; plus
+an end-to-end test that holds the lock port and asserts a second instance really terminates.
+`tests/test_logging_setup.py` (14): the frozen path is under `%APPDATA%` and never under
+`_MEI*`, source builds are unchanged, and retention deletes only what this module wrote.
+`tests/test_vision_cleanup.py` (17): both dispatch points strip while still recording the
+credit, `translate_image` / `translate_multimodal` / `_dispatch_call` (the rotation route) all
+return clean text, and an unclosed tag is left alone rather than swallowing the answer.
+Verified as regression tests: restoring the ttkbootstrap dialog fails the end-to-end test after
+a 45 s hang, restoring the `__file__` log path fails 3, removing the pruning call fails 1, and
+unwrapping the two dispatch sites fails 5.
 
 ---
 

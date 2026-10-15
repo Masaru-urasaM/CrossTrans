@@ -2,7 +2,6 @@
 Translation Service for CrossTrans.
 Handles text translation using AI APIs with clipboard integration.
 """
-import re
 import time
 import queue
 import logging
@@ -12,6 +11,7 @@ import keyboard
 
 from src.constants import COOLDOWN, TRIAL_MODE_ENABLED, TRIAL_MODEL, TRIAL_PROXY_URL
 from src.core import furigana
+from src.core.text_cleanup import strip_thinking_tags
 from src.core.clipboard import ClipboardManager
 from src.core.api_manager import AIAPIManager
 from src.core.history import HistoryManager
@@ -19,27 +19,6 @@ from src.core.provider_health import ProviderHealthManager
 from src.core.quota_manager import QuotaManager
 from src.core.trial_api import TrialAPIClient, TrialAPIError
 from config import Config
-
-# Punctuation that indicates text is a sentence (not a dictionary query)
-# Includes English and Japanese keyboard characters
-# NOTE: Hyphen (-), apostrophe ('), underscore (_) are NOT included
-# because they can appear in single words like "self-aware", "don't"
-SENTENCE_PUNCTUATION = (
-    # Sentence endings
-    '.!?…。！？'
-    # Clause separators
-    ';:,；：、'
-    # Brackets (English)
-    '()[]{}<>'
-    # Brackets (Japanese)
-    '（）「」『』【】〈〉《》'
-    # Quotes
-    '""\'\'""'''
-    # Other symbols
-    '/\\@#&+=|~'
-    # Japanese equivalents
-    '／＼＠＃＆＋＝｜〜・'
-)
 
 
 class TranslationService:
@@ -137,42 +116,6 @@ class TranslationService:
         """Reconfigure API (call after API key change)."""
         self._configure_api()
 
-    def _is_dictionary_query(self, text: str) -> bool:
-        """Check if text looks like a dictionary lookup (single word/short phrase).
-
-        Uses language-aware tokenization for CJK languages (Japanese, Chinese, Korean, etc.)
-        which don't use spaces between words.
-        """
-        # Check for sentence punctuation first (quick exit)
-        # Uses comprehensive list from SENTENCE_PUNCTUATION constant
-        if any(c in text for c in SENTENCE_PUNCTUATION):
-            return False
-
-        text = text.strip()
-        if not text:
-            return False
-
-        # Try language-aware tokenization for CJK languages
-        try:
-            from src.core.nlp_manager import nlp_manager
-
-            # Detect language
-            detected_lang, confidence = nlp_manager.detect_language(text)
-
-            # Use NLP tokenization if available and confident
-            # Vietnamese now uses subprocess isolation to handle potential native code crashes
-            if confidence >= 0.6 and nlp_manager.is_installed(detected_lang):
-                tokens = nlp_manager.tokenize(text, detected_lang)
-                # Filter out empty tokens and punctuation-only tokens
-                tokens = [t for t in tokens if t.strip() and not all(c in SENTENCE_PUNCTUATION for c in t)]
-                return 1 <= len(tokens) <= 4
-        except Exception:
-            pass  # Fallback to simple split
-
-        # Fallback: simple whitespace split (for languages with spaces)
-        words = text.split()
-        return 1 <= len(words) <= 4
-
     @staticmethod
     def _is_japanese_text(text: str) -> bool:
         """Check if text contains Japanese characters (hiragana, katakana, or kanji)."""
@@ -200,8 +143,8 @@ class TranslationService:
     def _strip_thinking_tags(self, text: str) -> str:
         """Remove AI thinking/reasoning tags from response.
 
-        Some AI models (DeepSeek-R1, etc.) include their reasoning process
-        wrapped in <think>...</think> tags. This strips those out.
+        The API manager already strips its own results; this still covers the
+        trial-proxy path, which does not go through it.
 
         Args:
             text: Raw API response text
@@ -209,13 +152,7 @@ class TranslationService:
         Returns:
             Cleaned text with thinking tags removed
         """
-        if not text:
-            return text
-
-        # Pattern matches <think>...</think> including multiline content
-        # Using re.DOTALL so . matches newlines
-        cleaned = re.sub(r'<think>.*?</think>\s*', '', text, flags=re.DOTALL | re.IGNORECASE)
-        return cleaned.strip()
+        return strip_thinking_tags(text)
 
     def translate_text(self, text: str, target_language: str,
                        custom_prompt: Optional[str] = None,

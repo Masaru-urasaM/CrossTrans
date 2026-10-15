@@ -5,6 +5,46 @@
 
 ---
 
+## H1 — Health Review: the notice, the log, the vision strip — ✅ Done (2026-09-07) [unreleased]
+
+**Goal:** answer "is the project in good shape?" with measurements rather than documents, and fix
+whatever the measuring turned up. The suite, the tags, the release and the worker were all
+healthy; three defects were not visible from the docs at all, because each one only shows itself
+in the *shipped* app or in a state the tests never entered.
+
+**Delivered:**
+
+| # | What | Evidence it was real |
+|---|------|----------------------|
+| H1.1 | The "already running" notice no longer hangs the process | py-spy on a live hang: `wait_window` ← ttkbootstrap `Dialog.show()` ← `main.py:46`; a process resident since 2026-08-19, 19 days, no visible window |
+| H1.2 | The frozen app logs to `%APPDATA%/CrossTrans/logs`, pruned after 14 days | six orphaned `_MEI*` directories (202 MB), each holding a `logs/translator_*.log` PyInstaller had been deleting on exit |
+| H1.3 | `<think>` blocks stripped on the vision paths too | three callers (`app.py`, `screenshot_handler.py`, `pdf_ocr.py`) reached the API manager directly, past the only code that cleaned |
+
+**The mechanism behind H1.1, which is the part worth keeping:** ttkbootstrap builds its dialog
+with `transient=<the master>`, and **Tk withdraws a transient window whose master is withdrawn**.
+`main.py` withdraws its root, so the dialog was never mapped and `show()` waited for a click on a
+window that did not exist — invisible, unkillable except through Task Manager. The stdlib
+messagebox is a native Windows dialog (class `#32770`) that a withdrawn owner cannot hide;
+verified by enumerating window handles for both. A daemon watchdog calling `os._exit(0)` now
+backs it, so no future dialog can strand that path either.
+
+**Two general rules came out of it**, both now in CLAUDE.md → Known Issues: a withdrawn root
+breaks *any* transient dialog, not only ones that call `grab_set()`; and the frozen app must
+never derive a path from `__file__`, because under onefile it lands in the temp directory that is
+deleted on exit.
+
+**Tests:** 551 → 593. `test_single_instance_notice.py` (11, including an end-to-end test that
+holds the lock port and asserts a second instance really terminates), `test_logging_setup.py`
+(14), `test_vision_cleanup.py` (17). Each verified by reverting the production change: the
+end-to-end test hangs 45 s and fails, the log-path revert fails 3, removing the pruning call
+fails 1, unwrapping the two dispatch sites fails 5.
+
+**Decisions:** 12 (native dialog + watchdog), 13 (`%APPDATA%` + retention, JSONL deferred),
+14 (strip at the dispatch point, not at the callers). Findings left alone on purpose became
+**D4–D10** in `DEFERRED.md`.
+
+---
+
 ## F0–F7 — Furigana Everywhere — ✅ Done (2026-08-04 → 2026-08-17) [1.9.19]
 
 **Goal:** wherever the app displays Japanese, show hiragana readings above the kanji, with the

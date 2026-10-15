@@ -14,6 +14,7 @@ import base64
 
 from src.core.remote_config import get_config
 from src.core.multimodal import MultimodalProcessor
+from src.core.text_cleanup import strip_thinking_tags
 from src.core.ssl_pinning import get_ssl_context_for_url
 
 # Default models to try for each provider when model is "Auto"
@@ -21,19 +22,62 @@ from src.core.ssl_pinning import get_ssl_context_for_url
 # Keys match PROVIDERS_LIST exactly (Title Case)
 # NOTE: These are hardcoded fallbacks. The active list comes from get_config().
 DEFAULT_MODELS_BY_PROVIDER = {
-    'Google': ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'],
+    # All three previous entries answer 404 (checked 2026-09-08 with a real call):
+    # gemini-2.0-flash, gemini-1.5-flash and gemini-1.5-pro are retired. This list
+    # drives auto-pick and _try_model_rotation, so it keeps the old intent - a
+    # mid-tier flash model first - with IDs that exist, a faster one to rotate to
+    # when the first is busy (2.5-flash really did answer 503 mid-check), and an
+    # alias last that will survive the next deprecation.
+    'Google': ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest'],
     'OpenAI': ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo'],
     'Anthropic': ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022', 'claude-3-haiku-20240307'],
     'DeepSeek': ['deepseek-chat', 'deepseek-coder'],
-    'Groq': ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768'],
+    # All three previous entries were decommissioned by Groq (checked 2026-09-07).
+    # This list drives auto-pick and _try_model_rotation(), so it holds only models
+    # measured to answer a translation directly. Re-measured 2026-09-08 with a real
+    # call: gpt-oss-120b/20b answer in 0.6-0.7 s and put their reasoning in a
+    # SEPARATE 'reasoning' field, leaving content clean; qwen3.6-27b takes 1.3 s and
+    # 509 completion tokens against gpt-oss's 134, with <think> inline in content, so
+    # it depends on strip_thinking_tags() and costs 4x the tokens. qwen3.8-27b also
+    # answered 429 'Request too large ... on output' on one of two attempts.
+    # NB the OpenAI-compatible path sends NO max_tokens (see
+    # _call_generic_openai_style) - the hard limit there is its timeout=10, not a
+    # token budget. Only _call_anthropic caps output, at 1024.
+    'Groq': ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
     'xAI': ['grok-2', 'grok-beta'],
     'Mistral': ['mistral-large-latest', 'mistral-small-latest'],
     'Perplexity': ['sonar', 'sonar-pro'],
-    'Cerebras': ['llama-3.3-70b', 'llama3.1-70b'],
-    'SambaNova': ['Meta-Llama-3.3-70B-Instruct', 'Meta-Llama-3.1-70B-Instruct'],
+    # Both previous entries answered 404 "Model does not exist" (2026-09-08, real
+    # call). Cerebras only serves three models now. gpt-oss-120b leads because it is
+    # the one model here measured directly - on Groq's build it answers in 0.7 s with
+    # its reasoning in a separate field, leaving content clean. Cerebras's own build
+    # could not be called (402, the account has no credit), so that is an inference
+    # from the same base model on another provider, not a measurement of this one.
+    'Cerebras': ['gpt-oss-120b', 'qwen-3.8-27b'],
+    # Meta-Llama-3.1-70B-Instruct is gone from SambaNova's catalogue (2026-09-08);
+    # Meta-Llama-3.3-70B-Instruct survives and stays first. gemma-4-31B-it replaces
+    # the dead entry - a plain instruct model, deliberately not one of the MiniMax or
+    # DeepSeek reasoning models, since auto-pick wants boring and fast. Unverified by
+    # a real call: SambaNova returns 402 before it validates the model.
+    'SambaNova': ['Meta-Llama-3.3-70B-Instruct', 'gemma-4-31B-it'],
     'Together': ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo'],
     'SiliconFlow': ['deepseek-ai/DeepSeek-V3', 'Qwen/Qwen2.5-72B-Instruct'],
-    'OpenRouter': ['google/gemini-2.0-flash-exp:free', 'meta-llama/llama-3.3-70b-instruct:free'],
+    # Both previous entries are gone: google/gemini-2.0-flash-exp:free and
+    # meta-llama/llama-3.3-70b-instruct:free are absent from OpenRouter's live
+    # catalogue AND have zero routable endpoints (checked 2026-09-08; the two
+    # public signals agreed on all 20 IDs, so either is a sound death test).
+    # Free-tier by deliberate choice - an OpenRouter key with no credit still
+    # translates. The cost of that choice, accepted knowingly: every free model
+    # OpenRouter carries has exactly ONE endpoint, which is how both entries
+    # above died. These two at least fail independently, being served by
+    # different upstreams (Google AI Studio and Nvidia).
+    # UNVERIFIED BY A REAL CALL - no OpenRouter key was available. Both were
+    # confirmed routable, which proves they are not dead but not that they
+    # translate well. The risk to test is latency, not truncation: this path sends
+    # no max_tokens but does use timeout=10 (_call_generic_openai_style), and both
+    # of these lean reasoning/agentic. A model that thinks for eleven seconds fails
+    # even though its answer was fine.
+    'OpenRouter': ['google/gemma-4-31b-it:free', 'nvidia/nemotron-3.5-lightning:free'],
 }
 
 if TYPE_CHECKING:
@@ -452,15 +496,18 @@ class AIAPIManager:
 
     def _generate_content(self, provider: str, api_key: str, model_name: str,
                            prompt: str, image_path: Optional[str] = None) -> str:
-        """Dispatch one request and record which model served it.
+        """Dispatch one request, clean the answer, record which model served it.
 
         Every successful text/vision call in this class funnels through here, so
         recording the attribution once covers the configured model, an
         auto-detected one and any rotation substitute without eight separate
-        bookkeeping sites.
+        bookkeeping sites. Reasoning tags are stripped for the same reason: the
+        image, screenshot and PDF-OCR callers read this result directly, without
+        passing through TranslationService.
         """
-        result = self._route_generate_content(provider, api_key, model_name,
-                                              prompt, image_path)
+        result = strip_thinking_tags(
+            self._route_generate_content(provider, api_key, model_name,
+                                         prompt, image_path))
         self._record_attribution(model_name, provider)
         return result
 
@@ -1043,9 +1090,10 @@ class AIAPIManager:
     def _generate_content_multimodal(self, provider: str, api_key: str, model_name: str,
                                       prompt: str, image_paths: List[str],
                                       file_contents: Dict[str, str]) -> str:
-        """Multimodal dispatch; records the attribution like _generate_content."""
-        result = self._route_generate_multimodal(provider, api_key, model_name,
-                                                 prompt, image_paths, file_contents)
+        """Multimodal dispatch; cleans and attributes like _generate_content."""
+        result = strip_thinking_tags(
+            self._route_generate_multimodal(provider, api_key, model_name,
+                                            prompt, image_paths, file_contents))
         self._record_attribution(model_name, provider)
         return result
 

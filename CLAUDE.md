@@ -108,7 +108,16 @@ Key points:
 
 - **os._exit(0) cleanup**: `os._exit(0)` skips Python cleanup (atexit handlers, file flushes). This is intentional to bypass Tkinter's exception handling. A 0.5s sleep before `os._exit()` ensures log flushing.
 
-- **Single instance**: TCP socket lock on `127.0.0.1:47823` (see `src/utils/single_instance.py`)
+- **Single instance**: TCP socket lock on `127.0.0.1:47823` (see `src/utils/single_instance.py`).
+  The lock also **serves show requests** (D4): a second instance sends `SHOW_REQUEST` and the
+  running one raises its window plus a 2 s toast, instead of the old "look in the tray" dialog.
+  **The acknowledgement is load-bearing** - `listen()` predates the accept loop, so connecting
+  succeeds against any older build and the request just rots in the backlog (seen on 2026-09-08:
+  CLOSE_WAIT against a running 1.9.20). Only a reply distinguishes a version that will act from
+  one that will not, and without it a mid-upgrade launch would exit silently having done nothing.
+  The notice dialog and its watchdog remain, as the fallback for exactly that case.
+  Tests must pass `port=` rather than reach for `LOCK_PORT`: the developer's own CrossTrans holds
+  it, so a suite that uses it either skips or throws a window onto the screen mid-run.
 
 - **ttkbootstrap discards explicit colours on standard `tk` widgets**: it re-themes them at construction, so `tk.Label(fg='#80b8ff', bg='#363636')` comes back `fg='#ffffff'`, `bg='#222222'`. Measured, not theoretical — it is why the furigana reading colour never actually shipped before v1.9.19. Pass `autostyle=False` whenever a colour must survive - use `ruby_text.NO_AUTOSTYLE`, which guards the kwarg for the no-ttkbootstrap case. `tag_configure()` colours are **not** affected, only widget options. Leave a widget themed when it should match the frame around it.
 
@@ -124,6 +133,22 @@ Key points:
 
 - **Never use `grab_set()` on popups**: Tkinter `grab_set()` + `transient(hidden_root)` causes permanent UI freeze. The root window is withdrawn, so modal grab locks all input with no visible dialog to dismiss. Always use `attributes('-topmost', True)` + `lift()` + `focus_force()` + `after(100, topmost=False)` pattern instead.
 
+- **A ttkbootstrap dialog on a withdrawn root never appears, and blocks forever.** The same trap
+  from the other side: `Messagebox`/`Dialog.show()` builds its toplevel with
+  `transient=<the master>` and then calls `grab_set()` + `wait_window()`. **Tk withdraws a
+  transient window whose master is withdrawn**, so the dialog is never mapped — `show()` waits
+  for a click on a window that does not exist. `main.py`'s "already running" notice did this and
+  left a process resident for 19 days with no visible window (measured 2026-09-07 with py-spy;
+  see Decision 12). For a notice on a hidden root use **stdlib `tkinter.messagebox`** — on
+  Windows it is a native dialog (class `#32770`), which a withdrawn owner cannot hide — and give
+  any such path a watchdog that force-exits, so a future dialog cannot strand a process either.
+
+- **The frozen app must not derive paths from `__file__`.** Under a onefile build it resolves
+  inside `_MEIxxxxx`, the temp directory PyInstaller deletes on exit. `setup_logging()` did this
+  and threw away every log the shipped EXE ever wrote. Frozen paths belong under
+  `%APPDATA%/CrossTrans` (`logging_setup.resolve_log_dir()`, guarded by `is_frozen()`); anything
+  written there needs its own retention, hence `prune_old_logs()`.
+
 ## Remote Config System (Important)
 
 Models, providers, and API URLs are dynamically fetched from Cloudflare Worker KV.
@@ -133,6 +158,41 @@ Hardcoded values in `constants.py` serve as fallback defaults.
 1. **Remote**: Cloudflare Worker `GET /v1/config` -> KV namespace `MODELS_KV`
 2. **Local cache**: `%APPDATA%/CrossTrans/models_config.json` (24h TTL)
 3. **Hardcoded**: `constants.py` values (always available, compiled into EXE)
+
+**Groq and Google come from their own APIs, not from OpenRouter.** The cron's OpenRouter
+data lags badly for both - on 2026-09-08 it still listed `gemini-2.0-flash`, retired and
+answering 404 - so `fetchGroqModels()` and `fetchGeminiModels()` query each provider directly
+and replace its slice of `model_provider_map` outright (Steps 5.5 and 5.6). Both fail closed to
+the static list and report `groq_source` / `gemini_source` in `cache_meta`. The remaining
+11 providers are still OpenRouter-derived - see DEFERRED D11.
+
+**`default_models_by_provider` is hand-written and the cron does NOT regenerate it**
+(`STATIC_DEFAULT_MODELS_BY_PROVIDER`). It is what auto-detection and `_try_model_rotation()`
+read when the model field is blank, so a stale entry costs a real user a silent failed attempt
+per model - which is exactly what happened to Groq, Google and OpenRouter, all three of which
+had **entirely** dead lists. Verify an entry with a real API call before trusting it:
+**presence in a provider's `/models` listing is not enough** (`gemini-2.5-pro` is listed and
+404s on use). An intermediary's listing is weaker still - OpenRouter names Groq as an upstream
+for `llama-3.3-70b-instruct`, which Groq's own catalogue does not carry at all.
+
+**A default must also identify as its own provider**, or it reaches the wrong API. Under
+`provider='Auto'` the chosen model goes back through `_identify_provider()`, which matches
+`model_provider_map` first and then falls through to prefix rules where **`google/` and
+`meta-llama/` both mean Together**. Both dead OpenRouter defaults were being mis-routed there on
+top of being retired, and the replacement `google/gemma-4-31b-it:free` did the same until it was
+listed in the map. So: **every entry in `default_models_by_provider` must also appear in
+`MODEL_PROVIDER_MAP` under the same provider.** `tests/test_default_model_routing.py` asserts the
+round-trip for all thirteen providers at tier 3, where `constants.py` is the only list there is.
+
+**A provider missing from `API_KEY_PATTERNS` is read as Google.** `_detect_provider_from_key()`
+ends in `return 'Google'`, so a key it cannot place picks up Google's default model and sends it
+to the user's own provider - silent, and indistinguishable from a dead model. Cerebras had this
+until `csk-` was added (2026-09-08). Still uncovered: OpenAI, DeepSeek, Mistral, Together,
+SiliconFlow, SambaNova - and **SambaNova can never be covered**, its keys are bare UUIDs.
+
+**Thirteen model IDs are claimed by two providers at once**, and `_identify_provider()` returns
+the first match, so one of the two always loses (DEFERRED D12). It only matters under
+`provider='Auto'`. Do not "fix" it by deleting a real model from a provider's list.
 
 ### Key module: `src/core/remote_config.py`
 - Singleton `RemoteConfigManager` with thread-safe RLock
@@ -166,6 +226,8 @@ Hardcoded values in `constants.py` serve as fallback defaults.
 - `file_processor.py` - Document extraction (.docx, .txt, .srt)
 - `pdf_ocr.py` - Scanned PDF OCR support
 - `crypto.py` - Secure API key storage (DPAPI encryption)
+- `text_cleanup.py` - `strip_thinking_tags()`: the single place `<think>...</think>` is removed,
+  called from the API manager's two dispatch points so vision callers are covered too
 - `auth.py` - Windows Hello authentication
 - `provider_health.py` - Smart provider fallback
 - `quota_manager.py` - Trial mode quota tracking
@@ -195,6 +257,14 @@ Hardcoded values in `constants.py` serve as fallback defaults.
 
 - `updates.py` - Auto-update system (check, download, install)
 - `single_instance.py` - TCP socket lock for single instance
+- `logging_setup.py` - log file setup; `resolve_log_dir()` (%APPDATA% when frozen, repo `logs/`
+  from source), `prune_old_logs()` (14-day retention **plus** rotated `.log.N` siblings),
+  `JsonLinesFormatter`. **The file log is JSONL, the console is not** - a terminal has a
+  human in front of it. `tag` comes off a `[Bracket]` prefix when the message has one and
+  from `record.module` otherwise, so none of the ~458 call sites had to change; keep writing
+  `logging.info("[Thing] ...")` and it lands in `tag`. Not buffered, deliberately: the
+  updater's `os._exit(0)`, the crash hook and the already-running watchdog all end the
+  process without cleanup, and a buffer would drop exactly the lines that matter
 - `ui_helpers.py` - Dark title bar, word filtering utilities
 
 ## Build
@@ -232,6 +302,17 @@ system cannot find the drive specified." Both measured; a test guards the first.
 ```bash
 pytest tests/ --cov=src
 ```
+
+CI runs the same suite on `windows-latest` for every push and PR
+(`.github/workflows/tests.yml`). Windows only - the app registers global hotkeys,
+reads the registry and the clipboard through pywin32, and draws Tk widgets.
+
+**A green tick is checked, not trusted.** `conftest.py`'s `tk_root` fixture *skips*
+without a usable display and 312 of the tests need one, so a runner with no desktop
+session would skip half the suite and still pass. `tools/check_test_counts.py` reads
+the JUnit XML and fails the build when more tests were skipped than a healthy run
+explains (`DEFAULT_MAX_SKIPPED`), or when suspiciously few were collected at all.
+Raise the ceiling only for a skip you can name.
 
 ## Run
 
@@ -428,7 +509,8 @@ Dictionary mode filters tokens before displaying as clickable buttons:
 ### Auto-dictionary detection REMOVED
 `translate()` no longer auto-switches to dictionary mode for short text (1-4 words).
 Dictionary lookup only happens through the dedicated Dictionary button.
-The `_is_dictionary_query()` method still exists but is unused.
+`_is_dictionary_query()` and the `SENTENCE_PUNCTUATION` constant it was the only user of
+were deleted on 2026-09-07 (D8) - do not reintroduce them to "restore" the behaviour.
 
 ### Custom Word Boxes
 

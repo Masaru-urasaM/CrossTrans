@@ -182,14 +182,24 @@ PROVIDERS_LIST = [
 # Updated January 2026 with all active models
 MODEL_PROVIDER_MAP = {
     # === GOOGLE (Gemini) ===
+    # Verified 2026-09-08 by a real generateContent call per model. Six of the
+    # eight IDs that used to sit here answer 404: the whole 2.0 line,
+    # gemini-3-flash (the live name is gemini-3-flash-preview) and
+    # gemini-2.5-flash-preview-image. gemini-2.5-pro is *listed* by the API and
+    # still 404s on use ("no longer available to new users") - which is why
+    # presence in /models is not the test here, a call is.
+    # Chat models only: the same endpoint also serves tts, image, transcribe,
+    # robotics, computer-use, lyria (music), nano-banana (image) and the agentic
+    # deep-research / antigravity families, none of which translate.
     'Google': [
-        # Gemini 3.0 Series
-        'gemini-3-flash',
-        # Gemini 2.5 Series
-        'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite',
-        'gemini-2.5-flash-preview-image',
-        # Gemini 2.0 Series
-        'gemini-2.0-flash', 'gemini-2.0-flash-exp', 'gemini-2.0-flash-lite',
+        # Gemini 3.x flash
+        'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash',
+        'gemini-3.5-flash', 'gemini-3.5-flash-lite',
+        'gemini-3.1-flash-lite', 'gemini-3-flash-preview',
+        # Gemini 2.5
+        'gemini-2.5-flash', 'gemini-2.5-flash-lite',
+        # Aliases that follow the current release, so they cannot go stale
+        'gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-pro-latest',
     ],
     # === OPENAI ===
     'OpenAI': [
@@ -227,20 +237,21 @@ MODEL_PROVIDER_MAP = {
         'deepseek-v3', 'deepseek-v2.5',
     ],
     # === GROQ ===
+    # Verified against Groq's own /models endpoint 2026-09-07. The entire Llama
+    # chat line is decommissioned: 15 of the 17 IDs that used to sit here are
+    # gone, and the 2 survivors were whisper - a speech model that was never a
+    # translation candidate. Only reached in tier-3 fallback (remote config
+    # unreachable AND no local cache), which is exactly when offering a model
+    # that 404s is worst. Live but deliberately absent: whisper / orpheus
+    # (speech), *-guard and gpt-oss-safeguard (classifiers), allam-2-7b (Arabic
+    # specialist, 4k ctx), groq/compound* (agentic - multi-step, and it cannot
+    # hold the trial proxy's 15 s timeout).
     'Groq': [
-        # Llama 3.3
-        'llama-3.3-70b-versatile', 'llama-3.3-70b-specdec',
-        # Llama 3.2
-        'llama-3.2-1b-preview', 'llama-3.2-3b-preview',
-        'llama-3.2-11b-vision-preview', 'llama-3.2-90b-vision-preview',
-        # Llama 3.1
-        'llama-3.1-70b-versatile', 'llama-3.1-8b-instant',
-        # Llama 3
-        'llama3-70b-8192', 'llama3-8b-8192', 'llama-guard-3-8b',
-        # Mixtral & Gemma
-        'mixtral-8x7b-32768', 'gemma-7b-it', 'gemma2-9b-it',
-        # Whisper (Audio)
-        'whisper-large-v3', 'whisper-large-v3-turbo', 'distil-whisper-large-v3-en',
+        # GPT-OSS - 131k ctx, answers directly (measured: no reasoning preamble)
+        'openai/gpt-oss-120b', 'openai/gpt-oss-20b',
+        # Qwen 3 - 131k ctx, multilingual; emits <think>, which
+        # text_cleanup.strip_thinking_tags() removes on every path
+        'qwen/qwen3.6-27b', 'qwen/qwen3.8-27b',
     ],
     # === XAI (Grok) ===
     'xAI': [
@@ -273,25 +284,27 @@ MODEL_PROVIDER_MAP = {
         'llama-3.1-sonar-huge-128k-online',
     ],
     # === CEREBRAS ===
+    # Cerebras serves exactly three models (its own /models, 2026-09-08 with a
+    # real key). All SIX IDs that used to be here are gone - the whole Llama line
+    # and qwen-3-32b - and llama-3.3-70b / llama3.1-70b answered a real request
+    # with 404 "Model does not exist". The three below returned 402 "Payment
+    # required" instead, which is the useful distinction: Cerebras validates the
+    # model before it checks billing, so 402 proves the model exists where 404
+    # proves it does not. Not callable beyond that - the key has no credit.
     'Cerebras': [
-        # Llama Series
-        'llama-4-scout-17b', 'llama-4-maverick-17b',
-        'llama-3.3-70b', 'llama3.1-8b', 'llama3.1-70b',
-        # Qwen Series
-        'qwen-3-32b',
+        'gpt-oss-120b', 'qwen-3.8-27b', 'gemma-4-31b',
     ],
     # === SAMBANOVA ===
+    # SambaNova's own /models, 2026-09-08 with a real key: 11 of the 12 IDs that
+    # used to be here are gone - every DeepSeek-R1 variant, the whole Llama 3.1/3.2
+    # line and all three Qwen entries. Only Meta-Llama-3.3-70B-Instruct survived.
+    # Weaker evidence than Cerebras and Google, deliberately noted: SambaNova checks
+    # billing BEFORE model validity, so every call returned 402 - including one for
+    # a model absent from its own catalogue. The listing is the only evidence here;
+    # no model below has been sent a real translation.
     'SambaNova': [
-        # DeepSeek
-        'DeepSeek-R1', 'DeepSeek-R1-Distill-Llama-70B', 'DeepSeek-R1-Distill-Qwen-32B',
-        # Llama 3.3
-        'Meta-Llama-3.3-70B-Instruct',
-        # Llama 3.2
-        'Meta-Llama-3.2-1B-Instruct', 'Meta-Llama-3.2-3B-Instruct',
-        # Llama 3.1
-        'Meta-Llama-3.1-8B-Instruct', 'Meta-Llama-3.1-70B-Instruct', 'Meta-Llama-3.1-405B-Instruct',
-        # Qwen
-        'Qwen2.5-72B-Instruct', 'Qwen2.5-Coder-32B-Instruct', 'QwQ-32B-Preview',
+        'Meta-Llama-3.3-70B-Instruct', 'gemma-4-31B-it', 'gpt-oss-120b',
+        'DeepSeek-V3.2', 'DeepSeek-V3.1', 'MiniMax-M3', 'MiniMax-M2.7',
     ],
     # === TOGETHER ===
     'Together': [
@@ -331,21 +344,41 @@ MODEL_PROVIDER_MAP = {
         'Pro/Qwen/Qwen2.5-7B-Instruct', 'Pro/deepseek-ai/DeepSeek-V3',
     ],
     # === OPENROUTER (aggregator - common models) ===
+    # Tier-3 fallback only: the Worker rebuilds this list from OpenRouter's live
+    # catalogue on every cron, so tiers 1 and 2 already carry ~426 current IDs.
+    # It is reached on a fresh install with no network, which is exactly when a
+    # dead entry is least recoverable - and 9 of the 20 that used to be here were
+    # dead (checked 2026-09-08 against the live catalogue AND the per-model
+    # /endpoints resource, which agreed exactly): o1-mini, claude-3.5-sonnet,
+    # claude-3-opus, gemini-2.0-flash-exp, gemini-pro, gemini-flash-1.5,
+    # llama-3.1-405b-instruct, mixtral-8x7b-instruct, qwq-32b-preview.
+    # Every ID below has at least one routable endpoint. No ':batch' variants -
+    # those are async batch endpoints and cannot serve an interactive translation.
     'OpenRouter': [
         # OpenAI
-        'openai/gpt-4o', 'openai/gpt-4-turbo', 'openai/gpt-3.5-turbo', 'openai/o1', 'openai/o1-mini',
+        'openai/gpt-4o', 'openai/gpt-4o-mini', 'openai/gpt-4-turbo',
+        'openai/gpt-3.5-turbo', 'openai/o1',
         # Anthropic
-        'anthropic/claude-3.5-sonnet', 'anthropic/claude-3-opus', 'anthropic/claude-3-haiku',
+        'anthropic/claude-sonnet-5', 'anthropic/claude-opus-5', 'anthropic/claude-3-haiku',
         # Google
-        'google/gemini-2.0-flash-exp', 'google/gemini-pro', 'google/gemini-flash-1.5',
+        'google/gemini-3.8-flash', 'google/gemini-2.5-flash', 'google/gemini-2.5-flash-lite',
         # Meta
-        'meta-llama/llama-3.3-70b-instruct', 'meta-llama/llama-3.1-70b-instruct', 'meta-llama/llama-3.1-405b-instruct',
+        'meta-llama/llama-3.3-70b-instruct', 'meta-llama/llama-3.1-70b-instruct',
+        'meta-llama/llama-4-maverick',
         # Mistral
-        'mistralai/mistral-large', 'mistralai/mixtral-8x7b-instruct',
+        'mistralai/mistral-large', 'mistralai/mistral-medium-3-5',
         # DeepSeek
         'deepseek/deepseek-chat', 'deepseek/deepseek-r1',
         # Qwen
-        'qwen/qwen-2.5-72b-instruct', 'qwen/qwq-32b-preview',
+        'qwen/qwen-2.5-72b-instruct', 'qwen/qwen3.8-flash',
+        # Free tier - these two are also the OpenRouter entries in
+        # DEFAULT_MODELS_BY_PROVIDER, and they MUST stay listed here.
+        # _identify_provider() matches this map first; miss it and
+        # 'google/gemma-4-31b-it:free' falls through to the 'google/' prefix
+        # rule, which answers Together and sends an sk-or-v1- key to the wrong
+        # API. Measured 2026-09-08 on the tier-3 path, where this list is the
+        # only one there is - and it is what the old defaults were doing.
+        'google/gemma-4-31b-it:free', 'nvidia/nemotron-3.5-lightning:free',
     ],
     # === HUGGINGFACE ===
     'HuggingFace': [
@@ -375,7 +408,13 @@ API_KEY_PATTERNS = {
     'sk-or-v1-': 'OpenRouter', # OpenRouter keys
     'pplx-': 'Perplexity',    # Perplexity keys
     'hf_': 'HuggingFace',     # HuggingFace keys start with hf_
+    'csk-': 'Cerebras',       # Cerebras keys start with csk-
     # Note: sk- is used by OpenAI, DeepSeek, Together, SiliconFlow - need model name
+    # SambaNova cannot be added: its keys are bare UUIDs with no prefix to match.
+    # A provider missing from this table falls through _detect_provider_from_key()
+    # to its 'default to Google' branch, so a Cerebras user with Provider=Auto and
+    # a blank model field was being handed gemini-2.5-flash and sending it to
+    # api.cerebras.ai (measured 2026-09-08).
 }
 
 # ============== VISION MODELS ==============
@@ -385,7 +424,10 @@ VISION_MODELS = {
     'google': ['gemini-*'],  # All Gemini models support vision
     'openai': ['gpt-4-vision-*', 'gpt-4o', 'gpt-4o-*'],  # Note: o1 models do NOT support vision
     'anthropic': ['claude-3-*', 'claude-3.5-*', 'claude-3-5-*'],  # Wildcard support
-    'groq': ['llama-3.2-*-vision-*', 'llava-*'],
+    # Measured 2026-09-07 with a 2x2 PNG: qwen3 accepts images; gpt-oss-*,
+    # groq/compound* and allam-2-7b reject them ('content must be a string').
+    # The llama-3.2 vision previews and llava are gone from Groq entirely.
+    'groq': ['qwen/qwen3*'],
     'xai': ['grok-*-vision*', 'grok-vision-*'],
     'mistral': ['pixtral-*'],
     'together': ['meta-llama/Llama-3.2-*-Vision-*', 'Qwen/Qwen2-VL-*', '*-vision-*'],
