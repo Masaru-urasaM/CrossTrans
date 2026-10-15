@@ -2,8 +2,9 @@
 
 > **Status: 🔨 IN PROGRESS** on branch `feature/japanese-language-identity` (from `main` after
 > the merge of `h1-health-review`, `f28a276`). **J0 ✅ and J1 ✅ done 2026-10-15** (§6).
-> **J2 ✅ and J3 ✅ done 2026-10-15** (`src/core/lang_id.py`, Decision 24; the dictionary
-> result window reads the stated source and both languages of an entry).
+> **J2 ✅, J3 ✅ and J4 ✅ done 2026-10-15** (`src/core/lang_id.py`, Decision 24; the dictionary
+> result window reads the stated source and both languages of an entry; translation prompts
+> state the source or ask the model for a `[[SOURCE: ...]]` line, Decision 25).
 > **D13-D15 ✅ done 2026-10-15** at the user's request: one Dictionary mode serves both buttons
 > (Decision 23), so every later phase changes it once; a failed lookup shows its message; no
 > `grab_set()` in its dialogs. Closing D15 surfaced D16 (`UpdateFailedDialog`, DEFERRED.md).
@@ -779,7 +780,17 @@ annotated; I1 on every fixture; `overhead_px()` grows with the new readings; the
 and the examples carry readings. Then Settings → Hotkeys → Furigana OFF → look up again → no
 readings anywhere, and the looked-up word is still colour-highlighted.
 
-### J4 - The model reports the source language  *(Q1 + Q7; replaces the old J4 and J11)*
+### J4 - The model reports the source language  *(Q1 + Q7; replaces the old J4 and J11)*  ✅ Done (2026-10-15)
+
+> **Result** (Decision 25): `src/core/source_marker.py` + `TranslationService._call_with_source()`,
+> `last_source_language`, `source_verdict(text)`; History's `source_verdict` field. **Measured
+> before wiring** (`--mode translate`, ten words alone, target English, Google + Groq second
+> keys): marker written **10/10 and 10/10**, never leaked; verdicts Japanese 5 / 4, Chinese 2 / 2
+> (汽車, 工作 - confidently wrong), **Unknown 3 / 4** (床, 先生, 結構, 新聞, 愛人). Every Japanese
+> verdict came with the Japanese sense, every Chinese one with the Chinese sense. Sense accuracy
+> from a word alone is unchanged (within noise) - the model has nothing more to go on. Cache not
+> namespaced (step 5: no). Tests 952 → 1011; 20 mutations killed. **For J5/J6:** an Unknown
+> verdict is common enough for the chooser to matter; a wrong Chinese verdict is not caught.
 
 The old J4 (a Settings default with Windows-locale inference) was **declined** by the user's Q1
 answer - do not build it. Design in §3.1; approve the details below before coding.

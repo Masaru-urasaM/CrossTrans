@@ -1,4 +1,4 @@
-"""Measure what real models answer to the dictionary prompt (manual - never run in CI).
+"""Measure what real models answer to the dictionary and translation prompts (manual - never run in CI).
 
 A kanji-only headword is ambiguous on its own: 手紙 is "letter" in Japanese and
 "toilet paper" in Chinese. The dictionary prompt used to send such a word with
@@ -19,13 +19,25 @@ Conditions (what the lookup is told besides the headword):
 Only `bare` exists before the prompt learned source and context; the tool says so
 rather than silently measuring something else.
 
+`--mode translate` sends each headword alone through `translate_or_fix()` instead -
+what a language hotkey does with a selection - and records whether the answer
+began with the `[[SOURCE: ...]]` line the prompt asks for on ambiguous kanji-only
+text (Phase J4), which language it named, and the sense of the translation:
+
+    python tools/eval_dictionary_prompt.py --mode translate --label before --key 2
+    python tools/eval_dictionary_prompt.py --mode translate --label after --key 2
+
+`--key N` measures each provider's N-th configured key (a free key whose daily
+quota is spent answers nothing but 429s).
+
 Real API calls, on the user's own keys: one call per word per provider. `trial`
 goes through the trial proxy and spends this device's daily trial quota, so it is
 never in the default provider list. The tool never writes config.json - provider
 health, history and the local trial counter are left alone.
 
-Output: logs/eval/dictionary_<label>.jsonl, one JSON object per call, including
-the raw answer so a surprising verdict can be read in full.
+Output: logs/eval/dictionary_<label>.jsonl (translate mode: translate_<label>.jsonl),
+one JSON object per call, including the raw answer so a surprising verdict can be
+read in full.
 """
 import argparse
 import hashlib
@@ -90,6 +102,19 @@ class _NoQuota:
         pass
 
 
+class _NoHistory:
+    """Stand-in for HistoryManager: never a cache hit, records nothing."""
+
+    def find_cached_entry(self, *args, **kwargs):
+        return None
+
+    def find_source_verdict(self, *args, **kwargs):
+        return None
+
+    def add_entry(self, *args, **kwargs) -> None:
+        pass
+
+
 def parse_entry(answer: str) -> Dict[str, Optional[str]]:
     """Pull the named fields out of the first `## [word]` entry of an answer."""
     from src.ui.dictionary_render import FIELD_RE
@@ -126,37 +151,51 @@ def sense_verdict(translation: Optional[str], ja_words: List[str],
     return 'ja' if ja else 'zh' if zh else 'neither'
 
 
-def prompt_version() -> str:
+def prompt_version(mode: str = 'dictionary') -> str:
     """Short hash of the code that writes the prompt, so rows from different wordings of
     the prompt are never pooled by mistake."""
     from src.core.translation import TranslationService
-    source = inspect.getsource(TranslationService.dictionary_lookup)
+    if mode == 'translate':
+        source = inspect.getsource(TranslationService.translate_or_fix)
+        module = 'src.core.source_marker'
+    else:
+        source = inspect.getsource(TranslationService.dictionary_lookup)
+        module = 'src.core.dictionary_prompt'
     try:
-        import src.core.dictionary_prompt as dictionary_prompt
-        source += inspect.getsource(dictionary_prompt)
+        import importlib
+        source += inspect.getsource(importlib.import_module(module))
     except ImportError:          # before the prompt moved into its own module
         pass
     return hashlib.sha1(source.encode('utf-8')).hexdigest()[:10]
 
 
-def build_services(config, wanted: List[str]):
+def build_services(config, wanted: List[str], key_index: int = 1):
     """One (label, service) per wanted provider, each limited to that provider's
-    first key, with no health manager and no model rotation - so the provider
-    that answers is the one being measured, and nothing is written back."""
+    `key_index`-th key (1-based), with no health manager, no model rotation and no
+    history - so the provider that answers is the one being measured, and nothing
+    is written back."""
     from src.core.api_manager import AIAPIManager
     from src.core.translation import TranslationService
     from src.core.trial_api import TrialAPIClient
 
-    by_provider: Dict[str, dict] = {}
+    keys_by_provider: Dict[str, List[dict]] = {}
     for key_cfg in config.get_api_keys():
         if not (key_cfg.get('api_key') or '').strip():
             continue
-        by_provider.setdefault((key_cfg.get('provider') or 'Auto'), key_cfg)
+        keys_by_provider.setdefault((key_cfg.get('provider') or 'Auto'), []).append(key_cfg)
+    by_provider: Dict[str, dict] = {}
+    for provider, keys in keys_by_provider.items():
+        if len(keys) >= key_index:
+            by_provider[provider] = keys[key_index - 1]
+        else:
+            print(f"SKIP {provider}: has {len(keys)} key(s), --key {key_index} asked")
 
     services = []
     for name in wanted:
         svc = TranslationService.__new__(TranslationService)
         svc.last_attribution = None
+        svc.last_source_language = None
+        svc.history_manager = _NoHistory()
         if name.lower() == 'trial':
             device_id = config.get('device_id')
             if not device_id:
@@ -185,7 +224,10 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--label', required=True,
-                        help='names the output file: logs/eval/dictionary_<label>.jsonl')
+                        help='names the output file: logs/eval/<mode>_<label>.jsonl')
+    parser.add_argument('--mode', choices=('dictionary', 'translate'), default='dictionary')
+    parser.add_argument('--key', type=int, default=1,
+                        help="measure each provider's N-th configured key (1-based)")
     parser.add_argument('--condition', choices=CONDITIONS, default='bare')
     parser.add_argument('--providers', default='',
                         help="comma-separated, e.g. 'Google,Groq,trial'; "
@@ -205,6 +247,9 @@ def main(argv=None) -> int:
     from config import Config
     from src.core.translation import TranslationService
 
+    if args.mode == 'translate':
+        return run_translate(args)
+
     params = inspect.signature(TranslationService.dictionary_lookup).parameters
     needs = {'context': ['context'], 'source-context': ['source_language', 'context']}
     missing = [p for p in needs.get(args.condition, []) if p not in params]
@@ -217,7 +262,7 @@ def main(argv=None) -> int:
     configured = sorted({(k.get('provider') or 'Auto') for k in config.get_api_keys()
                          if (k.get('api_key') or '').strip()})
     wanted = [p.strip() for p in args.providers.split(',') if p.strip()] or configured
-    services, _ = build_services(config, wanted)
+    services, _ = build_services(config, wanted, args.key)
     if not services:
         print("FAIL: no provider to measure")
         return 2
@@ -287,6 +332,108 @@ def main(argv=None) -> int:
         for r in mine:
             translation = (r['translation'] or r['error'] or '')[:70]
             print(f"    {r['word']:<4} {(r['field2'] or '-')[:22]:<22} {r['sense']:<8} {translation}")
+    return 0
+
+
+def run_translate(args) -> int:
+    """`--mode translate`: each headword alone through translate_or_fix()."""
+    from config import Config
+    try:
+        from src.core.source_marker import parse_source_marker
+    except ImportError:          # before the prompts learned the source language
+        parse_source_marker = None
+
+    config = Config()
+    configured = sorted({(k.get('provider') or 'Auto') for k in config.get_api_keys()
+                         if (k.get('api_key') or '').strip()})
+    wanted = [p.strip() for p in args.providers.split(',') if p.strip()] or configured
+    services, _ = build_services(config, wanted, args.key)
+    if not services:
+        print("FAIL: no provider to measure")
+        return 2
+
+    words = EVAL_WORDS
+    if args.words:
+        chosen = {w.strip() for w in args.words.split(',')}
+        words = [w for w in EVAL_WORDS if w[0] in chosen]
+
+    version = prompt_version('translate')
+    out_dir = os.path.join(ROOT, 'logs', 'eval')
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f'translate_{args.label}.jsonl')
+
+    rows = []
+    with open(out_path, 'a', encoding='utf-8') as out:
+        for provider, svc in services:
+            # Keep the model's own words: the service strips the marker line.
+            seen = {}
+            real_call = svc._call_model
+
+            def recording_call(prompt, _real=real_call, _seen=seen):
+                _seen['prompt'] = prompt
+                _seen['raw'] = _real(prompt)
+                return _seen['raw']
+
+            svc._call_model = recording_call
+            for i, (word, _sentence, ja_words, zh_words) in enumerate(words):
+                if i or provider != services[0][0]:
+                    time.sleep(args.delay)
+                seen.clear()
+                started = time.time()
+                result, error = '', None
+                try:
+                    result = svc.translate_or_fix(word, args.target, skip_cache=True)
+                    if result.startswith('Error:'):
+                        error, result = result, ''
+                except Exception as exc:  # recorded, never fatal: one bad call
+                    error = f'{type(exc).__name__}: {exc}'
+                raw_answer = seen.get('raw', '')
+                marker_found, verdict = None, None
+                if parse_source_marker and raw_answer:
+                    _clean, verdict, marker_found = parse_source_marker(raw_answer)
+                row = {
+                    'ts': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+                    'label': args.label,
+                    'mode': 'translate',
+                    'prompt_version': version,
+                    'provider': provider,
+                    'model': svc.last_attribution,
+                    'word': word,
+                    'target': args.target,
+                    'asked_marker': '[[SOURCE:' in seen.get('prompt', ''),
+                    'marker_found': marker_found,
+                    'verdict': verdict,
+                    'service_verdict': getattr(svc, 'last_source_language', None),
+                    'result': result,
+                    'sense': sense_verdict(result, ja_words, zh_words),
+                    'elapsed_s': round(time.time() - started, 2),
+                    'error': error,
+                    'raw': raw_answer,
+                }
+                out.write(json.dumps(row, ensure_ascii=False) + '\n')
+                out.flush()
+                rows.append(row)
+                status = error or (f"marker={marker_found} verdict={verdict} "
+                                   f"sense={row['sense']} result={result[:40]!r}")
+                print(f"[{provider}] {word}: {status}")
+
+    print(f"\nwrote {len(rows)} rows to {out_path}\n")
+    for provider, _svc in services:
+        mine = [r for r in rows if r['provider'] == provider]
+        ok = [r for r in mine if not r['error']]
+        markers = sum(1 for r in ok if r['marker_found'])
+        verdicts = {}
+        for r in ok:
+            verdicts[r['verdict'] or 'none'] = verdicts.get(r['verdict'] or 'none', 0) + 1
+        senses = {s: sum(1 for r in ok if r['sense'] == s) for s in ('ja', 'zh', 'both', 'neither')}
+        leaked = sum(1 for r in ok if '[[SOURCE' in (r['result'] or '').upper())
+        model = next((r['model'] for r in ok if r['model']), '?')
+        print(f"{provider} ({model}) [translate -> {args.target}]: {len(ok)}/{len(mine)} answered, "
+              f"marker {markers}/{len(ok)}, verdicts {verdicts}, sense {senses}, "
+              f"marker leaked into the result {leaked}")
+        for r in mine:
+            print(f"    {r['word']:<4} {str(r['verdict'] or '-'):<22} {r['sense']:<8} "
+                  f"{(r['result'] or r['error'] or '')[:60]}")
     return 0
 
 

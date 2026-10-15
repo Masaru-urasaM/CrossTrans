@@ -5,6 +5,48 @@ approaches. Newest first.
 
 ---
 
+### Decision 25 - How a translation prompt asks the model for the source language
+
+**Date**: 2026-10-15
+**Status**: RESOLVED
+
+**Problem**: Decision 22 lets the AI model decide whether ambiguous kanji-only text is Japanese or
+Chinese, and Q7 made the ordinary translation prompts source-aware. The model's decision has to
+come back out of a call whose answer is shown to the user, pasted by Replace and cached in History.
+
+**Options considered**:
+1. **A marker line in the answer** (`[[SOURCE: Japanese]]`), read and removed by the app - Pros:
+   no extra call; measured compliance 10/10 on both providers. Cons: depends on the model; a stray
+   marker must never reach the user.
+2. **A separate identification call** - Pros: clean output. Cons: one more call (and trial quota)
+   on every ambiguous selection.
+3. **Structured output (JSON)** - Cons: the providers differ in support, and a JSON envelope
+   around a translation is fragile in exactly the uncensored, verbatim cases the prompts protect.
+
+**Resolution**: **Option 1**, only for mostly-CJK text that the characters cannot place; text they
+can place has its language *stated* instead, and every other text is sent unchanged. Details that
+were weighed:
+- **The request goes last** in the prompt, after the rules it is an exception to ("output only the
+  result").
+- **No favourite**: the wording never says which language is likelier, and its example (娘,
+  "daughter" / "mother") is not one of the measured words (Decision 21's lesson).
+- **Unknown is allowed** and means no verdict. Measured: 3-4 in ten - that is where the user is
+  asked (J6). Confidently wrong answers (汽車 "car", 工作 "work") are not caught by this; only
+  context or the user can.
+- **The cache is not namespaced by verdict.** An entry made before J4 has no verdict and serves
+  as before; Re-translate gets a fresh one. Namespacing would re-ask every cached kanji-only text
+  once, for a marker most of them do not need.
+- **The verdict has its own field** (`source_verdict`), never `source_lang`: History has always
+  filled `source_lang` from the characters, which says "Chinese" for every kanji-only text.
+- **Mixed text is left alone** below 50% kanji + kana among its letters ("I love 你" is English),
+  and Hangul excludes Korean.
+
+**References**: `src/core/source_marker.py`, `TranslationService._call_with_source()` /
+`source_verdict()`, `HistoryManager.find_source_verdict()`, CHANGELOG "Phase J4",
+`logs/eval/translate_before.jsonl` / `translate_after.jsonl`, TODO.md J4.
+
+---
+
 ### Decision 24 - Glyph evidence: "Japanese-only" excludes Big5-HKSCS, not just Big5
 
 **Date**: 2026-10-15

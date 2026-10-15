@@ -5,6 +5,8 @@ Handles text translation using AI APIs with clipboard integration.
 import time
 import queue
 import logging
+import threading
+from collections import OrderedDict
 from typing import Optional, Callable, Tuple, Dict
 
 import keyboard
@@ -14,6 +16,7 @@ from src.core import furigana
 from src.core.text_cleanup import strip_thinking_tags
 from src.core.clipboard import ClipboardManager
 from src.core.dictionary_prompt import build_dictionary_prompt, extract_context
+from src.core.source_marker import parse_source_marker, source_clause
 from src.core.api_manager import AIAPIManager
 from src.core.history import HistoryManager
 from src.core.provider_health import ProviderHealthManager
@@ -24,6 +27,16 @@ from config import Config
 
 class TranslationService:
     """Handles all translation-related operations."""
+
+    # The language a model reported for the most recent translation of ambiguous
+    # kanji-only text (its [[SOURCE: ...]] line, Decision 22), or None. Like
+    # last_attribution: read it right after the call it belongs to. Class-level
+    # defaults, because tests and tools build the service with __new__.
+    last_source_language: Optional[str] = None
+    # Verdicts for the texts translated this session, newest last; History keeps
+    # them across restarts (source_verdict()).
+    SOURCE_VERDICTS_MAX = 64
+    _source_verdicts_lock = threading.Lock()
 
     def __init__(self, config: Config,
                  notification_callback: Optional[Callable[[str], None]] = None) -> None:
@@ -179,7 +192,9 @@ class TranslationService:
             if cached is not None:
                 logging.info("Cache hit - returning stored translation, skipping API call")
                 self.last_attribution = self._cached_attribution(cached)
+                self.last_source_language = cached.get('source_verdict') or None
                 return cached['translated']
+        self.last_source_language = None
 
         if has_custom_prompt:
             # Has custom prompt → follow custom prompt, more flexible.
@@ -214,10 +229,12 @@ Rules (DO NOT include these in your response):
         prompt = base_prompt
 
         try:
-            result = self._call_model(prompt)
-
-            # Clean up AI thinking tags from result
-            result = self._strip_thinking_tags(result)
+            if has_custom_prompt:
+                # The user's own instructions are sent exactly as written.
+                result, verdict = self._strip_thinking_tags(self._call_model(prompt)), None
+            else:
+                result, verdict = self._call_with_source(prompt, text)
+            self._remember_source_verdict(text, verdict)
 
             # Save to history on success. Custom-prompt results are tagged 'custom' so the
             # R1 cache (find_cached) never serves them in place of a plain translation,
@@ -225,7 +242,8 @@ Rules (DO NOT include these in your response):
             self.history_manager.add_entry(
                 text, result, target_language,
                 source_type='custom' if has_custom_prompt else 'text',
-                model_used=self.last_attribution or 'Auto')
+                model_used=self.last_attribution or 'Auto',
+                source_lang=verdict or '', source_verdict=verdict or '')
             return result
         except TrialAPIError as e:
             return f"Error: {str(e)}"
@@ -268,7 +286,9 @@ Rules (DO NOT include these in your response):
             if cached is not None:
                 logging.info("Merged cache hit - returning stored result, skipping API call")
                 self.last_attribution = self._cached_attribution(cached)
+                self.last_source_language = cached.get('source_verdict') or None
                 return cached['translated']
+        self.last_source_language = None
 
         prompt = f"""You are a translation-and-grammar fixer tool. Decide automatically between two modes based on the
 language of the text below, then output ONLY the result.
@@ -296,16 +316,15 @@ STRICT RULES (DO NOT include these rules in your response):
    translate it. In translate mode, output ONLY {target_language}."""
 
         try:
-            result = self._call_model(prompt)
-
-            # Clean up AI thinking tags from result
-            result = self._strip_thinking_tags(result)
+            result, verdict = self._call_with_source(prompt, text)
+            self._remember_source_verdict(text, verdict)
 
             # Store under the 'merged' namespace so repeat requests are cached but never
             # served in place of (or served) a plain translation.
             self.history_manager.add_entry(
                 text, result, target_language, source_type='merged',
-                model_used=self.last_attribution or 'Auto')
+                model_used=self.last_attribution or 'Auto',
+                source_lang=verdict or '', source_verdict=verdict or '')
             return result
         except TrialAPIError as e:
             return f"Error: {str(e)}"
@@ -412,6 +431,62 @@ STRICT RULES (DO NOT include these rules in your response):
             if "API_KEY_INVALID" in error_msg or "API key not valid" in error_msg:
                 return "Error: Invalid API key. Please check your API key in Settings."
             return f"Error: {error_msg}"
+
+    def _call_with_source(self, prompt: str, text: str) -> Tuple[str, Optional[str]]:
+        """Call the model about `text` with its source-language clause appended.
+
+        Mostly-CJK text gets its language stated when the characters prove it, or
+        the model is asked to name it on a marker line, which is read and removed
+        here (Decision 22, `source_marker`). Any other text is sent unchanged.
+
+        Returns:
+            (result without the marker, the model's verdict or None)
+        """
+        clause = source_clause(text)
+        result = self._strip_thinking_tags(self._call_model(prompt + clause.text))
+        if not clause.asks:
+            return result, None
+        result, verdict, found = parse_source_marker(result)
+        # Counts and language names only - never the user's text.
+        logging.info(f"[LangID] translation verdict={verdict or 'none'} "
+                     f"marker={'found' if found else 'missing'} chars={len(text)}")
+        return result, verdict
+
+    def _source_verdict_store(self) -> "OrderedDict[str, str]":
+        store = self.__dict__.get('_source_verdicts')
+        if store is None:
+            with self._source_verdicts_lock:
+                store = self.__dict__.setdefault('_source_verdicts', OrderedDict())
+        return store
+
+    def _remember_source_verdict(self, text: str, verdict: Optional[str]) -> None:
+        """Record a call's verdict: as `last_source_language`, and for the text."""
+        self.last_source_language = verdict
+        if not verdict or not text:
+            return
+        store = self._source_verdict_store()
+        with self._source_verdicts_lock:
+            store[text] = verdict
+            store.move_to_end(text)
+            while len(store) > self.SOURCE_VERDICTS_MAX:
+                store.popitem(last=False)
+
+    def source_verdict(self, text: str) -> Optional[str]:
+        """The language a model reported for exactly this text, or None.
+
+        This session's translations first, then History, which keeps verdicts
+        across restarts. Only ever a model's verdict - never a label guessed from
+        the characters (History's `source_lang` is often that).
+        """
+        if not text:
+            return None
+        store = self._source_verdict_store()
+        with self._source_verdicts_lock:
+            verdict = store.get(text)
+        if verdict:
+            return verdict
+        finder = getattr(self.history_manager, 'find_source_verdict', None)
+        return finder(text) if finder else None
 
     def _call_model(self, prompt: str) -> str:
         """Send one prompt to whichever backend is active and record who answered.

@@ -17,8 +17,16 @@ class HistoryManager:
 
     def add_entry(self, original: str, translated: str, target_lang: str,
                   source_type: str = "text", model_used: str = "Auto",
-                  source_lang: str = ""):
-        """Add a new translation entry to history."""
+                  source_lang: str = "", source_verdict: str = ""):
+        """Add a new translation entry to history.
+
+        Args:
+            source_lang: The source language label shown in the History list;
+                detected from the characters when empty.
+            source_verdict: The language a model reported for `original`
+                (Decision 22). Stored only when there is one - it is what tells a
+                model's verdict apart from a detected label later.
+        """
         if not self.config.get('history_enabled', True):
             return
 
@@ -40,6 +48,8 @@ class HistoryManager:
             'source_type': source_type,
             'model_used': model_used
         }
+        if source_verdict:
+            entry['source_verdict'] = source_verdict
 
         history = self.config.get('history', [])
         history.insert(0, entry)
@@ -90,6 +100,16 @@ class HistoryManager:
                 translated = entry.get('translated', '')
                 if translated and not translated.startswith('Error:'):
                     return entry
+        return None
+
+    def find_source_verdict(self, original: str) -> Optional[str]:
+        """The language a model reported for this exact text, from the newest
+        entry that recorded one - whatever its target language - or None."""
+        if not original:
+            return None
+        for entry in self.config.get('history', []):
+            if entry.get('original') == original and entry.get('source_verdict'):
+                return entry['source_verdict']
         return None
 
     def find_cached(self, original: str, target_lang: str,

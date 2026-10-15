@@ -4,6 +4,70 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase J4 — Translations learn the source language, and the model says what it decided (2026-10-15)
+
+The user's answers to TODO.md Q1 and Q7: the AI model decides what ambiguous kanji-only text is,
+and the ordinary translation prompts learn the source language too. This phase makes the model
+*say* what it decided; J5-J8 use the answer. Nothing visible changes yet, except that a translation
+of Japanese or Chinese text is now told which one it is when the characters prove it.
+
+**Measured first** - `tools/eval_dictionary_prompt.py --mode translate` (new), the ten kanji-only
+false friends sent alone through `translate_or_fix()` as a language hotkey would, target English,
+real API calls on the user's second key of each provider:
+
+| | gemini-2.5-flash | gpt-oss-120b (Groq) |
+|---|---|---|
+| Before - Japanese sense / Chinese sense | 6 (+ 結構 "Fine") / 3 | 5 (+ 結構 "Fine") / 4 |
+| After - wrote the `[[SOURCE: ...]]` line | **10/10** | **10/10** |
+| After - the line leaked into the translation | 0 | 0 |
+| After - said Japanese / Chinese / Unknown | 5 / 2 / 3 | 4 / 2 / 4 |
+
+Every "Japanese" came with the Japanese sense (9/9), every "Chinese" with the Chinese sense (汽車
+"car", 工作 "work" - both models, confidently wrong). The models admit doubt on 3-4 words in ten
+(床, 先生, 結構, 新聞, 愛人), which is where J6's chooser will ask the user. The sense itself is no
+better or worse from a word alone - one run each, within noise - because the word alone is all the
+model has; the gain is that the app now knows what the model assumed. A sanity run on sentences:
+kana and Chinese-glyph text are stated, not asked, and translate correctly; English text is sent
+unchanged. With a Chinese *target*, a merged prompt still sometimes leaves 勉強 as it is - with the
+old prompt too (it once even "fixed" it to 勉强, the Chinese "reluctantly"); not a J4 regression.
+
+**Added**
+- `src/core/source_marker.py` (pure): `source_clause(text)` - mostly-CJK text (kanji + kana at
+  least half of its letters, no Hangul) whose characters prove its language gets
+  `SOURCE LANGUAGE: the text above is Japanese.` (or Chinese); kanji that prove nothing make the
+  prompt ask for one first line, `[[SOURCE: Japanese]]` / `[[SOURCE: Chinese]]` /
+  `[[SOURCE: Unknown]]`; any other text gets nothing, so its prompt is byte-for-byte what it was.
+  `parse_source_marker(answer)` reads and removes the line (double brackets anywhere; a bare
+  `SOURCE: x` only as the first line), and a missing or garbled one is simply no verdict.
+- `TranslationService.last_source_language` (per call, like `last_attribution`; a cache hit
+  restores the stored one) and `source_verdict(text)` - the model's verdict for exactly that
+  text, from this session (bounded, 64 texts) or from History.
+- `HistoryManager`: entries record `source_verdict` when a model gave one, and
+  `find_source_verdict()` reads it. `source_lang` (the History label) takes the verdict too.
+- `tools/eval_dictionary_prompt.py`: `--mode translate`, and `--key N` to measure each provider's
+  N-th key (the first Google key's free quota was spent).
+- `tests/test_source_marker.py` (59 tests).
+
+**Changed**
+- `translate_or_fix()` (the language hotkeys) and `translate_text()` (the main window, Re-translate)
+  append the clause. A custom prompt is sent exactly as the user wrote it. Logged as
+  `[LangID] translation verdict=.. marker=found|missing chars=..` - never the text.
+
+**Decided** (Decision 25): the marker goes last in the prompt; the wording names no favourite
+language and its example (娘) is not one of the measured words; the cache is **not** namespaced
+by verdict - an entry from before J4 simply has no verdict, and Re-translate gets one; the
+verdict lives in its own `source_verdict` field, because `source_lang` has always held a guess
+from the characters ("Chinese" for every kanji-only text).
+
+**Tests**: 952 -> 1011 (+59), 0 failed, 0 skipped. Twenty mutations - mixed text or Hangul
+counted as CJK, evidence ignored, a "more common" tie-break added, the example swapped for an
+eval word, Unknown read as a language, the marker left in the answer, the bare form read anywhere
+or nowhere, the service not parsing or not appending, the verdict not stored, a cache hit or a
+failure leaving the wrong verdict, the memory unbounded, History ignored, the clause added to a
+custom prompt, History storing an empty verdict or the oldest one, the text in the log - each made
+the suite fail and was restored. `config.json` was hashed before and after every real-API run:
+unchanged.
+
 ### Phase J3 — The dictionary result reads the language it was asked in (2026-10-15)
 
 The result window took its reading hint from one place only: the model's own **Source Language**

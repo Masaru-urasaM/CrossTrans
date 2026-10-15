@@ -15,7 +15,7 @@ Select text, press hotkey, get instant translation in a popup.
 | `src/constants.py` | VERSION, LANGUAGES, PROVIDERS (hardcoded fallbacks) |
 | `src/app.py` | Main TranslatorApp coordinator (~1630 lines) |
 | `src/core/remote_config.py` | Dynamic model/provider config (Cloudflare KV) |
-| `src/core/` | Business logic (25 modules) |
+| `src/core/` | Business logic (26 modules) |
 | `src/ui/` | UI components (20+ files) |
 | `src/ui/settings/` | Settings tabs (package) |
 | `src/utils/updates.py` | Auto-update system (check, download, install) |
@@ -241,6 +241,13 @@ the first match, so one of the two always loses (DEFERRED D12). It only matters 
   **Glyph sets are traps** (Decision 24): "Japanese-only" = CP932 minus GB2312 minus
   **Big5-HKSCS** (plain Big5 calls Hong Kong's 衆 裏 綫 Japanese); "cannot be Japanese" = outside
   **JIS X 0213** (CP932 lacks the 2010 Jōyō 剝 頰 塡); never GBK (it holds everything)
+- `source_marker.py` - What a translation prompt says about the source language (J4, Decision 25):
+  `source_clause(text)` states it when the characters prove it, asks the model for a first line
+  `[[SOURCE: Japanese|Chinese|Unknown]]` when they do not (mostly-CJK text only - other text is
+  sent byte-for-byte as before), `parse_source_marker()` reads and removes it. The service keeps
+  the verdict as `last_source_language` / `source_verdict(text)`; History stores it as
+  `source_verdict` - **never trust History's `source_lang` as a verdict**, it is a guess from the
+  characters. Never add a "more common language" tie-break (Decision 21).
 - `update_ui_manager.py` - Update status checking & UI feedback
 - `trial_manager.py` - Trial mode status & dialogs
 
