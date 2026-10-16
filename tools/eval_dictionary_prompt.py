@@ -30,6 +30,18 @@ text (Phase J4), which language it named, and the sense of the translation:
 `--key N` measures each provider's N-th configured key (a free key whose daily
 quota is spent answers nothing but 429s).
 
+`--repeat N` calls every case N times (K9): one call per word says what a model
+answered once, not what it answers - the summary then gives each provider's
+consistency, the share of repeats that agree with the case's most common answer.
+
+`--input phrases` (translate mode) sends ten kanji-only phrases and sentences
+instead of the ten words - five Japanese, five Chinese, every one still asked
+about (no kana, no glyph or grammar evidence) - and scores the verdict against
+the known language. A word alone is ambiguous by nature; a phrase is not, so
+this measures whether the marker is read correctly when there is context:
+
+    python tools/eval_dictionary_prompt.py --mode translate --input phrases --repeat 3 --label k9
+
 Real API calls, on the user's own keys: one call per word per provider. `trial`
 goes through the trial proxy and spends this device's daily trial quota, so it is
 never in the default provider list. The tool never writes config.json - provider
@@ -81,6 +93,44 @@ EVAL_WORDS = [
 ]
 
 CONDITIONS = ('bare', 'context', 'source-context')
+
+# Kanji-only phrases whose language is known, none of which the characters settle
+# (tests/test_source_marker.py checks they are all still asked about): Japanese
+# headline compounds, and Chinese sentences without two listed function words.
+EVAL_PHRASES = [
+    ('日本国憲法第九条改正論議', 'Japanese'),
+    ('首相官邸前抗議集会', 'Japanese'),
+    ('新型車両運行開始予定', 'Japanese'),
+    ('株式市場急落原因分析', 'Japanese'),
+    ('国会議員定数削減法案', 'Japanese'),
+    ('他在大學學習中文。', 'Chinese'),
+    ('我們明天去北京。', 'Chinese'),
+    ('今天天氣很好。', 'Chinese'),
+    ('中國人民銀行宣布降息。', 'Chinese'),
+    ('他們昨天去了上海。', 'Chinese'),
+]
+
+
+def consistency(rows: List[dict], key: str) -> Optional[float]:
+    """Mean, over cases, of the share of a case's answers that agree with its most
+    common answer (`key` of each row; None counts as an answer). None without rows."""
+    by_case: Dict[str, List] = {}
+    for row in rows:
+        by_case.setdefault(row['word'], []).append(row.get(key))
+    if not by_case:
+        return None
+    shares = []
+    for answers in by_case.values():
+        most = max(answers.count(answer) for answer in set(answers))
+        shares.append(most / len(answers))
+    return round(sum(shares) / len(shares), 3)
+
+
+def verdict_family(verdict: Optional[str]) -> Optional[str]:
+    """'Japanese', 'Chinese' (either script) or None."""
+    if not verdict:
+        return None
+    return 'Chinese' if verdict.startswith('Chinese') else verdict
 
 # Labels the prompt numbers 1-8; read by label, since models renumber.
 FIELD_KEYS = {
@@ -236,7 +286,15 @@ def main(argv=None) -> int:
     parser.add_argument('--words', default='', help='comma-separated subset of the ten')
     parser.add_argument('--delay', type=float, default=2.0,
                         help='seconds between calls (free tiers rate-limit)')
+    parser.add_argument('--repeat', type=int, default=1,
+                        help='calls per case, for a consistency figure (K9)')
+    parser.add_argument('--input', choices=('words', 'phrases'), default='words',
+                        help='translate mode: the ten words, or the ten phrases (K9)')
     args = parser.parse_args(argv)
+    if args.repeat < 1:
+        parser.error('--repeat must be at least 1')
+    if args.input == 'phrases' and args.mode != 'translate':
+        parser.error('--input phrases is a translate-mode measurement')
 
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -280,7 +338,8 @@ def main(argv=None) -> int:
     rows = []
     with open(out_path, 'a', encoding='utf-8') as out:
         for provider, svc in services:
-            for i, (word, sentence, ja_words, zh_words) in enumerate(words):
+            calls = [(rep, case) for case in words for rep in range(args.repeat)]
+            for i, (rep, (word, sentence, ja_words, zh_words)) in enumerate(calls):
                 if i or provider != services[0][0]:
                     time.sleep(args.delay)
                 kwargs = {}
@@ -305,6 +364,7 @@ def main(argv=None) -> int:
                     'provider': provider,
                     'model': svc.last_attribution,
                     'word': word,
+                    'repeat': rep,
                     'context': kwargs.get('context'),
                     'source_language': kwargs.get('source_language'),
                     'target': args.target,
@@ -327,8 +387,10 @@ def main(argv=None) -> int:
         japanese = sum(1 for r in ok if 'japanese' in (r['field2'] or '').lower())
         senses = {s: sum(1 for r in ok if r['sense'] == s) for s in ('ja', 'zh', 'both', 'neither')}
         model = next((r['model'] for r in ok if r['model']), '?')
+        repeated = (f", field2 consistency {consistency(ok, 'field2')}"
+                    if args.repeat > 1 else "")
         print(f"{provider} ({model}) [{args.condition}]: {len(ok)}/{len(mine)} answered, "
-              f"field2=Japanese {japanese}/{len(ok)}, sense {senses}")
+              f"field2=Japanese {japanese}/{len(ok)}, sense {senses}{repeated}")
         for r in mine:
             translation = (r['translation'] or r['error'] or '')[:70]
             print(f"    {r['word']:<4} {(r['field2'] or '-')[:22]:<22} {r['sense']:<8} {translation}")
@@ -352,10 +414,15 @@ def run_translate(args) -> int:
         print("FAIL: no provider to measure")
         return 2
 
-    words = EVAL_WORDS
+    # (text, ja keywords, zh keywords, expected language or None)
+    if getattr(args, 'input', 'words') == 'phrases':
+        cases = [(text, [], [], expected) for text, expected in EVAL_PHRASES]
+    else:
+        cases = [(word, ja, zh, None) for word, _sentence, ja, zh in EVAL_WORDS]
     if args.words:
         chosen = {w.strip() for w in args.words.split(',')}
-        words = [w for w in EVAL_WORDS if w[0] in chosen]
+        cases = [c for c in cases if c[0] in chosen]
+    repeat = getattr(args, 'repeat', 1)
 
     version = prompt_version('translate')
     out_dir = os.path.join(ROOT, 'logs', 'eval')
@@ -375,7 +442,8 @@ def run_translate(args) -> int:
                 return _seen['raw']
 
             svc._call_model = recording_call
-            for i, (word, _sentence, ja_words, zh_words) in enumerate(words):
+            calls = [(rep, case) for case in cases for rep in range(repeat)]
+            for i, (rep, (word, ja_words, zh_words, expected)) in enumerate(calls):
                 if i or provider != services[0][0]:
                     time.sleep(args.delay)
                 seen.clear()
@@ -399,13 +467,16 @@ def run_translate(args) -> int:
                     'provider': provider,
                     'model': svc.last_attribution,
                     'word': word,
+                    'repeat': rep,
+                    'expected': expected,
                     'target': args.target,
                     'asked_marker': '[[SOURCE:' in seen.get('prompt', ''),
                     'marker_found': marker_found,
                     'verdict': verdict,
                     'service_verdict': getattr(svc, 'last_source_language', None),
                     'result': result,
-                    'sense': sense_verdict(result, ja_words, zh_words),
+                    'sense': sense_verdict(result, ja_words, zh_words) if ja_words else None,
+                    'correct': (verdict_family(verdict) == expected) if expected else None,
                     'elapsed_s': round(time.time() - started, 2),
                     'error': error,
                     'raw': raw_answer,
@@ -428,11 +499,17 @@ def run_translate(args) -> int:
         senses = {s: sum(1 for r in ok if r['sense'] == s) for s in ('ja', 'zh', 'both', 'neither')}
         leaked = sum(1 for r in ok if '[[SOURCE' in (r['result'] or '').upper())
         model = next((r['model'] for r in ok if r['model']), '?')
+        scored = [r for r in ok if r['expected']]
+        extra = ''
+        if scored:
+            extra += f", correct {sum(1 for r in scored if r['correct'])}/{len(scored)}"
+        if repeat > 1:
+            extra += f", verdict consistency {consistency(ok, 'verdict')}"
         print(f"{provider} ({model}) [translate -> {args.target}]: {len(ok)}/{len(mine)} answered, "
               f"marker {markers}/{len(ok)}, verdicts {verdicts}, sense {senses}, "
-              f"marker leaked into the result {leaked}")
+              f"marker leaked into the result {leaked}{extra}")
         for r in mine:
-            print(f"    {r['word']:<4} {str(r['verdict'] or '-'):<22} {r['sense']:<8} "
+            print(f"    {r['word']:<4} {str(r['verdict'] or '-'):<22} {str(r['sense'] or r['expected']):<8} "
                   f"{(r['result'] or r['error'] or '')[:60]}")
     return 0
 

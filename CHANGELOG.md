@@ -4,6 +4,37 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase K9 — Tooling: the mutation runner, the CI floor, repeats and phrases (2026-10-16)
+
+**Added**
+- `tools/mutation_check.py` - the runner every phase since J1 was checked with, until now a
+  scratch file each session rewrote. A list file names `(name, path, old, new, pytest_args)`; each
+  mutation is applied, its tests run, the file restored byte for byte (also on an error or
+  Ctrl+C). It keeps the two lessons learned: **stale bytecode** - two same-size mutants written
+  within a second shared the .pyc's (mtime, size) key, so the second run executed the first; the
+  module's bytecode is deleted and none is written - and **a run where no test ran is not a kill**.
+  A pattern found 0 or 2+ times is a setup failure; lists written with `\n` match CRLF files.
+  Output: one line per mutation, `logs/mutation_<list>.jsonl`, exit 0 only when all were killed.
+- `tools/eval_dictionary_prompt.py --repeat N`: every case N times, and each provider's
+  **consistency** (the share of repeats agreeing with the case's most common answer) - one call
+  per word says what a model answered once, not what it answers.
+- `--input phrases` (translate mode): ten kanji-only phrases and sentences - five Japanese headline
+  compounds, five Chinese sentences - every one still asked about (no kana, no glyph or grammar
+  evidence; a test keeps it so as the evidence grows), scored against the known language. A word
+  alone is ambiguous by nature; a phrase is not, so this measures whether the marker is answered
+  correctly when there is context.
+
+**Changed**
+- CI's `--min-total` 500 -> **1350** (the suite is 1 392): a test file that quietly stops being
+  collected now fails the build instead of passing with fewer tests.
+
+**Tests**: 1360 -> 1392 (+32): `tests/test_mutation_check.py` (8 - killed and restored with CRLF, a
+multi-line pattern on a CRLF file, an equivalent survivor, a missing and a doubled pattern, a test
+that never ran, two same-size mutants in a row, an unusable list), `tests/test_eval_tool.py` (24 -
+every phrase still asked, balanced, not a measured word; consistency; the verdict family; the
+argument checks; a scripted run of ten phrases twice: 20 calls, repeats adjacent, 18/20 correct).
+The runner was then used on K8's real list - same five kills. 10 mutations killed.
+
 ### Phase K8 — The old deferred items: D18, D12, and a desk check of D11 (2026-10-16)
 
 **Removed (D18)**

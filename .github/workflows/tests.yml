@@ -54,8 +54,11 @@ jobs:
 
       - name: Check the run actually ran
         if: always()
+        # --min-total sits a little under the suite's size (1,390 on 2026-10-16),
+        # so a test file that quietly stops being collected fails the build.
+        # Raise it as the suite grows; never lower it to make a run pass.
         run: |
-          python tools/check_test_counts.py junit.xml --min-total 500
+          python tools/check_test_counts.py junit.xml --min-total 1350
 
       - name: Keep the report
         if: always()

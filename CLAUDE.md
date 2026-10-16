@@ -342,7 +342,13 @@ without a usable display and 312 of the tests need one, so a runner with no desk
 session would skip half the suite and still pass. `tools/check_test_counts.py` reads
 the JUnit XML and fails the build when more tests were skipped than a healthy run
 explains (`DEFAULT_MAX_SKIPPED`), or when suspiciously few were collected at all.
-Raise the ceiling only for a skip you can name.
+Raise the ceiling only for a skip you can name. The floor, `--min-total` (1350 since K9), sits a
+little under the suite's size: raise it as the suite grows, never lower it to make a run pass.
+
+**Mutation checks** - each phase's tests are checked by breaking the code they guard:
+`python tools/mutation_check.py <list.py>` (format and the two built-in lessons in its docstring:
+stale bytecode, and "no test ran" is not a kill). A survivor is a question - an equivalent
+mutant, a selector that misses the test, or a missing test - not something to shrug off.
 
 ## Run
 
