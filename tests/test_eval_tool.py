@@ -3,6 +3,7 @@ Tests for tools/eval_dictionary_prompt.py's K9 additions: --repeat, --input phra
 and the two figures they report. The tool itself makes real API calls and is run
 by hand; these keep its pure parts and its phrase set honest, with no network.
 """
+import logging
 import os
 import sys
 from types import SimpleNamespace
@@ -106,7 +107,7 @@ def test_phrases_are_scored_and_repeated(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr('config.Config', lambda: SimpleNamespace(get_api_keys=lambda: [
         {'provider': 'Fake', 'api_key': 'k'}]))
     args = SimpleNamespace(providers='Fake', key=1, words='', label='t', target='English',
-                           delay=0, input='phrases', repeat=2)
+                           delay=0, input='phrases', repeat=2, confirm_calls=20)
     assert tool.run_translate(args) == 0
     assert len(service.calls) == 20                                    # 10 phrases x 2
     assert service.calls[0] == service.calls[1]                        # repeats are adjacent
@@ -115,3 +116,78 @@ def test_phrases_are_scored_and_repeated(monkeypatch, tmp_path, capsys):
     assert "verdict consistency 1.0" in out
     written = (tmp_path / 'logs' / 'eval' / 'translate_t.jsonl').read_text(encoding='utf-8')
     assert written.count('"repeat": 1') == 10
+
+
+class Untouchable:
+    """A service that records any call before failing it: nothing may be sent."""
+
+    def __init__(self):
+        self.calls = []
+        self.last_attribution = None
+        self.last_source_language = None
+
+    def _call_model(self, prompt):
+        self.calls.append(prompt)
+        raise AssertionError("a real call was made")
+
+    def translate_or_fix(self, text, *args, **kwargs):
+        self.calls.append(text)
+        raise AssertionError("a real call was made")
+
+    def dictionary_lookup(self, words, *args, **kwargs):
+        self.calls.append(words)
+        raise AssertionError("a real call was made")
+
+
+class TestNothingIsSentUnconfirmed:
+    """Every call is a real one, on the user's keys or the trial quota (K12):
+    without --confirm-calls naming the exact count, a run prints its plan and
+    stops before the first."""
+
+    @staticmethod
+    def _offline(monkeypatch, tmp_path, service):
+        monkeypatch.setattr(tool, 'build_services',
+                            lambda config, wanted, key: ([('Fake', service)], None))
+        monkeypatch.setattr(tool, 'ROOT', str(tmp_path))
+        monkeypatch.setattr('config.Config', lambda: SimpleNamespace(get_api_keys=lambda: [
+            {'provider': 'Fake', 'api_key': 'k'}]))
+        monkeypatch.setattr(logging, 'disable', lambda level: None)   # main() turns logging off
+
+    @staticmethod
+    def _args(**extra):
+        return SimpleNamespace(providers='Fake', key=1, words='', label='t', target='English',
+                               delay=0, input='phrases', repeat=2, **extra)
+
+    def test_translate_mode_prints_the_plan_and_stops(self, monkeypatch, tmp_path, capsys):
+        service = Untouchable()
+        self._offline(monkeypatch, tmp_path, service)
+        assert tool.run_translate(self._args()) == 3
+        assert service.calls == []
+        out = capsys.readouterr().out
+        assert "PLAN: 20 real API call(s) on your keys (Fake 20)" in out
+        assert "--confirm-calls 20" in out
+        assert not (tmp_path / 'logs').exists()          # not even an empty results file
+
+    def test_a_wrong_count_is_not_a_yes(self, monkeypatch, tmp_path):
+        service = Untouchable()
+        self._offline(monkeypatch, tmp_path, service)
+        assert tool.run_translate(self._args(confirm_calls=19)) == 3
+        assert service.calls == []
+
+    def test_dictionary_mode_prints_the_plan_and_stops(self, monkeypatch, tmp_path, capsys):
+        service = Untouchable()
+        self._offline(monkeypatch, tmp_path, service)
+        assert tool.main(['--label', 't', '--providers', 'Fake', '--words', '手紙,汽車']) == 3
+        assert service.calls == []
+        assert "PLAN: 2 real API call(s)" in capsys.readouterr().out
+
+    def test_the_plan_counts_cases_repeats_and_providers(self):
+        services = [('Groq', None), ('Google', None)]
+        assert tool.planned_calls(services, 10, 3) == {'Groq': 30, 'Google': 30}
+
+    def test_the_exact_total_is_a_yes(self):
+        assert tool.confirmed({'Groq': 10, 'Google': 10}, 20)
+
+    def test_the_trial_quota_is_named(self, capsys):
+        assert not tool.confirmed({'trial': 10}, None)
+        assert "trial quota" in capsys.readouterr().out

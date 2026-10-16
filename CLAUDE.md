@@ -119,7 +119,8 @@ Key points:
   one that will not, and without it a mid-upgrade launch would exit silently having done nothing.
   The notice dialog and its watchdog remain, as the fallback for exactly that case.
   Tests must pass `port=` rather than reach for `LOCK_PORT`: the developer's own CrossTrans holds
-  it, so a suite that uses it either skips or throws a window onto the screen mid-run.
+  it, so a suite that uses it either skips or throws a window onto the screen mid-run. Since K12 a
+  test's connection to it is refused.
 
 - **ttkbootstrap discards explicit colours on standard `tk` widgets**: it re-themes them at construction, so `tk.Label(fg='#80b8ff', bg='#363636')` comes back `fg='#ffffff'`, `bg='#222222'`. Measured, not theoretical — it is why the furigana reading colour never actually shipped before v1.9.19. Pass `autostyle=False` whenever a colour must survive - use `ruby_text.NO_AUTOSTYLE`, which guards the kwarg for the no-ttkbootstrap case. `tag_configure()` colours are **not** affected, only widget options. Leave a widget themed when it should match the frame around it.
 
@@ -350,6 +351,17 @@ the JUnit XML and fails the build when more tests were skipped than a healthy ru
 explains (`DEFAULT_MAX_SKIPPED`), or when suspiciously few were collected at all.
 Raise the ceiling only for a skip you can name. The floor, `--min-total` (1350 since K9), sits a
 little under the suite's size: raise it as the suite grows, never lower it to make a run pass.
+
+**A test run stays off the developer's session** (K12, Decision 32; `tests/quiet_session.py`,
+installed by `conftest.py` before any test module is imported). The Tk thread runs on a private
+desktop: its windows are real - mapped, measured, focused - but no screen shows them, so a run
+never draws on the screen or takes the focus. Without that desktop the Tk tests skip, naming why;
+CI or `CROSSTRANS_TESTS_ON_SCREEN=1` runs them on screen. The network (but loopback, and never the
+lock port), clipboard writes (Tk's clipboard is in memory), keystrokes, hotkeys, browser windows
+and registry writes are refused, and a refused call fails its test even when the code swallowed
+it. The one test that must reach the real clipboard asks for `real_clipboard` and runs on CI or
+with `CROSSTRANS_TESTS_REAL_CLIPBOARD=1`. Do not make a second Tcl interpreter in a test: under
+pytest's capture one could not read `init.tcl`.
 
 **Mutation checks** - each phase's tests are checked by breaking the code they guard:
 `python tools/mutation_check.py <list.py>` (format and the two built-in lessons in its docstring:
@@ -586,7 +598,8 @@ read 汽車, 工作, 床 as Chinese (3/10 each).
 - Logged as `[Dictionary] lookup n=.. source=.. target=.. context_chars=..` - counts, never text.
 - `tools/eval_dictionary_prompt.py` measures what real models answer (manual, real API calls on
   the configured keys; `trial` spends the daily trial quota and is opt-in). Results land in
-  `logs/eval/dictionary_<label>.jsonl`.
+  `logs/eval/dictionary_<label>.jsonl`. Nothing is sent until `--confirm-calls N` names the count
+  a run without it prints (K12) - and it is run only with the user's go-ahead for that run.
 
 ### Word Filtering (hardcoded, no API call)
 Dictionary mode filters tokens before displaying as clickable buttons:

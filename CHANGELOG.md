@@ -4,6 +4,66 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase K12 — Quiet tests: off the user's screen, off the network (2026-10-16)
+
+The user, after K11: the tests threw windows all over the screen and interrupted other work, and
+the translation usage was used up.
+
+**Found**
+- **Windows**: the Tk tests drew real windows on the developer's own desktop - popups, dialogs,
+  History, the dictionary windows, the 1400x850 main window - and the app raises its windows on
+  purpose (`lift()`, `focus_force()`, `-topmost`), so every one took the keyboard focus. Mutation
+  checks re-ran them dozens of times.
+- **Quota**: not the suite - every API test mocks `urlopen` and uses a fake key. It was the
+  measurement runs: `tools/eval_dictionary_prompt.py` and `tools/eval_ocr_prompt.py` made about 197
+  real calls on the user's keys over two days (2026-10-15 about 145 in J, 2026-10-16 52 in K10;
+  Google 81, Groq 86, trial 30), each started without the user seeing a count first.
+- **Clipboard**: `test_it_really_reaches_the_windows_clipboard`, and every test that copies through
+  `RubyText._on_copy()`, wrote the user's real clipboard on every run.
+- Nothing stopped a test from reaching the network, sending keystrokes (the Replace path calls
+  `keyboard.press_and_release('ctrl+v')`), registering a hotkey, opening a browser or writing the
+  registry. None did (measured below) - but nothing prevented it.
+
+**Added**
+- `tests/quiet_session.py`, installed by `conftest.py` before any test module is imported:
+  - **A private desktop** for the Tk thread (`CreateDesktopW` + `SetThreadDesktop`; never
+    `SwitchDesktop`). Windows there are mapped, laid out, measured, focused and topmost as before,
+    and none reaches the user's desktop (measured). Without it, creating Tk skips the test with the
+    reason - never the screen - except on CI or with `CROSSTRANS_TESTS_ON_SCREEN=1`.
+  - **No network but loopback**, and never the running CrossTrans's lock port: refused with
+    `SessionGuardError`, an `OSError`.
+  - **Tk's clipboard in memory** - the Tcl `clipboard` command, which Python's `clipboard_*` and
+    Tk's own text and entry bindings both write through; `pyperclip.copy` and the
+    `win32clipboard` writers refused.
+  - **Keystrokes, hotkeys, browser windows and registry writes** refused (`keyboard`,
+    `user32.SendInput` / `keybd_event` / `RegisterHotKey`, `webbrowser`, `os.startfile`, `winreg`).
+  - Every refusal is recorded, so a test whose code swallowed one still fails, naming what it
+    reached for; the terminal summary says where the run's windows went.
+- `real_clipboard` fixture: the one test whose point is the real clipboard runs on CI, or locally
+  with `CROSSTRANS_TESTS_REAL_CLIPBOARD=1` - and then the user's content is saved first and put back.
+  Not by default: saving and restoring cannot put every format back (files copied in Explorer,
+  some images), and a clipboard history records the test's text anyway.
+- `--confirm-calls N` on both eval tools: until it names the exact number of real calls the run
+  would make, the tool prints the plan (`PLAN: 20 real API call(s) on your keys (Groq 20)`) and
+  sends nothing (exit 3).
+
+**Measured** - the full suite run under a watcher on the user's desktop (a separate process that
+lists every top-level window of the test process tree every 20 ms): **0 windows on the user's
+desktop, 0 samples with one in the foreground**, in four full runs and the mutation runs. No test
+changed the clipboard (its sequence number, logged per test). No test was refused anything: the
+guards found no existing offender. A private window station, which would have isolated the
+clipboard as well, is refused for this user (Windows error 5).
+
+**Fixed during implementation**
+- A test that made a Tcl-only interpreter left the next interpreter unable to read `init.tcl`
+  under pytest's capture, in some test orders only. The Tcl-only case is now checked on the
+  arguments (`quiet_session.wants_windows`), with no interpreter made.
+
+**Tests**: 1421 -> 1501 passed + 1 skipped (the real-clipboard test, locally; it runs on
+CI). +74 `tests/test_quiet_session.py`, +7 for the eval tools' confirmation. 25
+mutations killed with `tools/mutation_check.py` - each safe to run: a broken guard is caught by a
+test that checks the guard is in place before calling anything.
+
 ### Phase K11 — The EXE, built and checked (2026-10-16)
 
 **Built** - the branch at K10, version still 1.9.20 (the release number is the user's call), as

@@ -11,6 +11,36 @@ from unittest.mock import MagicMock, patch
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Off the user's session before anything else is imported: the Tk thread moves to
+# a private desktop, which only works while it owns no window yet, and the
+# network, clipboard, keystrokes and the rest are refused (K12).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import quiet_session  # noqa: E402
+
+quiet_session.install()
+
+
+@pytest.fixture(autouse=True)
+def _stay_in_the_test_session(request):
+    """Fail a test that reached outside the session - also when its code caught
+    the SessionGuardError and carried on (quiet_session)."""
+    quiet_session.CURRENT_TEST = request.node.nodeid
+    first = len(quiet_session.BLOCKED)
+    yield
+    quiet_session.CURRENT_TEST = None
+    reached = [what for _test, what in quiet_session.BLOCKED[first:]]
+    if reached:
+        pytest.fail("reached outside the test session:\n  " + "\n  ".join(reached),
+                    pytrace=False)
+
+
+def pytest_terminal_summary(terminalreporter):
+    """Where this run's windows went, and anything refused outside a test."""
+    terminalreporter.write_line(f"quiet session: {quiet_session.describe()}")
+    for test, what in quiet_session.BLOCKED:
+        if test is None:
+            terminalreporter.write_line(f"quiet session: refused outside any test: {what}")
+
 
 @pytest.fixture
 def temp_config_dir():
@@ -140,6 +170,10 @@ def tk_root():
     Session-scoped because creating and tearing down interpreters repeatedly is
     slow and leaks Tcl state; individual tests should build their widgets in
     their own frame and destroy it.
+
+    Its windows - and every Toplevel a test maps - are on this run's private
+    desktop: real windows, on no screen (quiet_session, K12). Without that
+    desktop, creating Tk skips the test rather than draw on the user's screen.
     """
     tkinter = pytest.importorskip("tkinter")
     try:
@@ -152,3 +186,36 @@ def tk_root():
         root.destroy()
     except Exception:
         pass
+
+
+@pytest.fixture
+def real_clipboard(tk_root):
+    """The Windows clipboard itself, for the one test whose point is reaching it.
+
+    Every other test gets Tk's in-memory clipboard (quiet_session). This one runs
+    on CI, where no one's clipboard is there to lose, or when asked for with
+    CROSSTRANS_TESTS_REAL_CLIPBOARD=1 - and then the user's content is saved first
+    and put back after. Not by default: saving and restoring cannot put every
+    format back (files copied in Explorer, some images), and a clipboard history
+    records the test's text anyway (K12).
+    """
+    if not quiet_session.real_clipboard_allowed():
+        pytest.skip(f"writes the user's clipboard - runs on CI, or locally with "
+                    f"{quiet_session.REAL_CLIPBOARD_ENV}=1")
+    from src.core.clipboard import ClipboardManager
+    with quiet_session.real_clipboard(tk_root):
+        saved = ClipboardManager.save_clipboard()
+        if saved is None:
+            pytest.skip("could not read the clipboard to save it, so it is left alone")
+        try:
+            yield
+        finally:
+            if saved:
+                ClipboardManager.restore_clipboard(saved)
+            else:                                   # it was empty: leave it empty
+                import win32clipboard
+                win32clipboard.OpenClipboard()
+                try:
+                    win32clipboard.EmptyClipboard()
+                finally:
+                    win32clipboard.CloseClipboard()

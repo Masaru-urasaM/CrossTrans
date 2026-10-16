@@ -5,6 +5,44 @@ approaches. Newest first.
 
 ---
 
+### Decision 32 - Tests run on a private desktop and cannot leave the test session
+
+**Date**: 2026-10-16
+**Status**: RESOLVED (the user: the tests threw windows over the screen, interrupted other work and
+used up the translation quota. The options below were proposed; the goal's stop hook asked for a
+fix before the user chose, so the recommended ones were built - revisit if the user objects)
+
+**Problem**: The Tk tests mapped real windows on the developer's desktop, and the app's windows
+take the focus by design. Nothing kept a test off the network, the clipboard or the keyboard, and
+the eval tools spent real quota without showing a count first.
+
+**Options considered**:
+1. **A private desktop for the Tk thread** (`CreateDesktopW` + `SetThreadDesktop`) - Pros: the
+   windows stay real (mapped, measured, focusable - measured 2026-10-16); no test changes; plain
+   `pytest` and the mutation runner are covered. Cons: Windows only; must happen before the thread
+   owns a window or a hook; desktops share the window station's clipboard, so it is not covered.
+2. **Offscreen geometry and no-op `focus_force` / `lift` / `-topmost`** - Cons: changes the
+   behaviour under test (the dialog tests assert topmost and focus); a newly mapped window is still
+   activated and still gets a taskbar button.
+3. **Skip the Tk tests locally** - Cons: about 350 fewer tests where they matter; breaks "the
+   test count never goes down".
+4. **A private window station**, which would isolate the clipboard too - refused for this user:
+   Windows error 5.
+5. For the one real-clipboard test: **save and restore around it** - Cons: cannot put every
+   format back (files copied in Explorer, some images), and a clipboard history records it anyway;
+   **only on CI or when asked for** - Cons: one local skip.
+
+**Resolution**: Option 1, plus refusals for the network (but loopback, and never the lock port),
+clipboard writes (Tk's clipboard kept in memory), keystrokes, hotkeys, browser windows and registry
+writes - each recorded, so a swallowed refusal still fails its test. The real-clipboard test runs
+on CI or with `CROSSTRANS_TESTS_REAL_CLIPBOARD=1`: the proposal said save and restore, dropped once
+the lost-format case was seen. The eval tools send nothing until `--confirm-calls N` matches.
+
+**References**: `tests/quiet_session.py`, `tests/conftest.py`, `tests/test_quiet_session.py`,
+`tools/eval_dictionary_prompt.py`, `tools/eval_ocr_prompt.py`
+
+---
+
 ### Decision 31 - Between providers that list the same model, the key decides
 
 **Date**: 2026-10-16

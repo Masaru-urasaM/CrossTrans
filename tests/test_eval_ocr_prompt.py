@@ -99,3 +99,25 @@ class TestScore:
     ('Chinese (Traditional)', 'Chinese'), (None, None)])
 def test_family(language, expected):
     assert tool.family(language) == expected
+
+
+def test_nothing_is_sent_without_the_count(monkeypatch, tmp_path, capsys):
+    """K12: the vision calls are real ones too - the plan, then nothing."""
+    import logging
+    from types import SimpleNamespace
+
+    import eval_dictionary_prompt
+    calls = []
+    service = SimpleNamespace(api_manager=SimpleNamespace(
+        translate_multimodal=lambda *args, **kwargs: calls.append(args) or '',
+        last_attribution=None))
+    monkeypatch.setattr(eval_dictionary_prompt, 'build_services',
+                        lambda config, wanted, key: ([('Google', service)], None))
+    monkeypatch.setattr('config.Config', lambda: SimpleNamespace(get_api_keys=lambda: []))
+    monkeypatch.setattr(logging, 'disable', lambda level: None)   # main() turns logging off
+    monkeypatch.setattr(tool, 'ROOT', str(tmp_path))
+    assert tool.main(['--label', 't']) == 3
+    assert calls == []
+    out = capsys.readouterr().out
+    assert f"PLAN: {len(tool.OCR_CASES)} real API call(s) on your keys (Google" in out
+    assert not (tmp_path / 'logs').exists()

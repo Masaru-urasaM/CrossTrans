@@ -47,6 +47,13 @@ goes through the trial proxy and spends this device's daily trial quota, so it i
 never in the default provider list. The tool never writes config.json - provider
 health, history and the local trial counter are left alone.
 
+Nothing is sent until `--confirm-calls N` names the exact number of calls the run
+would make (K12): without it the tool prints that number, per provider, and stops.
+
+    python tools/eval_dictionary_prompt.py --label k12 --providers Groq
+    PLAN: 10 real API call(s) on your keys (Groq 10). Nothing was sent.
+    python tools/eval_dictionary_prompt.py --label k12 --providers Groq --confirm-calls 10
+
 Output: logs/eval/dictionary_<label>.jsonl (translate mode: translate_<label>.jsonl),
 one JSON object per call, including the raw answer so a surprising verdict can be
 read in full.
@@ -270,6 +277,28 @@ def build_services(config, wanted: List[str], key_index: int = 1):
     return services, sorted(by_provider)
 
 
+def planned_calls(services, cases: int, repeat: int = 1) -> Dict[str, int]:
+    """The real calls a run would make, per provider - before it makes any."""
+    return {provider: cases * repeat for provider, _svc in services}
+
+
+def confirmed(plan: Dict[str, int], confirm_calls: Optional[int]) -> bool:
+    """True when `confirm_calls` is exactly the number of calls `plan` makes.
+
+    Every call is a real one, on the user's own keys or this device's trial
+    quota, so the user sees the count before any is spent (K12). Otherwise the
+    plan is printed and nothing is sent.
+    """
+    total = sum(plan.values())
+    if confirm_calls == total:
+        return True
+    spend = ', '.join(f'{provider} {calls}' for provider, calls in plan.items())
+    trial = ' - the trial calls spend the daily trial quota' if 'trial' in plan else ''
+    print(f"PLAN: {total} real API call(s) on your keys ({spend}){trial}. Nothing was sent.")
+    print(f"      Re-run with --confirm-calls {total} to make them.")
+    return False
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -290,6 +319,9 @@ def main(argv=None) -> int:
                         help='calls per case, for a consistency figure (K9)')
     parser.add_argument('--input', choices=('words', 'phrases'), default='words',
                         help='translate mode: the ten words, or the ten phrases (K9)')
+    parser.add_argument('--confirm-calls', type=int, default=None,
+                        help='the number of real API calls the run makes, as a run without '
+                             'it prints - nothing is sent until it matches (K12)')
     args = parser.parse_args(argv)
     if args.repeat < 1:
         parser.error('--repeat must be at least 1')
@@ -329,6 +361,8 @@ def main(argv=None) -> int:
     if args.words:
         chosen = {w.strip() for w in args.words.split(',')}
         words = [w for w in EVAL_WORDS if w[0] in chosen]
+    if not confirmed(planned_calls(services, len(words), args.repeat), args.confirm_calls):
+        return 3
 
     version = prompt_version()
     out_dir = os.path.join(ROOT, 'logs', 'eval')
@@ -423,6 +457,9 @@ def run_translate(args) -> int:
         chosen = {w.strip() for w in args.words.split(',')}
         cases = [c for c in cases if c[0] in chosen]
     repeat = getattr(args, 'repeat', 1)
+    if not confirmed(planned_calls(services, len(cases), repeat),
+                     getattr(args, 'confirm_calls', None)):
+        return 3
 
     version = prompt_version('translate')
     out_dir = os.path.join(ROOT, 'logs', 'eval')

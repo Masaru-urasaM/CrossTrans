@@ -8,12 +8,14 @@ app's own prompt and `AIAPIManager.translate_multimodal()`, parses the answer wi
 the app's own `parse_ocr_result()`, and records whether the sections came back,
 whether the text was read exactly, and whether the language matches:
 
-    python tools/eval_ocr_prompt.py --label k10 --providers Google --key 3
+    python tools/eval_ocr_prompt.py --label k10 --providers Google --key 3 --confirm-calls 10
 
 Real API calls on the user's own keys: one image per case per provider, through a
-vision-capable key. The tool never writes config.json. Fonts are Windows' own
-(Yu Gothic, Microsoft YaHei, Microsoft JhengHei) so each script draws with real
-glyphs. Output: logs/eval/ocr_<label>.jsonl; images in logs/eval/ocr_images/.
+vision-capable key - nothing is sent until `--confirm-calls N` names their number
+(K12; a run without it prints the number). The tool never writes config.json.
+Fonts are Windows' own (Yu Gothic, Microsoft YaHei, Microsoft JhengHei) so each
+script draws with real glyphs. Output: logs/eval/ocr_<label>.jsonl; images in
+logs/eval/ocr_images/.
 """
 import argparse
 import json
@@ -94,6 +96,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument('--delay', type=float, default=3.0,
                         help='seconds between calls (a free tier allows ~10 a minute)')
     parser.add_argument('--texts', default='', help='comma-separated subset of the cases')
+    parser.add_argument('--confirm-calls', type=int, default=None,
+                        help='the number of real API calls the run makes, as a run without '
+                             'it prints - nothing is sent until it matches (K12)')
     args = parser.parse_args(argv)
 
     if hasattr(sys.stdout, 'reconfigure'):
@@ -102,7 +107,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     logging.disable(logging.WARNING)
     import src.core  # noqa: F401 - must precede config (circular import)
     from config import Config
-    from eval_dictionary_prompt import build_services
+    from eval_dictionary_prompt import build_services, confirmed, planned_calls
     from src.ui.screenshot_handler import ocr_prompt
 
     config = Config()
@@ -117,6 +122,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.texts:
         chosen = {t.strip() for t in args.texts.split(',')}
         cases = [case for case in OCR_CASES if case[0] in chosen]
+    if not confirmed(planned_calls(services, len(cases)), args.confirm_calls):
+        return 3
 
     out_dir = os.path.join(ROOT, 'logs', 'eval')
     os.makedirs(out_dir, exist_ok=True)
