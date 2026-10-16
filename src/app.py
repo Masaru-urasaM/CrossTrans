@@ -49,8 +49,9 @@ from src.ui.settings import SettingsWindow
 from src.ui.dialogs import APIErrorDialog, TrialExhaustedDialog, TrialFeatureDialog
 from src.ui.history_dialog import HistoryDialog
 from src.ui.toast import ToastManager, ToastType
-from src.ui.quick_translate import QuickTranslateManager, is_error_text
+from src.ui.quick_translate import QuickTranslateManager, fill_source_row, is_error_text
 from src.core import furigana, lang_id
+from src.core.source_marker import ROW_ASK, ROW_CHANGE, source_row
 from src.ui.ruby_text import MAX_ANNOTATE_CHARS, RubyText, insert_output
 from src.ui.tray import TrayManager
 from src.utils.updates import (
@@ -788,6 +789,13 @@ class TranslatorApp:
 
         ttk.Label(original_header, text="Original:", font=('Segoe UI', 10)).pack(side=LEFT)
 
+        # The Japanese / Chinese row for kanji-only input (K5), packed after the
+        # label by _refresh_source_row() when there is something to say
+        self._source_row = ttk.Frame(original_header)
+        self._source_row_state = None
+        # A translation handed over with the text (Open Translator) is of exactly it
+        self._translated_input = (original or '').strip() if translated else None
+
         # Dictionary button - opens popup with word buttons for original text
         # Use tk.Button for consistent reddish-brown color
         self.dict_btn = tk.Button(
@@ -990,8 +998,14 @@ class TranslatorApp:
         if hasattr(self, 'translate_btn'):
             self.translate_btn.configure(text=f"Translate → {self.selected_language}")
 
-    def _do_retranslate(self):
-        """Perform translation from popup."""
+    def _do_retranslate(self, source_language: Optional[str] = None):
+        """Perform translation from popup.
+
+        Args:
+            source_language: The Japanese / Chinese answer from the row beside
+                "Original:" (K5): stated to the model, and the cache skipped -
+                it holds the translation the answer is correcting.
+        """
         original = self.original_text.get('1.0', tk.END).strip()
 
         # Check for attachments
@@ -1019,6 +1033,7 @@ class TranslatorApp:
         def translate_thread():
             translated = ""
             extracted_original = ""
+            source_text = None
 
             if has_attachments:
                 # Collect all attachments for single API call
@@ -1147,10 +1162,13 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
             else:
                 # Standard text translation (no attachments)
                 translated = self.translation_service.translate_text(
-                    original, self.selected_language, custom_prompt)
+                    original, self.selected_language, custom_prompt,
+                    skip_cache=bool(source_language), source_language=source_language)
+                source_text = original
 
             if self.popup:
-                self.popup.after(0, lambda: self._update_translation_with_original(translated, extracted_original))
+                self.popup.after(0, lambda: self._update_translation_with_original(
+                    translated, extracted_original, source_text=source_text))
 
         threading.Thread(target=translate_thread, daemon=True).start()
 
@@ -1215,10 +1233,19 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         except Exception:
             self.popup.title("CrossTrans")
 
-    def _update_translation_with_original(self, translated: str, extracted_original: str = ""):
-        """Update translation result and optionally the original text in popup."""
+    def _update_translation_with_original(self, translated: str, extracted_original: str = "",
+                                          source_text: Optional[str] = None):
+        """Update translation result and optionally the original text in popup.
+
+        Args:
+            source_text: The text that was translated, when it was the input box's
+                own text - what the Japanese / Chinese row asks about (K5).
+        """
         # Stop animation
         self._stop_translate_animation()
+
+        if source_text is not None and not is_error_text(translated):
+            self._translated_input = source_text
 
         # Update original text box if extracted_original is provided
         if extracted_original:
@@ -1238,7 +1265,8 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         self._update_popup_title_with_trial()
 
         # The translation may have brought a verdict for the input (J4): the
-        # Reading pane can read kanji-only Japanese now.
+        # Reading pane can read kanji-only Japanese now, and the language row
+        # (K5) can say what the model made of it.
         if self._reading_pane_alive():
             self._schedule_reading_refresh(delay_ms=1)
 
@@ -1427,6 +1455,9 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         self._reading_pane_job = None
         if not self._reading_pane_alive():
             return
+        # The language row describes the same input, and must not wait on the
+        # furigana toggle or the pane's collapse state below.
+        self._refresh_source_row()
 
         # The Settings toggle is read here, not cached, so switching furigana
         # off takes effect on the next edit like every other surface.
@@ -1518,6 +1549,56 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         """Open dictionary popup window with word buttons for original text."""
         original = self.original_text.get('1.0', tk.END).strip()
         self.dictionary_popup.open_from_text(original)
+
+    def _refresh_source_row(self):
+        """The main window's Japanese / Chinese row, beside "Original:" (K5).
+
+        The popup's rule (`source_marker.source_row`, Decision 29) applied to the
+        input box: ask once a translation of exactly this text came back without
+        a verdict; offer the other language for a term a model or the user
+        placed. Untranslated, unplaced kanji ask nothing - typing is not a
+        question. Shown with furigana off too: the answer changes the meaning.
+        """
+        row = getattr(self, '_source_row', None)
+        try:
+            if row is None or not row.winfo_exists():
+                return
+            text = self.original_text.get('1.0', 'end-1c').strip()
+        except tk.TclError:
+            return
+        verdict = self.translation_service.source_verdict(text) if text else None
+        mode = source_row(text, verdict)
+        if mode == ROW_ASK and text != getattr(self, '_translated_input', None):
+            mode = None
+        state = (mode, lang_id.normalize_language(verdict) if mode == ROW_CHANGE else None)
+        if state == getattr(self, '_source_row_state', None):
+            return
+        self._source_row_state = state
+        for child in row.winfo_children():
+            child.destroy()
+        if mode:
+            fill_source_row(row, mode, verdict, self._choose_input_source)
+            row.pack(side=LEFT, padx=(12, 0))
+        else:
+            row.pack_forget()
+
+    def _choose_input_source(self, language: str):
+        """An answer from the main window's row (K5): kept as the input's verdict,
+        then the input is translated again with it stated - the popup's rule
+        (Decision 27). Ignored while a translation is running."""
+        text = self.original_text.get('1.0', tk.END).strip()
+        if not text:
+            return
+        try:
+            if str(self.translate_btn.cget('state')) == 'disabled':
+                return
+        except (tk.TclError, AttributeError):
+            return
+        logging.info(f"[LangID] user chose source={language} chars={len(text)} "
+                     f"via=main-window")
+        self.translation_service.remember_user_source(text, language)
+        self._schedule_reading_refresh(delay_ms=1)
+        self._do_retranslate(source_language=language)
 
     def _on_source_chosen(self, text: str):
         """The user said which language a text's kanji are (the Dictionary's

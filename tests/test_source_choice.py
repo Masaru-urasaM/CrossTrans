@@ -314,3 +314,169 @@ class TestPopupChoiceIsKept:
         names = [name for name, _args, _kwargs in app.translation_service.mock_calls]
         assert names == ['remember_user_source', 'redo_translation']
         app.translation_service.remember_user_source.assert_called_once_with("汽車", JAPANESE)
+
+
+# --------------------------------------------------------------------------- #
+# K5 - the main window's row, beside "Original:"
+# --------------------------------------------------------------------------- #
+def pump(root, ms=100):
+    import time
+    deadline = time.time() + ms / 1000
+    while time.time() < deadline:
+        root.update()
+        time.sleep(0.01)
+
+
+@pytest.fixture
+def main_window(tk_root, monkeypatch):
+    """The real main window (`show_popup`) on a TranslatorApp built with __new__ -
+    __init__ would register hotkeys and a tray icon - with a real verdict memory."""
+    from src.app import TranslatorApp
+    from src.constants import LANGUAGES
+    created = []
+
+    def build(original, translated="", verdicts=None, furigana=True):
+        app = TranslatorApp.__new__(TranslatorApp)
+        app.root = tk_root
+        app.popup = None
+        config = MagicMock()
+        config.has_any_vision_capable.return_value = False
+        config.has_any_file_capable.return_value = False
+        config.get_furigana_enabled.return_value = furigana
+        config.get_furigana_reading_pane.return_value = True
+        config.get_fix_grammar_enabled.return_value = True
+        app.config = config
+        app.translation_service = make_service()
+        for text, verdict in (verdicts or {}).items():
+            app.translation_service._remember_source_verdict(text, verdict)
+        app.selected_language = "English"
+        app.filtered_languages = LANGUAGES.copy()
+        app.dictionary_popup = MagicMock()
+        app.toast = MagicMock()
+        app.drop_handler = MagicMock()
+        app.show_popup(original, translated, "English", force_new=True)
+        created.append(app)
+        settle(app)
+        return app
+
+    yield build
+    for app in created:
+        try:
+            app.popup.destroy()
+        except (tk.TclError, AttributeError):
+            pass
+
+
+def settle(app, text=None):
+    """Set the input (as typing would) and refresh what depends on it, now."""
+    if text is not None:
+        app.original_text.delete('1.0', tk.END)
+        app.original_text.insert('1.0', text)
+    app._refresh_reading_pane()
+    app.root.update_idletasks()
+
+
+def shown(app):
+    """(label, [buttons]) of the row, or None when it is not shown."""
+    if not app._source_row.winfo_manager():
+        return None
+    labels, buttons = row_parts(app._source_row)
+    return labels[0], [b.cget('text') for b in buttons]
+
+
+def click(app, text):
+    _labels, buttons = row_parts(app._source_row)
+    next(b for b in buttons if b.cget('text') == text).invoke()
+
+
+class TestMainWindowRow:
+    def test_it_sits_beside_original_without_growing_the_header(self, main_window, tk_root):
+        app = main_window("汽車", verdicts={"汽車": CHINESE_SIMPLIFIED})
+        tk_root.update()
+        header = app._source_row.master
+        assert header is app._original_header
+        assert header.winfo_height() == app.dict_btn.winfo_height()
+
+    def test_untranslated_unplaced_kanji_asks_nothing(self, main_window):
+        app = main_window("汽車")
+        assert shown(app) is None
+
+    def test_a_translation_without_a_verdict_asks(self, main_window):
+        # Open Translator hands over the popup's translation of exactly this text.
+        app = main_window("汽車", "Car")
+        assert shown(app) == ("Kanji-only text - read it as:", ["Japanese", "Chinese"])
+
+    def test_a_placed_term_offers_the_other_language(self, main_window):
+        app = main_window("汽車", verdicts={"汽車": CHINESE_SIMPLIFIED})
+        assert shown(app) == ("Kanji-only text - read as Chinese.", ["Read as Japanese"])
+
+    @pytest.mark.parametrize("text, verdict", [("這是我的書。", CHINESE_TRADITIONAL),
+                                               ("勉強します", None), ("Hello", None)])
+    def test_sentences_kana_and_latin_get_no_row(self, main_window, text, verdict):
+        app = main_window(text, "x", verdicts={text: verdict} if verdict else None)
+        assert shown(app) is None
+
+    def test_other_text_drops_the_question(self, main_window):
+        app = main_window("汽車", "Car")
+        settle(app, "工作")
+        assert shown(app) is None
+
+    def test_it_shows_with_furigana_off(self, main_window):
+        # The answer changes the meaning, not only the readings.
+        app = main_window("汽車", verdicts={"汽車": CHINESE_SIMPLIFIED}, furigana=False)
+        assert shown(app) == ("Kanji-only text - read as Chinese.", ["Read as Japanese"])
+
+    def test_an_answer_is_kept_and_translates_again(self, main_window):
+        app = main_window("汽車", "Car")
+        app._do_retranslate = MagicMock()
+        click(app, "Japanese")
+        assert app.translation_service.source_verdict("汽車") == JAPANESE
+        app._do_retranslate.assert_called_once_with(source_language=JAPANESE)
+        settle(app)
+        assert shown(app) == ("Kanji-only text - read as Japanese.", ["Read as Chinese"])
+
+    def test_no_answer_while_a_translation_runs(self, main_window):
+        app = main_window("汽車", "Car")
+        app._do_retranslate = MagicMock()
+        app.translate_btn.configure(state='disabled')
+        click(app, "Japanese")
+        assert app.translation_service.source_verdict("汽車") is None
+        app._do_retranslate.assert_not_called()
+
+
+class TestMainWindowTranslation:
+    """`_do_retranslate(source_language=)` on the real window, the request faked."""
+
+    @pytest.fixture
+    def window(self, main_window, monkeypatch):
+        monkeypatch.setattr('threading.Thread', _SyncThread)
+        app = main_window("汽車")
+        app.translation_service.translate_text = MagicMock(return_value="Steam train")
+        return app
+
+    def test_the_answer_is_stated_and_the_cache_skipped(self, window):
+        window._do_retranslate(source_language=JAPANESE)
+        pump(window.root)
+        call = window.translation_service.translate_text.call_args
+        assert call.args[0] == "汽車"
+        assert call.kwargs == {'skip_cache': True, 'source_language': JAPANESE}
+        assert window.trans_text.get_plain() == "Steam train"
+
+    def test_a_plain_translate_states_nothing(self, window):
+        window._do_retranslate()
+        pump(window.root)
+        assert window.translation_service.translate_text.call_args.kwargs == {
+            'skip_cache': False, 'source_language': None}
+
+    def test_a_finished_translation_is_of_the_input(self, window):
+        window._do_retranslate()
+        pump(window.root)
+        assert window._translated_input == "汽車"
+        assert shown(window) == ("Kanji-only text - read it as:", ["Japanese", "Chinese"])
+
+    def test_a_failure_is_not_a_translation_of_it(self, window):
+        window.translation_service.translate_text.return_value = "Error: quota exceeded"
+        window._do_retranslate()
+        pump(window.root)
+        assert window._translated_input is None
+        assert shown(window) is None

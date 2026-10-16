@@ -13,7 +13,7 @@ Select text, press hotkey, get instant translation in a popup.
 | `main.py` | Entry point |
 | `config.py` | Configuration management, registry auto-start |
 | `src/constants.py` | VERSION, LANGUAGES, PROVIDERS (hardcoded fallbacks) |
-| `src/app.py` | Main TranslatorApp coordinator (~1630 lines) |
+| `src/app.py` | Main TranslatorApp coordinator (~2040 lines) |
 | `src/core/remote_config.py` | Dynamic model/provider config (Cloudflare KV) |
 | `src/core/` | Business logic (26 modules) |
 | `src/ui/` | UI components (20+ files) |
@@ -710,7 +710,7 @@ unknown; a surface that needs a language asks.
 | Text whose characters settle it | nothing asked; `SOURCE LANGUAGE: the text above is X.` stated | `source_marker.source_clause()` |
 | Dictionary lookup | field 2 (Source Language) | `dictionary_prompt` (J1) |
 | Screenshot OCR | `===SOURCE LANGUAGE===` section | `screenshot_handler.ocr_prompt()` (J8) |
-| The user | the popup's "Kanji-only text - read it as: [Japanese] [Chinese]" row, or "read as Chinese. [Read as Japanese]" for a term a model placed (re-translates, Decisions 27 and 29); the Dictionary's "Kanji-only text: Japanese or Chinese?" dialog (Decision 26, kept since K3) | `source_marker.source_row()`, `QuickTranslateManager._build_source_chooser()`, `DictionaryPopup._open_ambiguous_kanji()` |
+| The user | the popup's "Kanji-only text - read it as: [Japanese] [Chinese]" row, or "read as Chinese. [Read as Japanese]" for a term a model placed (re-translates, Decisions 27 and 29); the same row in the main window beside "Original:" (K5 - asks only once a translation of exactly the input could not place it); the Dictionary's "Kanji-only text: Japanese or Chinese?" dialog (Decision 26, kept since K3) | `source_marker.source_row()`, `QuickTranslateManager._build_source_chooser()`, `TranslatorApp._refresh_source_row()`, `DictionaryPopup._open_ambiguous_kanji()` |
 
 **Where it is kept**: `TranslationService.last_source_language` (per call) and
 `source_verdict(text)` (this session, bounded, then History's `source_verdict` field). An

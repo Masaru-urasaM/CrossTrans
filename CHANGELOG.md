@@ -4,6 +4,36 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase K5 — The main window's own Japanese / Chinese row (2026-10-16)
+
+**Added**
+- **The popup's row, in the main window**, beside "Original:" and before the Dictionary button.
+  When a translation of kanji-only input came back without a verdict, the Reading pane stayed
+  plain and nothing let the user say which language it was; the popup has asked since J6. Now:
+  "Kanji-only text - read it as: [Japanese] [Chinese]" once a translation of exactly this input
+  could not place it, and "Kanji-only text - read as Chinese. [Read as Japanese]" for a term a
+  model or the user placed (the popup's rule, `source_marker.source_row()`, Decision 29). An
+  answer is kept as the input's verdict (K3) and the input is translated again with it stated,
+  **skipping the cache** - the cached entry is the translation the answer is correcting.
+- **Untranslated, unplaced kanji ask nothing** - typing 汽車 is not a question, and the row would
+  flicker with every keystroke. A text handed over by Open Translator counts as translated: the
+  popup's result is of exactly that text.
+- Shown with furigana off too: the answer changes the meaning, not only the readings. It sits in
+  the existing header row and adds no height (measured: header, row and Dictionary button all
+  28 px).
+- `TranslatorApp._refresh_source_row()` (run from `_refresh_reading_pane()`, before its furigana
+  and collapse checks, so typing, translating and the Dictionary's answer all refresh it),
+  `_choose_input_source()` (ignored while a translation runs), `_do_retranslate(source_language=)`,
+  `_update_translation_with_original(..., source_text=)` and `_translated_input` (a failed
+  translation is not a translation of the input).
+
+**Tests**: 1264 -> 1279 (+15): `TestMainWindowRow` and `TestMainWindowTranslation` build the real
+main window (`show_popup`) on a `TranslatorApp` made with `__new__`, with a real verdict memory -
+the row's place and height, when it asks, when it offers a change, sentences / kana / Latin, other
+text dropping the question, furigana off, an answer kept and re-translated, no answer during a
+running translation, the answer stated with the cache skipped, a failure not counted. 11
+mutations killed.
+
 ### Phase K4 — A term a model placed can be read as the other language (2026-10-16)
 
 **Added**
