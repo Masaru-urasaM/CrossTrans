@@ -16,6 +16,25 @@ except ImportError:
     HAS_TTKBOOTSTRAP = False
 
 
+def furigana_reader_note(accurate: bool, japanese_installed: bool) -> str:
+    """The Dictionary tab's line on which reader furigana uses (D19)."""
+    if accurate:
+        return "Furigana: accurate readings (UniDic, from the Japanese pack)."
+    if japanese_installed:
+        return ("Furigana: basic readings - the Japanese pack is installed, but its reader "
+                "could not be loaded here (see the log).")
+    return ("Furigana: basic readings. Install the Japanese pack below (~250 MB) for "
+            "accurate ones - they apply at once, no restart.")
+
+
+def _apply_to_furigana(language: str, success: bool) -> None:
+    """Installing or removing the Japanese pack changes the reader furigana uses
+    (D19): look again now, not at the next start."""
+    if success and language == "Japanese":
+        from src.core import furigana
+        furigana.refresh_providers()
+
+
 class DictionaryTabMixin:
     """Mixin class providing Dictionary/NLP tab functionality."""
 
@@ -27,6 +46,8 @@ class DictionaryTabMixin:
 
         ttk.Label(parent, text="Install language packs to enable smart word recognition in Dictionary mode.",
                   font=('Segoe UI', 9), foreground='#888888').pack(anchor=W, pady=(2, 10))
+
+        self._create_furigana_reader_note(parent)
 
         try:
             self._create_dictionary_tab_content(parent)
@@ -478,6 +499,7 @@ class DictionaryTabMixin:
                 self.window.after(0, lambda p=percent: self._update_install_progress_bar(p))
 
             success, error = nlp_manager.install(language, progress_callback)
+            _apply_to_furigana(language, success)
             self._progress_animation_running = False
             self.window.after(0, lambda: self._on_install_complete(language, success, error))
 
@@ -669,6 +691,7 @@ class DictionaryTabMixin:
                 self.window.after(0, update_ui)
 
             success, error = nlp_manager.uninstall(language, progress_callback)
+            _apply_to_furigana(language, success)
 
             # Stop animation
             self._progress_animation_running = False
@@ -819,6 +842,7 @@ class DictionaryTabMixin:
                 self.window.after(0, lambda m=message, p=percent: self._update_install_progress(m, p))
 
             success, error = nlp_manager.install(language, progress_callback)
+            _apply_to_furigana(language, success)
             self._progress_animation_running = False
             self.window.after(0, lambda: self._on_bulk_install_complete(language, success, error))
 
@@ -936,6 +960,7 @@ class DictionaryTabMixin:
                 self.window.after(0, lambda m=message, p=percent: self._update_install_progress(m, p))
 
             success, error = nlp_manager.uninstall(language, progress_callback)
+            _apply_to_furigana(language, success)
             self._progress_animation_running = False
             self.window.after(0, lambda: self._on_bulk_delete_complete(language, success, error))
 
@@ -1002,6 +1027,24 @@ class DictionaryTabMixin:
             except tk.TclError:
                 pass
         self._bulk_animation_btn = None
+
+    def _create_furigana_reader_note(self, parent):
+        """Which reader furigana uses now, and how to get the accurate one (D19).
+
+        The Japanese pack's fugashi + UniDic is offered here rather than bundled:
+        it is ~250 MB, and the user chose to download it when wanted."""
+        try:
+            from src.core import furigana
+            from src.core.nlp_manager import nlp_manager
+            accurate = furigana.active_provider_name() == "fugashi"
+            installed = accurate or nlp_manager.is_installed("Japanese")
+        except Exception as e:
+            logging.warning(f"[Dictionary] furigana reader note skipped: {e}")
+            return
+        self.furigana_reader_label = ttk.Label(
+            parent, text=furigana_reader_note(accurate, installed), font=('Segoe UI', 9),
+            foreground='#28a745' if accurate else '#17a2b8', wraplength=520, justify=LEFT)
+        self.furigana_reader_label.pack(anchor=W, pady=(0, 10))
 
     def _refresh_dictionary_tab(self):
         """Refresh entire Dictionary tab to reflect install/uninstall changes."""

@@ -801,6 +801,13 @@ display rather than receiving pre-annotated strings through the queue.
   maps a whole-token reading onto interleaved kanji/kana runs and returns `None` on any
   mismatch. **Blank beats a wrong reading** — an absent reading is visibly absent, a wrong one
   is not.
+- **fugashi + UniDic is a download, not bundled** (D19, Decision 33 - the user's choice): it is
+  the Japanese language pack in Settings → Dictionary (~250 MB), and pykakasi, the reader every
+  install has, misreads common words (彼 か, 君 くん, 人 にん, 今日 こんにち - 30% of real
+  sentences differ). Installing or removing the pack calls `furigana.refresh_providers()`
+  (`dictionary_tab._apply_to_furigana`, all four install/uninstall paths): without it a provider
+  that failed to load is never tried again before a restart, and the annotation cache keeps the
+  old readings. The tab's top line (`furigana_reader_note`) says which reader is in use.
 - Two measured suppression rules: digit + counter pairs (`2日` would read as a bare fragment)
   and all-kanji compound refinement (`日本語` would read にっぽんご because UniDic tags 日本 as a
   proper noun).

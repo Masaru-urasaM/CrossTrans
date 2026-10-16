@@ -7,6 +7,39 @@ All notable changes to CrossTrans are documented here.
 Everything below `[1.9.20]` ships as **1.9.21**: the user chose the number on 2026-10-16, and
 `VERSION` says so. Not tagged and not built as a release yet.
 
+### Phase K14 — Accurate furigana as a download in Settings -> Dictionary (2026-10-16, D19)
+
+The user chose how D19 ends: not bundled - "put it in Settings, in the Dictionary language
+section; the user downloads it and applies it" (Decision 33).
+
+**Found**: the Japanese pack already installs fugashi + unidic-lite, and furigana already prefers
+fugashi - but only from the next start. A provider that failed to load is never tried again
+(`FugashiProvider._unavailable`), the import system caches directory listings, and the annotation
+cache keeps pykakasi's readings. Nothing in Settings said the pack changes furigana at all.
+
+**Added**
+- `furigana.refresh_providers()`: invalidates the import caches, forgets a failed fugashi load,
+  clears the annotation cache, and returns the provider now in use.
+- `dictionary_tab._apply_to_furigana()`: after every install and uninstall of the Japanese pack -
+  single and bulk, both directions.
+- The Dictionary tab's top line says which reader furigana uses: accurate (UniDic, from the pack),
+  basic with the pack installed but not loadable here (the EXE needs the system Python to be the
+  app's version), or basic with how to get the accurate one and what it costs.
+
+**Changed**
+- The Japanese pack's size reads ~250 MB (was ~200): unidic-lite alone installs to 249 MB.
+
+**Measured** (source run, fugashi installed, a session that started without it):
+`今日は彼の家に行きます。君は人です。` read 今日 こんにち, 彼 か, 君 くん, 人 にん through
+pykakasi; after `refresh_providers()`, with no restart, 今日 きょう, 彼 かれ, 君 きみ, 人 ひと.
+
+**Closed**: DEFERRED D19.
+
+**Tests**: 1502 -> 1519 (+17, `tests/test_furigana_reader_choice.py`: a pack installed after a
+failed load is found, a reader that cannot load leaves pykakasi, old readings dropped, import
+caches invalidated, only the Japanese pack and only on success, all four call sites, the three
+notes, the tab showing the reader in use, the pack's contents and size). 9 mutations killed.
+
 ### Release prep — 1.9.21 chosen, merged into main (2026-10-16)
 
 - `VERSION` 1.9.20 -> 1.9.21 (`src/constants.py`; the CLAUDE.md title follows).
