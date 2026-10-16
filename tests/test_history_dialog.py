@@ -24,8 +24,9 @@ import pytest
 import src.core  # noqa: F401  (must precede `config`: see project CLAUDE.md)
 from src.core import furigana as F
 from src.core.furigana import RubySegment
-from src.ui.history_dialog import LINE_CUT, HistoryDialog
-from src.ui.ruby_text import RubyLine, truncate_segments
+from src.ui import history_dialog as history_module
+from src.ui.history_dialog import FIRST_ROWS, LABEL_PADDING_PX, ROW_FONT, HistoryDialog
+from src.ui.ruby_text import ELLIPSIS, RubyLine, fit_segments
 
 HAS_PROVIDER = pytest.mark.skipif(not F.is_available(),
                                   reason="requires a reading provider (fugashi or pykakasi)")
@@ -71,8 +72,8 @@ def dialog(tk_root):
         manager = FakeHistoryManager(make_entries(count) if entries is None else entries)
         loaded = []
         dlg = HistoryDialog(parent, manager, loaded.append, furigana_enabled=furigana_enabled)
-        tk_root.update()
         opened.append((parent, dlg))
+        finish(dlg)
         return dlg, manager, loaded
 
     yield _open
@@ -82,6 +83,16 @@ def dialog(tk_root):
                 window.destroy()
             except tk.TclError:
                 pass
+
+
+def finish(dlg, timeout=20.0):
+    """Let the dialog draw every row: past FIRST_ROWS they come in batches (D17)."""
+    deadline = time.time() + timeout
+    dlg.window.update()
+    while (dlg._pending_rows or dlg._row_job) and time.time() < deadline:
+        dlg.window.update()
+        time.sleep(0.005)
+    assert not dlg._pending_rows, "rows still waiting after the timeout"
 
 
 def scrolls(dlg, widget):
@@ -216,22 +227,57 @@ def ruby_lines(dlg):
     return found
 
 
-class TestTruncateSegments:
-    def test_short_text_is_kept_whole(self):
+class TestFitSegments:
+    """Cut to a width in pixels (K7) - measured with the row's own font."""
+
+    @pytest.fixture
+    def width(self, tk_root):
+        from src.ui.ruby_text import _line_width, RUBY_FONT_SIZE, _as_font_tuple
+        ruby_font = _as_font_tuple(None, RUBY_FONT_SIZE)
+
+        def measure(segments):
+            total = 0
+            for segment in segments:
+                base = _line_width(tk_root, ROW_FONT, segment.base)
+                total += max(base, _line_width(tk_root, ruby_font, segment.ruby)) \
+                    if segment.ruby else base
+            return total
+        return measure
+
+    def test_short_text_is_kept_whole(self, tk_root):
         segments = (RubySegment("東京", "とうきょう"), RubySegment("へ", None))
-        assert truncate_segments(segments, 10) == (segments, False)
+        assert fit_segments(tk_root, segments, 500, base_font=ROW_FONT) == (segments, False)
 
-    def test_a_plain_run_is_cut_at_the_limit(self):
-        segments = (RubySegment("abcdef", None),)
-        assert truncate_segments(segments, 4) == ((RubySegment("abcd", None),), True)
+    def test_a_plain_run_is_cut_to_the_width_with_an_ellipsis(self, tk_root, width):
+        segments = (RubySegment("abcdefghij" * 10, None),)
+        fitted, cut = fit_segments(tk_root, segments, 200, base_font=ROW_FONT)
+        assert cut and fitted[-1] == RubySegment(ELLIPSIS, None)
+        assert width(fitted) <= 200
+        assert segments[0].base.startswith(fitted[0].base)
+        # One more character would not have fitted
+        longer = (RubySegment(segments[0].base[:len(fitted[0].base) + 1], None),
+                  RubySegment(ELLIPSIS, None))
+        assert width(longer) > 200
 
-    def test_a_ruby_pair_is_never_split(self):
+    def test_a_ruby_pair_is_never_split(self, tk_root, width):
+        # Room for "ab", the ellipsis and the first kanji of the pair - not the pair.
         segments = (RubySegment("ab", None), RubySegment("東京", "とうきょう"), RubySegment("x", None))
-        assert truncate_segments(segments, 3) == ((RubySegment("ab", None),), True)
+        room = (width(segments[:1]) + width((RubySegment(ELLIPSIS, None),))
+                + width((RubySegment("東", None),)) + 1)
+        assert room < width(segments[:2]) + width((RubySegment(ELLIPSIS, None),))
+        fitted, cut = fit_segments(tk_root, segments, room, base_font=ROW_FONT)
+        assert cut and fitted == (RubySegment("ab", None), RubySegment(ELLIPSIS, None))
 
-    def test_a_pair_that_fits_exactly_is_kept(self):
-        segments = (RubySegment("ab", None), RubySegment("東京", "とうきょう"), RubySegment("x", None))
-        assert truncate_segments(segments, 4) == (segments[:2], True)
+    def test_a_pair_that_fits_exactly_is_kept(self, tk_root, width):
+        segments = (RubySegment("ab", None), RubySegment("東京", "とうきょう"), RubySegment("x" * 40, None))
+        room = width(segments[:2]) + width((RubySegment(ELLIPSIS, None),))
+        fitted, cut = fit_segments(tk_root, segments, room, base_font=ROW_FONT)
+        assert cut and fitted == segments[:2] + (RubySegment(ELLIPSIS, None),)
+
+    def test_the_head_of_a_longer_line_always_ends_in_an_ellipsis(self, tk_root):
+        segments = (RubySegment("short", None),)
+        fitted, cut = fit_segments(tk_root, segments, 500, base_font=ROW_FONT, more=True)
+        assert cut and fitted == segments + (RubySegment(ELLIPSIS, None),)
 
 
 class TestReadings:
@@ -285,7 +331,8 @@ class TestReadings:
         line = ruby_lines(dlg)[0]
         assert line.get_plain().endswith("...")
         body = line.get_plain()[:-3]
-        assert len(body) <= LINE_CUT and text.startswith(body)
+        assert text.startswith(body)
+        assert line.winfo_reqwidth() <= dlg._line_px()       # inside the row (K7)
         bases = [seg.base for seg in line.segments if seg.ruby]
         assert all(base in ("毎日", "日本語", "勉強") for base in bases)
 
@@ -363,3 +410,183 @@ class TestRubyLineCost:
         import inspect
         from src.app import TranslatorApp
         assert 'furigana_enabled=self._ruby_enabled()' in inspect.getsource(TranslatorApp._open_history)
+
+
+# --------------------------------------------------------------------------- #
+# K7 - a line is cut to the row's width, not to a character count
+# --------------------------------------------------------------------------- #
+def plain_lines(dlg):
+    """The text labels of the rows' content lines (not the language/time/delete row)."""
+    found = []
+    for row in rows_of(dlg):
+        for child in row.winfo_children():
+            if child.winfo_class() == 'TLabel':
+                found.append(child)
+    return found
+
+
+class TestCutToTheRow:
+    def test_a_long_japanese_line_shows_its_ellipsis_inside_the_row(self, dialog):
+        # 70 kanji and kana: at 13 px each, far wider than the row. By character
+        # count it was cut to 57 - 685 px into 560 px - and the "..." was clipped.
+        text = "毎日日本語を勉強しています。" * 5
+        dlg, _, _ = dialog(entries=[entry(text, "I study")], furigana_enabled=False)
+        label = plain_lines(dlg)[0]
+        assert label.cget('text').endswith("...")
+        assert label.winfo_reqwidth() <= dlg._line_px()
+        assert text.startswith(label.cget('text')[:-3])
+
+    def test_a_latin_line_that_fits_is_shown_whole(self, dialog):
+        # 70 characters of Latin fit the row; the old rule cut anything past 60.
+        text = "The quick brown fox jumps over the lazy dog and then sits down."
+        assert len(text) > 60
+        dlg, _, _ = dialog(entries=[entry(text, "x")], furigana_enabled=False)
+        assert plain_lines(dlg)[0].cget('text') == text
+
+    def test_a_long_latin_line_is_cut_inside_the_row(self, dialog):
+        text = "The quick brown fox jumps over the lazy dog. " * 6
+        dlg, _, _ = dialog(entries=[entry(text, "x")], furigana_enabled=False)
+        label = plain_lines(dlg)[0]
+        assert label.cget('text').endswith("...")
+        assert label.winfo_reqwidth() <= dlg._line_px()
+
+    def test_the_translation_line_keeps_its_arrow(self, dialog):
+        dlg, _, _ = dialog(entries=[entry("x", "毎日日本語を勉強しています。" * 5)],
+                           furigana_enabled=False)
+        label = plain_lines(dlg)[1]
+        assert label.cget('text').startswith("→ ") and label.cget('text').endswith("...")
+        assert label.winfo_reqwidth() <= dlg._line_px()
+
+    def test_the_cut_leaves_room_for_the_labels_padding(self, dialog, tk_root):
+        # A character whose width makes the count differ with and without the
+        # padding; then the cut text alone must fit the row less the padding.
+        from tkinter import font
+        import string
+        measure = font.Font(tk_root, family=ROW_FONT[0], size=ROW_FONT[1]).measure
+        dlg, _, _ = dialog(entries=[entry("x", "y")], furigana_enabled=False)
+        room, dots = dlg._line_px(), measure(ELLIPSIS)
+        candidates = [ch for ch in string.ascii_letters + string.digits + "あいう東京"
+                      if (room - dots - LABEL_PADDING_PX) // measure(ch)
+                      != (room - dots) // measure(ch)]
+        if not candidates:
+            pytest.skip("no character here separates the two budgets")
+        text = candidates[0] * 300
+        dlg2, _, _ = dialog(entries=[entry(text, "y")], furigana_enabled=False)
+        shown = plain_lines(dlg2)[0].cget('text')
+        assert shown.endswith(ELLIPSIS)
+        assert measure(shown) <= room - LABEL_PADDING_PX
+
+    def test_a_document_is_measured_only_as_far_as_a_row_can_show(self, dialog):
+        dlg, _, _ = dialog(entries=[entry("word " * 20000, "x")], furigana_enabled=False)
+        assert len(plain_lines(dlg)[0].cget('text')) < history_module.LINE_SCAN_CHARS
+
+    def test_a_label_needs_no_more_padding_than_the_cut_leaves(self, dialog):
+        # The plain line is cut to the row less LABEL_PADDING_PX: a theme whose
+        # label padding were wider would clip the "..." again.
+        from tkinter import font
+        text = "毎日日本語を勉強しています。"
+        dlg, _, _ = dialog(entries=[entry(text, "x")], furigana_enabled=False)
+        label = plain_lines(dlg)[0]
+        measured = font.Font(label, family=ROW_FONT[0], size=ROW_FONT[1]).measure(text)
+        assert label.winfo_reqwidth() - measured <= LABEL_PADDING_PX
+
+
+# --------------------------------------------------------------------------- #
+# D17 - the first rows show at once, the rest follow in batches
+# --------------------------------------------------------------------------- #
+def open_unfinished(tk_root, entries, furigana_enabled=False):
+    parent = tk.Toplevel(tk_root)
+    dlg = HistoryDialog(parent, FakeHistoryManager(entries), lambda item: None,
+                        furigana_enabled=furigana_enabled)
+    return parent, dlg
+
+
+class TestRowsInBatches:
+    @pytest.fixture
+    def opened(self, tk_root):
+        windows = []
+        yield windows
+        for window in windows:
+            try:
+                window.destroy()
+            except tk.TclError:
+                pass
+
+    def test_only_the_first_rows_are_built_before_the_dialog_shows(self, tk_root, opened):
+        parent, dlg = open_unfinished(tk_root, make_entries(100))
+        opened.extend([dlg.window, parent])
+        assert len(rows_of(dlg)) == FIRST_ROWS
+        assert len(dlg._pending_rows) == 100 - FIRST_ROWS and dlg._row_job
+
+    def test_the_rest_follow_in_order(self, tk_root, opened):
+        entries = make_entries(100)
+        parent, dlg = open_unfinished(tk_root, entries)
+        opened.extend([dlg.window, parent])
+        finish(dlg)
+        rows = rows_of(dlg)
+        assert len(rows) == 100
+        texts = [label.cget('text') for label in plain_lines(dlg)][::2]
+        assert texts == [e['original'] for e in entries]
+
+    def test_a_search_while_rows_are_waiting_shows_only_its_results(self, tk_root, opened):
+        parent, dlg = open_unfinished(tk_root, make_entries(100))
+        opened.extend([dlg.window, parent])
+        dlg.search_entry.delete(0, tk.END)
+        dlg.search_entry.insert(0, "number 99")
+        finish(dlg)
+        assert len(rows_of(dlg)) == 1
+
+    def test_a_search_cancels_the_rows_it_replaces(self, tk_root, opened):
+        parent, dlg = open_unfinished(tk_root, make_entries(100))
+        opened.extend([dlg.window, parent])
+        old_job = dlg._row_job
+        dlg.search_entry.delete(0, tk.END)
+        dlg.search_entry.insert(0, "number")              # all 100 again: a new chain
+        pending = dlg.window.tk.splitlist(dlg.window.tk.call('after', 'info'))
+        assert old_job not in pending, "the replaced batches are still scheduled"
+        finish(dlg)
+        assert len(rows_of(dlg)) == 100
+
+    def test_a_row_destroyed_midway_does_not_stop_the_rest(self, tk_root, opened):
+        # A child's <Destroy> reaches the toplevel's binding too (CLAUDE.md Known
+        # Issues): only the window's own may cancel the waiting rows.
+        parent, dlg = open_unfinished(tk_root, make_entries(60))
+        opened.extend([dlg.window, parent])
+        rows_of(dlg)[0].destroy()
+        finish(dlg)
+        assert len(rows_of(dlg)) == 59
+
+    def test_closing_while_rows_are_waiting_is_quiet(self, tk_root, opened):
+        errors = []
+        tk_root.report_callback_exception = lambda *exc: errors.append(exc)
+        try:
+            parent, dlg = open_unfinished(tk_root, make_entries(100))
+            opened.append(parent)
+            dlg.window.destroy()
+            assert dlg._row_job is None and dlg._pending_rows == []
+            deadline = time.time() + 0.3
+            while time.time() < deadline:
+                tk_root.update()
+                time.sleep(0.01)
+        finally:
+            del tk_root.report_callback_exception
+        assert errors == []
+
+    def test_a_row_from_a_later_batch_scrolls_too(self, tk_root, opened):
+        parent, dlg = open_unfinished(tk_root, make_entries(60))
+        opened.extend([dlg.window, parent])
+        finish(dlg)
+        assert scrolls(dlg, rows_of(dlg)[-1])
+
+    def test_the_first_rows_show_well_before_the_last(self, tk_root, opened):
+        """Built at once, 100 entries kept the dialog blank until all were laid out
+        (D17: 1.2-1.9 s measured with construct + update; 0.5-0.6 s to the first idle
+        under mainloop). Relative, so a slow machine does not flake."""
+        start = time.perf_counter()
+        parent, dlg = open_unfinished(tk_root, make_entries(100))
+        opened.extend([dlg.window, parent])
+        dlg.window.update_idletasks()
+        first = time.perf_counter() - start
+        finish(dlg)
+        total = time.perf_counter() - start
+        assert first < total * 0.6, f"first rows {first:.2f} s of {total:.2f} s"

@@ -68,7 +68,7 @@ self.screenshot_handler.configure_callbacks(
 | Dictionary mode | `src/core/nlp_manager.py` + `src/ui/dictionary_mode.py` + `src/ui/custom_word_boxes.py` + `src/core/dictionary_prompt.py` (prompt) + `src/core/translation.py` (`dictionary_lookup`) |
 | Dictionary result rendering (furigana + highlight) | `src/ui/dictionary_render.py` + `show_dictionary_result()` in `src/ui/quick_translate.py` |
 | Japanese vs Chinese (kanji-only text) | `src/core/lang_id.py` (evidence, `resolve()`) + `src/core/source_marker.py` (what the translation prompt says / asks) - see "Language Identity" |
-| History rows | `src/ui/history_dialog.py` + `RubyLine` / `truncate_segments` in `src/ui/ruby_text.py` |
+| History rows | `src/ui/history_dialog.py` (first `FIRST_ROWS` built before it shows, the rest in batches - D17) + `RubyLine` / `fit_segments` (cut to the row in pixels) in `src/ui/ruby_text.py` |
 | Update system | `src/utils/updates.py` + `src/ui/settings/update_manager.py` |
 
 ## Auto-Update System (Important)
@@ -880,7 +880,7 @@ display rather than receiving pre-annotated strings through the queue.
 | Dictionary result window | the lookup's stated source, else each entry's **Source Language** field; `target_lang` for Translation/Definition/Word Type; Japanese + a non-Chinese language = Japanese throughout; Japanese/Chinese pairs cut at `→` | monospace columns preserved; Pronunciation never annotated. See below |
 | Dictionary word chips | mode language (from evidence, a model's verdict or the user since J5), applied to the whole line | a chip that cuts a compound stays bare. See below |
 | Custom lookup tags | mode language, per tag | a tag is one lookup phrase, so it is annotated on its own |
-| History rows | original: its evidence, else its `source_verdict` (never `source_lang`); translation: `output_hint` | `RubyLine` per annotated line, cut by segments to 57 characters; furigana OFF keeps the plain labels (J9) |
+| History rows | original: its evidence, else its `source_verdict` (never `source_lang`); translation: `output_hint` | `RubyLine` per annotated line, cut to the row's width in pixels with "..." (`fit_segments`, K7); furigana OFF keeps the plain labels (J9) |
 
 All result text goes through `ruby_text.insert_output(widget, index, text, lang_hint, enabled)`,
 so the toggle is honored in one place. Read every one of these boxes with `get_plain()`.

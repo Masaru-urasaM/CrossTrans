@@ -378,25 +378,56 @@ def insert_output(widget: 'RubyText', index, text: str,
         widget.insert_plain(index, text, tags)
 
 
-def truncate_segments(segments: Sequence[RubySegment],
-                      limit: int) -> Tuple[Tuple[RubySegment, ...], bool]:
-    """At most `limit` base characters of `segments`, and whether any were cut.
+ELLIPSIS = "..."
 
-    A plain run may be cut anywhere; a ruby pair is never split - it is kept
-    whole or dropped, since half of 東京 with all of とうきょう above it is a wrong
-    reading. Used where a line must fit a fixed width (the History rows).
+
+def fit_segments(widget: tk.Misc, segments: Sequence[RubySegment], available_px: int, *,
+                 base_font=None, ruby_font=None,
+                 more: bool = False) -> Tuple[Tuple[RubySegment, ...], bool]:
+    """The part of a line that fits `available_px` pixels, "..." included when
+    anything is cut, and whether anything was.
+
+    Measured as `RubyLine` draws it - a ruby pair takes the wider of its base
+    and its reading - so a plain label measured with the same base font fits
+    too. A plain run may be cut between characters; a ruby pair is kept whole or
+    dropped, since half of 東京 with all of とうきょう above it is a wrong
+    reading. `more` says the segments are already the head of a longer line, so
+    the ellipsis is due even when they fit. Used where a line must fit a row
+    (History, K7): cutting by character count let 57 CJK characters run 685 px
+    into a 560 px row, clipped, with the "..." never shown.
     """
+    base_font = _as_font_tuple(base_font, BASE_FONT_SIZE)
+    ruby_font = _as_font_tuple(ruby_font, RUBY_FONT_SIZE)
+
+    def width(segment: RubySegment) -> int:
+        base = _line_width(widget, base_font, segment.base)
+        return max(base, _line_width(widget, ruby_font, segment.ruby)) if segment.ruby else base
+
+    segments = tuple(segments)
+    if not more and sum(width(segment) for segment in segments) <= available_px:
+        return segments, False
+
+    budget = available_px - _line_width(widget, base_font, ELLIPSIS)
     kept: List[RubySegment] = []
     used = 0
-    for base, ruby in segments:
-        if used + len(base) <= limit:
-            kept.append(RubySegment(base, ruby))
-            used += len(base)
+    for segment in segments:
+        size = width(segment)
+        if used + size <= budget:
+            kept.append(segment)
+            used += size
             continue
-        if not ruby and used < limit:
-            kept.append(RubySegment(base[:limit - used], None))
-        return tuple(kept), True
-    return tuple(kept), False
+        if not segment.ruby:
+            part = ""
+            for ch in segment.base:
+                size = _line_width(widget, base_font, ch)
+                if used + size > budget:
+                    break
+                part += ch
+                used += size
+            if part:
+                kept.append(RubySegment(part, None))
+        break
+    return tuple(kept) + (RubySegment(ELLIPSIS, None),), True
 
 
 # Fonts and character widths for RubyLine, shared by every line. A Font made per

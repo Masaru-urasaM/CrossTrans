@@ -17,16 +17,25 @@ except ImportError:
 
 from src.core import furigana, lang_id
 from src.core.furigana import RubySegment
-from src.ui.ruby_text import RubyLine, truncate_segments
+from src.ui.ruby_text import RubyLine, fit_segments
 
-# A row shows a line whole up to LINE_MAX characters, else its first LINE_CUT and "...".
-LINE_MAX = 60
-LINE_CUT = 57
+# A line is cut to the row's width in pixels, "..." included (K7). By character
+# count (60, cut to 57) a Japanese line ran 685 px into a 560 px row, clipped,
+# and its "..." never showed, while a Latin line was cut with room to spare.
+LIST_WIDTH = 580            # the list's width before the window is first laid out
+ROW_PADDING = 10            # each row frame's padding, on either side
+LABEL_PADDING_PX = 4        # a ttk.Label's own, around its text (measured)
+# No row shows more than this many characters of a line; only these are measured.
+LINE_SCAN_CHARS = 200
 # Readings are generated for this much of a line - more than is shown, so a word
 # that straddles the cut is read in its context - but never for a whole document.
 LINE_ANNOTATE_CHARS = 120
 # The rows' text, as before J9.
 ROW_FONT = ('Segoe UI', 10)
+# The first rows are built before the dialog shows, the rest in batches while it
+# is on screen (D17): built at once, 100 entries kept it blank for 1.2-1.9 s.
+FIRST_ROWS = 12
+ROW_BATCH = 10
 
 
 def set_dark_title_bar(window):
@@ -58,6 +67,8 @@ class HistoryDialog:
         self.furigana_enabled = furigana_enabled
         self.search_var = None
         self.all_history = []  # Cache for filtering
+        self._pending_rows = []     # entries still to be drawn (D17)
+        self._row_job = None
 
         # Use tk.Toplevel
         self.window = tk.Toplevel(parent)
@@ -86,7 +97,14 @@ class HistoryDialog:
                           if self.window.winfo_exists() else None)
 
         self._create_widgets()
+        # Stop drawing rows into a closed window. Only the toplevel's own
+        # <Destroy>: a child's propagates here too (CLAUDE.md Known Issues).
+        self.window.bind('<Destroy>', self._on_destroy, add='+')
         self._refresh_list()
+
+    def _on_destroy(self, event):
+        if event.widget is self.window:
+            self._cancel_rows()
 
     def _create_widgets(self):
         """Create UI elements."""
@@ -141,7 +159,8 @@ class HistoryDialog:
             lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         )
 
-        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw", width=580)
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw",
+                                  width=LIST_WIDTH)
         self.canvas.pack(fill=BOTH, expand=True)
 
         # Mousewheel scrolling only - there is no scrollbar, so this binding is
@@ -224,7 +243,8 @@ class HistoryDialog:
 
     def _filter_and_display(self):
         """Filter history based on search and display."""
-        # Clear existing
+        # Clear existing - rows still waiting to be drawn included
+        self._cancel_rows()
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
 
@@ -256,17 +276,49 @@ class HistoryDialog:
             self._bind_wheel(empty)
             return
 
-        for item in filtered:
+        self._pending_rows = list(filtered)
+        self._build_rows(FIRST_ROWS)
+
+    def _build_rows(self, count: int):
+        """Draw the next `count` waiting rows, and schedule the rest (D17)."""
+        self._row_job = None
+        try:
+            if not self.window.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        batch, self._pending_rows = self._pending_rows[:count], self._pending_rows[count:]
+        for item in batch:
             self._create_history_item(item)
-        self._bind_wheel(self.scrollable_frame)
+        if self._pending_rows:
+            self._row_job = self.window.after(1, lambda: self._build_rows(ROW_BATCH))
+
+    def _cancel_rows(self):
+        """Forget the rows still waiting to be drawn."""
+        job, self._row_job = self._row_job, None
+        self._pending_rows = []
+        if job:
+            try:
+                self.window.after_cancel(job)
+            except tk.TclError:
+                pass
+
+    def _line_px(self) -> int:
+        """How wide a row's text may be: the list's width inside a row's padding."""
+        try:
+            width = self.canvas.winfo_width()
+        except tk.TclError:
+            width = 0
+        return (width if width > 1 else LIST_WIDTH) - 2 * ROW_PADDING
 
     def _create_history_item(self, item):
         """Create a single history row."""
-        frame = ttk.Frame(self.scrollable_frame, padding=10)
+        frame = ttk.Frame(self.scrollable_frame, padding=ROW_PADDING)
         frame.pack(fill=X, pady=2)
 
         # Separator line at bottom
-        ttk.Separator(self.scrollable_frame).pack(fill=X, padx=10)
+        separator = ttk.Separator(self.scrollable_frame)
+        separator.pack(fill=X, padx=10)
 
         # Top row: Lang + Time
         top_row = ttk.Frame(frame)
@@ -314,31 +366,39 @@ class HistoryDialog:
         del_btn.pack(side=RIGHT, padx=(0, 10))
         del_btn.bind("<Button-1>", lambda e, i=item: self._delete_item(i))
 
+        # The wheel, on this row's widgets as they are made - rows arrive in
+        # batches, after the list was last bound (D17)
+        self._bind_wheel(frame)
+        self._bind_wheel(separator)
+
     def _content_line(self, parent, text: str, hint: Optional[str], prefix: str = "",
                       fg: str = '#cccccc', pady=(0, 0)) -> list:
         """One line of a row - a RubyLine when it carries a reading, else the plain
         label it always was. Returns the widgets a click must reach.
 
-        Cut by segments to LINE_CUT characters plus "..." when longer than
-        LINE_MAX, never through a ruby pair.
+        Cut to the row's width in pixels with "..." (`fit_segments`, K7), never
+        through a ruby pair.
         """
         line = text.replace('\n', ' ')
         segments = ()
         if self.furigana_enabled and furigana.should_annotate(line[:LINE_ANNOTATE_CHARS], hint):
             segments = furigana.annotate(line[:LINE_ANNOTATE_CHARS], hint)
         if any(segment.ruby for segment in segments):
-            if len(line) > LINE_MAX:
-                segments, _cut = truncate_segments(segments, LINE_CUT)
-                segments += (RubySegment("...", None),)
-            line_widget = RubyLine(parent, (RubySegment(prefix, None),) + segments
-                                   if prefix else segments,
+            if prefix:
+                segments = (RubySegment(prefix, None),) + segments
+            segments, _cut = fit_segments(parent, segments, self._line_px(),
+                                          base_font=ROW_FONT,
+                                          more=len(line) > LINE_ANNOTATE_CHARS)
+            line_widget = RubyLine(parent, segments,
                                    base_font=ROW_FONT, bg=self._row_bg(), base_fg=fg)
             line_widget.pack(anchor=W, pady=pady)
             return [line_widget]
 
-        if len(line) > LINE_MAX:
-            line = line[:LINE_CUT] + "..."
-        label = ttk.Label(parent, text=f"{prefix}{line}", font=ROW_FONT, foreground=fg)
+        shown, _cut = fit_segments(parent, (RubySegment(prefix + line[:LINE_SCAN_CHARS], None),),
+                                   self._line_px() - LABEL_PADDING_PX, base_font=ROW_FONT,
+                                   more=len(line) > LINE_SCAN_CHARS)
+        label = ttk.Label(parent, text=''.join(segment.base for segment in shown),
+                          font=ROW_FONT, foreground=fg)
         label.pack(anchor=W, pady=pady)
         return [label]
 

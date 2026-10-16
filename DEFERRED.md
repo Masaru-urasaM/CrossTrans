@@ -139,25 +139,6 @@ wrong provider, or the next time `_identify_provider()` is touched for another r
 
 ---
 
-### D17 - The History dialog takes about a second to open with 100 entries
-
-**Found**: 2026-10-15, measuring the History-row readings (the plan's J9; the plan, `TODO.md`, is archived: `git show 5cc8736:TODO.md`). **Effort**: Medium.
-
-With 100 entries the dialog takes **0.93-0.95 s** to open on the development PC *without*
-readings (1.6 s the first time in a process), under a ttkbootstrap root - the readings add about
-0.33 s on top (J9 kept that low by drawing each annotated line on one canvas; the first version,
-a frame and two labels per segment, took 4.1 s). The baseline is the dialog's own construction:
-eight Tk widgets per row (frame, top row, two labels, time, delete, separator, plus the content
-labels), every one a native child window on Windows, each passed through ttkbootstrap's style
-wrapper, then one geometry pass over all of them. TODO.md J9 budgeted 300 ms for the whole
-dialog; the baseline alone is three times that.
-
-**Fix candidates**: build only the rows in view and add the rest as the list scrolls; or draw
-each row on one canvas as `RubyLine` does for its lines; or page the list. **Dependency**: none.
-**Trigger**: a user reporting a slow History window, or the next change to `history_dialog.py`.
-
----
-
 ### D18 - Dead code met during the language-identity work
 
 **Found**: 2026-10-15. **Effort**: Small.

@@ -4,6 +4,37 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase K7 — History: lines cut to the row, and the first rows at once (2026-10-16, D17)
+
+**Fixed**
+- **A long Japanese line ran off its row, and its "..." never showed.** A line was cut by
+  character count - whole up to 60, else 57 and "..." - but 57 kanji and kana in Segoe UI 10 are
+  685 px, and a row has 560: the label was clipped at the edge with the ellipsis out of sight.
+  Latin was cut too early instead (a 63-character sentence fits). Lines are now cut to the row's
+  width in pixels, ellipsis included (`ruby_text.fit_segments()`, replacing `truncate_segments()`):
+  measured with the row's own font as `RubyLine` draws it - a ruby pair takes the wider of base
+  and reading and is still never split - and, for a plain label, less the 4 px a `ttk.Label` puts
+  around its text (measured). Only the first 200 characters of a line are ever measured.
+- **D17 - the dialog took about a second to show anything.** It built all its rows before
+  appearing: ~8 native widgets a row, each through ttkbootstrap's style wrapper (0.7 s for 100
+  rows, profiled), then one layout pass over ~800 widgets (1.1 s). It now builds the first 12
+  rows - a screenful - and appears, then adds the rest in batches of 10 between events.
+  Measured under `mainloop` with the app's root, 100 entries, median of 5: the first idle moment
+  (first rows laid out and drawn) **0.54 s -> 0.21 s** without readings, **0.60 s -> 0.12 s** with
+  them; the longest the UI could not answer, **0.48 s -> 0.29 s** / **0.55 s -> 0.31 s**; the whole
+  list about the same (1.1-1.4 s). A search or a delete cancels the batches it replaces; closing
+  the window stops them - by the toplevel's own `<Destroy>` only, since a child's propagates to
+  that binding too (CLAUDE.md Known Issues); every row binds the wheel as it is built.
+
+**Tests**: 1315 -> 1331 (+16, `tests/test_history_dialog.py`): `TestFitSegments` (the four
+`truncate_segments` cases, now in pixels, plus the head of a longer line), `TestCutToTheRow` (a
+Japanese line's "..." inside the row, a Latin line that fits shown whole, a long Latin line, the
+arrow kept, a document measured only so far, the label's padding, the cut leaving room for it),
+`TestRowsInBatches` (only the first rows before showing, the rest in order, a search showing only
+its results and cancelling the old batches, a row destroyed midway not stopping the rest, closing
+quietly, the wheel on a late row, the first rows well before the last). The dialog fixture waits
+for every row. 11 mutations killed - four only after tests were added for them.
+
 ### Phase K6 — A Chinese sentence is known by its function words (2026-10-16)
 
 Measured first, as the proposal asked. **The problem was bigger than one example**: of Tatoeba's
