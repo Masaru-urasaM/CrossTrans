@@ -4,6 +4,32 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase K2 — The failed-update dialog no longer freezes the app (2026-10-16, D16)
+
+**Fixed**
+- **"Update Failed" was invisible and held every input of the app.** `UpdateFailedDialog` called
+  `grab_set()` and `transient(root)` on the app's root - withdrawn for the life of the process -
+  and then `wait_window()`. Tk withdraws a transient window whose master is withdrawn, so the
+  dialog was never shown, its grab locked the popup, the main window and the tray's windows, and
+  `wait_window()` waited for a click on a window nobody could see. It is what a user meets right
+  after a failed self-update. Found by reading the code on 2026-10-15; **reproduced** on
+  2026-10-16 before the fix (state `withdrawn`, viewable 0, the grab held by the dialog). It is now
+  raised with topmost + lift + focus_force and released after 100 ms (`_raise_without_grab()` in
+  `src/ui/dialogs.py`), and `wait_window()` stays - safe now that the window is mapped.
+- **The API-error, trial-exhausted and trial-feature notices** grabbed too: shown, but locking
+  every other window of the app while open, possibly behind another application. Same fix.
+
+**Left alone**: `PasswordDialog` (`src/core/auth.py`) and the update progress window
+(`src/ui/settings/update_manager.py`) also grab, but on the Settings window, which is visible,
+with `transient()` - they map, and keeping Settings modal under them is the intent.
+
+**Tests**: 1184 -> 1202 (+18, new `tests/test_dialogs.py`): the failed-update dialog is shown under
+the withdrawn root, holds no grab, is raised then released, and returns each choice; the three
+notices are shown without a grab, raised then released, and open the API Key tab; the module calls
+neither `grab_set` nor `transient`. Eleven mutations - each grab and the transient put back, the
+original D16 pair, the raise or its release removed, Cancel returning the option, the restart
+offered without a pending file - all killed.
+
 ### Phase K1 — The suite on a clean machine (2026-10-16)
 
 The first of the follow-ups proposed after J12: run the suite the way CI will - a fresh venv

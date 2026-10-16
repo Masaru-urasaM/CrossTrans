@@ -260,7 +260,8 @@ the first match, so one of the two always loses (DEFERRED D12). It only matters 
   line instead of two labels per segment, fonts and character widths shared across lines
 - `quick_translate.py` - QuickTranslateManager (translation popup with Copy, Replace, Dictionary, Open Translator, furigana rendering)
 - `tray.py` - System tray manager
-- `dialogs.py` - Error/trial dialogs
+- `dialogs.py` - Error/trial/update-failed dialogs, raised by `_raise_without_grab()` - never
+  `grab_set()` or `transient()`: they hang off the withdrawn root (D16, fixed 2026-10-16)
 - `attachments.py` - File attachment widget
 - `dictionary_mode.py` - Word selection UI with right-click drag-to-box support
 - `dictionary_popup.py` - Dictionary mode, the one implementation: detection, language dialog,

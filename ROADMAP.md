@@ -42,7 +42,7 @@ below until archived.
 
 | Item | Status | Notes |
 |------|--------|-------|
-| K: follow-ups to the language-identity work | 🔨 In progress | K1 done (2026-10-16): the suite on a clean venv - 5 failures fixed, D19 found |
+| K: follow-ups to the language-identity work | 🔨 In progress | K1 done (2026-10-16): the suite on a clean venv - 5 failures fixed, D19 found. K2 done: D16 |
 | Cut 1.9.21 | 📋 Planned | Bump `VERSION`, run `build_exe.bat`, tag, write release notes. The H1 work is on `main` and tested; the language-identity work is on its branch - merge it first if it ships in 1.9.21 rather than 1.9.22 (the user's call) |
 
 ---
@@ -64,7 +64,7 @@ language-identity work on 2026-10-15 (Dictionary mode implemented twice, a faile
 that raised `NameError`, the main-window dialogs' `grab_set()`) and were **closed the same day**.
 Closing D15 surfaced **D16**: `UpdateFailedDialog` is a `grab_set()` + `transient()` +
 `wait_window()` dialog on the withdrawn root - the documented freeze trap, on the failed-update
-path. The language-identity work then added **D17** (the History dialog takes ~1 s to open with
+path (**closed 2026-10-16**, K2). The language-identity work then added **D17** (the History dialog takes ~1 s to open with
 100 entries, before any readings) and **D18** (two pieces of dead code). None is scheduled; each
 carries its own trigger condition. **D19** (2026-10-16, K1): pykakasi - the one reading provider
 every install has - reads a word differently from fugashi in 30% of real sentences.

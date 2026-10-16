@@ -139,36 +139,6 @@ wrong provider, or the next time `_identify_provider()` is touched for another r
 
 ---
 
-### D16 - `UpdateFailedDialog` is a modal dialog on the withdrawn root
-
-**Found**: 2026-10-15, while fixing D15 (the same pattern in the Dictionary dialogs).
-**Effort**: Small for the dialog itself; it wants a manual test of a failed update.
-
-`src/ui/dialogs.py` `UpdateFailedDialog.__init__` builds `tk.Toplevel(parent)`, calls
-`grab_set()`, then `transient(parent)`, then `wait_window()` - and its only caller,
-`UpdateUIManager._show_update_failed_dialog()`, passes `self.root`, which `app.py` withdraws at
-start-up. That is exactly the trap in CLAUDE.md's Known Issues: Tk withdraws a transient window
-whose master is withdrawn, so the dialog is never mapped, the grab holds every input and
-`wait_window()` waits for a click on a window nobody can see. It is reached after a failed
-self-update (`check_update_status()` -> `root.after(1000, ...)`), i.e. at the moment a user most
-needs the app to respond. **Not reproduced** - found by reading the code; it needs a failed
-update to trigger.
-
-Lower risk, same family - `grab_set()` without `transient()`, so the window is mapped and can be
-closed, but it holds every input of the app while open: `APIErrorDialog`,
-`TrialExhaustedDialog` and `TrialFeatureDialog` (all on the withdrawn root), `PasswordDialog`
-(`src/core/auth.py`, on the Settings window, with `transient`) and the update progress window
-(`src/ui/settings/update_manager.py`, on the Settings window, with `transient` - a visible
-master, so it maps).
-
-**Fix**: for the notice on a hidden root, CLAUDE.md's rule - stdlib `tkinter.messagebox` (a
-native dialog a withdrawn owner cannot hide) or the topmost + lift + focus_force pattern without
-`grab_set()`; keep `wait_window()` only on a window that is certainly mapped. **Dependency**:
-none. **Trigger**: the next change to the update flow or to `dialogs.py`, or any report of the app
-freezing after an update.
-
----
-
 ### D17 - The History dialog takes about a second to open with 100 entries
 
 **Found**: 2026-10-15, measuring the History-row readings (the plan's J9; the plan, `TODO.md`, is archived: `git show 5cc8736:TODO.md`). **Effort**: Medium.
