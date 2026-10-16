@@ -5,6 +5,61 @@
 
 ---
 
+## K — Follow-ups to the language-identity work, then quiet tests — ✅ Done (2026-10-16) [unreleased, branch `feature/japanese-language-identity`]
+
+**Goal (user, 2026-10-16):** do all fifteen items proposed after J12 - the suite on a clean machine,
+the EXE and D16 before a release (items 1-3), the new feature's gaps (4-8), History and the old
+deferred items (9-11), AGENTS.md (12), tooling (13-15). Midway the user reported that the test runs
+threw windows over the screen and interrupted other work, and that the translation quota was used
+up: K12.
+
+| Phase | What | Commit | Tests |
+|---|---|---|---|
+| K1 | The suite on a clean venv (requirements only): 5 word-chip failures fixed; D19 found | `c00d284` | 1183 -> 1184 |
+| K2 | D16: the failed-update dialog no longer freezes the app | `ffea35b` | 1202 |
+| K3 | The Dictionary keeps the user's "Japanese or Chinese?" answer (Decision 28) | `2429741` | 1232 |
+| K4 | A term a model placed can be read as the other language (Decision 29) | `6927a23` | 1264 |
+| K5 | The main window's own Japanese / Chinese row | `41aeeac` | 1279 |
+| K6 | A Chinese sentence is known by its function words (Decision 30) | `2ee5ee4` | 1315 |
+| K7 | History: lines cut to the row in pixels, the first rows at once (D17) | `f4c178a` | 1331 |
+| K8 | D18 removed; D12 fixed - the key decides (Decision 31); D11 desk-checked | `efbc60b` | 1360 |
+| K9 | The mutation runner in tools/, the CI floor at 1350, eval repeats and phrases | `4eac224` | 1392 |
+| K10 | Real models: the trial model, phrases, screenshots (52 real calls) | `b5f6f92` | 1413 |
+| K11 | The EXE, built by hand (dist/ kept) and checked, the glyph codecs included | `e853854` | 1421 |
+| K12 | Quiet tests: a private desktop; no network, clipboard or keystrokes; the eval tools ask for the count (Decision 32) | `d6235cc` | 1502 |
+| K13 | Final check on a fresh clone, AGENTS.md regenerated, archive | this entry | 1502 |
+
+Items to phases: 1 -> K1 and K13, 2 -> K11, 3 -> K2, 4 -> K4, 5 -> K3, 6 -> K5, 7 -> K6, 8 -> K10,
+9 and 10 -> K7, 11 -> K8, 12 -> K13, 13-15 -> K9.
+
+**Checked, not assumed**: 110 mutations across K2-K12, all killed (`tools/mutation_check.py`). K12:
+no window of the test process on the user's desktop and no focus taken, in four full runs and every
+mutation run. K13: a fresh clone on a requirements-only venv - 1491 passed, 11 skipped (nine need
+fugashi + UniDic, one a built EXE, one the real clipboard), 0 failed.
+
+**Made without the user** (revisit if they object): Decisions 28-32. The user asked for every item
+at once; K12's options were built before the user chose between them.
+
+**Still the user's**: merging into `main`, pushing, the version (1.9.21 or 1.9.22) and the tag;
+D19's option (bundle unidic-lite, ~249 MB, or not); keys for D11's eight providers; deploying the
+Worker; and the manual checks:
+1. Popup, a term a model places: select 汽車 and press Win+Alt+E - a row "Kanji-only text - read as
+   Chinese. [Read as Japanese]"; the button re-translates it as Japanese, with readings.
+2. Popup, a Chinese sentence: 這是我的書。 - no row (its grammar settles it), translated as Chinese.
+3. Main window: type 汽車, Translate - the same row beside "Original:"; an answer re-translates, and
+   the Reading pane reads it once it is Japanese.
+4. Dictionary memory: main window, 手紙, Dictionary, answer "Japanese", close; Dictionary again -
+   no question.
+5. History: a long Japanese line ends in "..." at the row's edge; with 100 entries the window
+   opens at once.
+6. The failed-update dialog (D16): create `%TEMP%\crosstrans_update_error.txt` holding any text and
+   start the app - about a second later the "Update Failed" dialog appears in front, answers clicks,
+   and closes; the app is not frozen.
+7. The EXE (`dist\CrossTrans_v1.9.20_branch_2026-10-16.exe`): translate 東京大学, then
+   `%APPDATA%\CrossTrans\logs` holds no "[LangID] glyph evidence disabled".
+
+---
+
 ## J — Japanese Language Identity: furigana on every Japanese surface, a Dictionary that knows its languages — ✅ Done (2026-10-15) [unreleased, branch `feature/japanese-language-identity`]
 
 **Goal (user, 2026-10-15):** show furigana wherever Japanese appears, the Dictionary included,

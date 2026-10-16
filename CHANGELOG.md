@@ -4,6 +4,22 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase K13 — Final check and archive (2026-10-16)
+
+- **The suite on a fresh clone with only requirements.txt installed** - item 1's last step,
+  stopped earlier because the runs drew on the user's screen, done once K12 made them quiet:
+  **1491 passed, 11 skipped, 0 failed**, and no window on the user's desktop. Nine of the skips
+  need fugashi + UniDic, which requirements.txt leaves out; one inspects a built EXE; one writes
+  the real clipboard. On CI the clipboard test runs, which leaves ten - `DEFAULT_MAX_SKIPPED`
+  exactly. `tests.yml` now names them, so the next test that needs either knows to raise
+  `--max-skipped`. CI itself has still never run: `tests.yml` reaches GitHub only with a push.
+- **AGENTS.md** (untracked, not this project's file): it was CLAUDE.md as of `d3ee844`
+  (2026-09-08), line for line, and is now regenerated from the current CLAUDE.md; the old copy is
+  kept outside the repo. Still untracked.
+- K1-K13 archived in ROADMAP_DONE.md, with the manual checks and what is still the user's call.
+
+**Tests**: 1502 (no change).
+
 ### Phase K12 — Quiet tests: off the user's screen, off the network (2026-10-16)
 
 The user, after K11: the tests threw windows all over the screen and interrupted other work, and

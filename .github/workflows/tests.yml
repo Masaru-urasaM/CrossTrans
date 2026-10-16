@@ -57,6 +57,11 @@ jobs:
         # --min-total sits a little under the suite's size (1,390 on 2026-10-16),
         # so a test file that quietly stops being collected fails the build.
         # Raise it as the suite grows; never lower it to make a run pass.
+        # Skips expected here: nine tests need fugashi + UniDic, which
+        # requirements.txt leaves out, and one inspects a built EXE, which CI
+        # does not build - ten, DEFAULT_MAX_SKIPPED exactly (a fresh clone,
+        # 2026-10-16). A new test that needs either must raise --max-skipped
+        # here, naming itself.
         run: |
           python tools/check_test_counts.py junit.xml --min-total 1350
 

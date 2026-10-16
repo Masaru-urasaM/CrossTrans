@@ -31,10 +31,13 @@ language it looks up, plus one Dictionary mode for both buttons (D13–D15). Arc
 `ROADMAP_DONE.md` ("J"), detailed in `CHANGELOG.md` → Unreleased, reasoned in Decisions 21–27.
 Branched from `main` after the H1 merge; **not merged into `main`, not pushed**. Suite 676 → 1183.
 
-**Follow-ups on the same branch (2026-10-16, phases K1–K11)**: the fifteen items proposed after
-J12, which the user asked for in full - the suite on a clean machine, D16, the verdict gaps of the
-new feature, History, the old deferred items, tooling and measurements. Tracked in the table
-below until archived.
+**Follow-ups on the same branch (2026-10-16, phases K1–K13)**: the fifteen items proposed after
+J12, which the user asked for in full - the suite on a clean machine, the EXE, D16, the verdict
+gaps of the new feature, History, the old deferred items, AGENTS.md, tooling and measurements -
+and quiet tests (K12), after the user reported that test runs threw windows over the screen and
+the measurements used up the translation quota. Archived in `ROADMAP_DONE.md` ("K"), detailed in
+`CHANGELOG.md` → Unreleased, reasoned in Decisions 28–32. Suite 1183 → 1502. **Not merged into
+`main`, not pushed.**
 
 ---
 
@@ -42,8 +45,7 @@ below until archived.
 
 | Item | Status | Notes |
 |------|--------|-------|
-| K: follow-ups to the language-identity work | 🔨 In progress | K1 done (2026-10-16): the suite on a clean venv - 5 failures fixed, D19 found. K2 done: D16. K3 done: the Dictionary keeps the user's answer. K4 done: a placed term can change language on the popup. K5 done: the main window's row. K6 done: Chinese sentences by their function words. K7 done: History cut to the row, D17. K8 done: D18 removed, D12 fixed, D11 desk-checked. K9 done: mutation runner in tools/, CI floor 1350, eval repeats and phrases. K10 done: trial, phrases and screenshots measured. K11 done: EXE built and checked. K12 done: quiet tests - a private desktop, no network, clipboard or keystrokes; the eval tools ask for the count |
-| Cut 1.9.21 | 📋 Planned | Bump `VERSION`, run `build_exe.bat`, tag, write release notes. The H1 work is on `main` and tested; the language-identity work is on its branch - merge it first if it ships in 1.9.21 rather than 1.9.22 (the user's call) |
+| Cut 1.9.21 | 📋 Planned | Bump `VERSION`, run `build_exe.bat` (it deletes `dist\` first, released EXEs included - move them out, or build by hand as in K11), tag, write release notes. The H1 work is on `main` and tested; the language-identity work is on its branch - merge it first if it ships in 1.9.21 rather than 1.9.22 (the user's call) |
 
 ---
 
