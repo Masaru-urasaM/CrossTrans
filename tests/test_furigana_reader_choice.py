@@ -85,6 +85,13 @@ class TestApplyToFurigana:
         D._apply_to_furigana(language, success)
         assert calls == []
 
+    def test_a_failed_refresh_never_stops_the_install(self, monkeypatch):
+        # It runs on the install thread right before the completion callback.
+        def broken():
+            raise RuntimeError("the tagger could not be built")
+        monkeypatch.setattr(F, 'refresh_providers', broken)
+        D._apply_to_furigana('Japanese', True)          # must not raise
+
     @pytest.mark.parametrize('verb', ['install', 'uninstall'])
     def test_every_install_and_uninstall_applies_it(self, verb):
         # Single and bulk, both directions: four call sites, each followed by it.

@@ -7,6 +7,15 @@ All notable changes to CrossTrans are documented here.
 Everything below `[1.9.20]` ships as **1.9.21**: the user chose the number on 2026-10-16, and
 `VERSION` says so. Not tagged and not built as a release yet.
 
+### K14 follow-up — the furigana refresh can never stall an install (2026-10-16)
+
+**Fixed**: `_apply_to_furigana()` runs on the install thread just before the completion callback;
+had `refresh_providers()` ever raised, the callback would not have run and the Dictionary tab
+would have stayed "installing" for good. It now logs the error and returns. Found on review, not
+in use.
+
+**Tests**: 1524 -> 1525 (+1: a refresh that raises does not escape). 1 mutation killed.
+
 ### Phase K15 — D11: five providers' dead default models replaced (2026-10-16)
 
 The user, on D11: "do it now". No key for any of the eight providers was at hand, so the

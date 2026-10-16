@@ -29,10 +29,15 @@ def furigana_reader_note(accurate: bool, japanese_installed: bool) -> str:
 
 def _apply_to_furigana(language: str, success: bool) -> None:
     """Installing or removing the Japanese pack changes the reader furigana uses
-    (D19): look again now, not at the next start."""
+    (D19): look again now, not at the next start. Never raises: it runs on the
+    install thread just before the completion callback, which must still run, or
+    the tab would stay "installing" for good."""
     if success and language == "Japanese":
-        from src.core import furigana
-        furigana.refresh_providers()
+        try:
+            from src.core import furigana
+            furigana.refresh_providers()
+        except Exception as e:
+            logging.warning(f"[Dictionary] furigana not refreshed after the {language} pack: {e}")
 
 
 class DictionaryTabMixin:
