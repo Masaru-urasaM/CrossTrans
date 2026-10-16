@@ -5,6 +5,35 @@ approaches. Newest first.
 
 ---
 
+### Decision 31 - Between providers that list the same model, the key decides
+
+**Date**: 2026-10-16
+**Status**: RESOLVED (DEFERRED D12 asked for "a decision about whether Auto-mode ambiguity is worth
+changing shared routing for"; the user asked for every proposed item to be done)
+
+**Problem**: Thirteen model IDs appear under two providers in `model_provider_map`, and
+`_identify_provider()` returned the first, so under provider 'Auto' one provider's users always
+sent their key to the other's API.
+
+**Options considered**:
+1. **Reorder or delete entries** - Cons: any order is wrong for somebody; deleting a model a
+   provider really serves hides it from its users (rejected in D12 itself).
+2. **The key, positively**: the claimant whose prefix the key carries - Pros: exact where a prefix
+   exists. Cons: SambaNova (bare UUID keys), Together and SiliconFlow have none, so gpt-oss-120b
+   stays Cerebras's for SambaNova users.
+3. **The key, positively and by elimination**: as 2, then drop a claimant whose known prefix the key
+   lacks - Pros: also settles every row where only one claimant is prefix-less (SambaNova, and
+   Together/SiliconFlow against HuggingFace). Cons: relies on a provider never issuing a key
+   without its prefix - the same assumption step 4 of `_identify_provider()` already makes.
+
+**Resolution**: **Option 3** (`AIAPIManager._claimant_for_key()`); only between claimants, only with
+a key - no key, or a key no claimant's rule settles, keeps the first, as before. Together vs
+SiliconFlow (two prefix-less claimants) is left as it was.
+
+**References**: `src/core/api_manager.py`, `tests/test_provider_claims.py`, CHANGELOG "Phase K8".
+
+---
+
 ### Decision 30 - Chinese by its function words: two of 是很們這嗎呢吧麼你她它, in a sentence
 
 **Date**: 2026-10-16

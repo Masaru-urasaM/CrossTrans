@@ -4,6 +4,41 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase K8 — The old deferred items: D18, D12, and a desk check of D11 (2026-10-16)
+
+**Removed (D18)**
+- `TranslationService.do_translation()` - no caller since the language hotkeys moved to
+  `do_translate_or_fix()`, and it never learned the J6 source hint, so reviving it would have
+  brought the old rule back. The docstrings that described themselves against it now name the
+  method that is used.
+- `TranslatorApp._open_settings_dictionary_tab()` - no caller; and `open_dictionary_tab()` on the
+  Settings window, whose only caller it was. `_focus_settings_window()` stays: it has another.
+
+**Fixed (D12)**
+- **A model two providers list went to the first of them, whatever the key.** Thirteen IDs are
+  listed twice in `model_provider_map` (gpt-oss-120b by Cerebras and SambaNova; Llama, Gemma,
+  Mistral and Qwen IDs by HuggingFace and another), and under provider 'Auto' the loser's users
+  sent their key to the wrong API. `_identify_provider()` now lets the key decide between the
+  claimants (`_claimant_for_key()`): the provider whose prefix it carries; else one with no known
+  prefix, since a key without that prefix is not that provider's (a key that is not `csk-...` is
+  not Cerebras's, so gpt-oss-120b goes to SambaNova - whose keys are bare UUIDs and could never get
+  a prefix of their own); else the first, as before. Twelve of the thirteen now resolve; Together
+  vs SiliconFlow (`deepseek-ai/deepseek-r1`, `qwen/qwq-32b-preview`) cannot - neither has a prefix.
+  With no key, the first still wins. Decision 31.
+
+**Narrowed (D11, no code)**
+- The eight providers whose default models were never checked, against their own deprecation
+  pages: **Anthropic's three, xAI's two and DeepSeek's two are gone**; Together's are gone and
+  going (removal 2026-10-22); OpenAI's `gpt-3.5-turbo` shuts down 2026-10-23; Mistral's `-latest`
+  aliases move by policy; SiliconFlow's are not on its discontinued list; Perplexity's Sonar chat
+  completions became the Agent API in July. The table and the sources are in DEFERRED D11.
+  Nothing is replaced in code: the replacements the providers name are unverified by a call, and
+  the table users receive is the Worker's, whose deploy is the user's call.
+
+**Tests**: 1331 -> 1360 (+29): `tests/test_provider_claims.py` (28 - every shared ID with each
+claimant's key, the patternless claimant, D12's wrong rows, the unresolvable pair, no key, a model
+one provider lists) and a guard that the D18 code stays gone. 5 mutations killed.
+
 ### Phase K7 — History: lines cut to the row, and the first rows at once (2026-10-16, D17)
 
 **Fixed**

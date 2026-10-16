@@ -85,72 +85,33 @@ developer machine.
 or the next time any of these keys is at hand. Whoever holds one: call the model, do not just look
 it up - `gemini-2.5-pro` is *listed* by Google's API and 404s when used.
 
+**Desk check of the other eight, 2026-10-16** (K8 - the providers' own deprecation pages, no key,
+no call; the tier-3 table in `api_manager.DEFAULT_MODELS_BY_PROVIDER` carries the same IDs). It
+cannot confirm a model is alive, only that its provider says it is gone or going - and four
+more lists are:
+
+| Provider | Defaults | What the provider's own documentation says |
+|---|---|---|
+| Anthropic | all three | **All retired**: `claude-3-5-sonnet-20241022` 2025-10-28, `claude-3-5-haiku-20241022` 2026-02-19, `claude-3-haiku-20240307` 2026-04-20; "requests to retired models will fail". Replacements it names: `claude-sonnet-5-5`, `claude-haiku-4-5-20251001`; `claude-haiku-5-5` is listed Active ([model deprecations](https://platform.claude.com/docs/en/about-claude/model-deprecations)) |
+| xAI | `grok-2`, `grok-beta` | **Neither is on the model list** - only the grok-4.x family is ([models](https://docs.x.ai/docs/models)) |
+| DeepSeek | `deepseek-chat`, `deepseek-coder` | **Neither is in the API docs any more**; the current names are `deepseek-flash` and `deepseek-v4-pro`, with the legacy `deepseek-v4-flash` still accepted ([API docs](https://api-docs.deepseek.com/)). Secondary sources date the retirement of `deepseek-chat` to 2026-07-24 |
+| Together | both | `meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo` **removed 2026-02-25**; `meta-llama/Llama-3.3-70B-Instruct-Turbo` **to be removed 2026-10-22**, replacement `meta-models/Muse-Glimmer-30B` ([deprecations](https://docs.together.ai/docs/deprecations)) |
+| OpenAI | `gpt-4o-mini`, `gpt-4o`, `gpt-3.5-turbo` | `gpt-3.5-turbo` **shuts down 2026-10-23** (replacement `gpt-5.6-terra`); the `gpt-4o` and `gpt-4o-mini` snapshots on 2027-01-14 (`gpt-6-luna`) ([deprecations](https://developers.openai.com/api/docs/deprecations)) |
+| Mistral | `mistral-large-latest`, `mistral-small-latest` | Expected alive: by policy a `-latest` alias moves to the newer model by itself ([model lifecycle](https://docs.mistral.ai/inference/model-lifecycle)) |
+| SiliconFlow | `deepseek-ai/DeepSeek-V3`, `Qwen/Qwen2.5-72B-Instruct` | Not among the discontinued models in the release notes ([release notes](https://api-docs.siliconflow.cn/docs/release-notes/overview)) - unconfirmed either way |
+| Perplexity | `sonar`, `sonar-pro` | Still priced, but the July 2026 changelog says "Sonar Chat Completions is now Agent API" ([changelog](https://docs.perplexity.ai/changelog)); third parties date the end of `/chat/completions` for Sonar to 2026-09-27. **The risk may be the endpoint the app calls, not just the model** |
+
+Not changed in code, on purpose: the replacements are what the providers name, not what a call
+proved (the rule above), and the table users actually receive is the Worker's, whose deploy is
+the user's to approve. **Next step**: with a key per provider, call the named replacement, then
+change `STATIC_DEFAULT_MODELS_BY_PROVIDER` and the tier-3 copy together - Anthropic, xAI and
+DeepSeek first (entirely dead), Together and OpenAI before 2026-10-22/23.
+
 **And check the routing, not only the model.** A default must also *identify* as its own provider:
 `_identify_provider()` matches `model_provider_map` first, then prefix rules in which `google/`
 means Together and `meta-llama/` means Together. A slash-prefixed default that is missing from the
 map gets sent to the wrong endpoint entirely - which is what both dead OpenRouter defaults were
 doing on top of being retired. `tests/test_default_model_routing.py` guards this for all thirteen.
-
----
-
-### D12 - Thirteen model IDs are claimed by two providers at once
-
-**Found**: 2026-09-08, while adding Cerebras's and SambaNova's real catalogues.
-**Effort**: Medium - it changes shared routing logic, so it wants its own change and its own tests.
-
-`_identify_provider()` resolves a model name by walking `model_provider_map` and returning the
-**first** provider whose list contains it. Thirteen IDs appear under two providers, so for one of
-the two the answer is always wrong:
-
-| Model | Claimed by | Resolves to |
-|---|---|---|
-| `gpt-oss-120b` | Cerebras, SambaNova | Cerebras |
-| `meta-llama/llama-3.3-70b-instruct` | OpenRouter, HuggingFace | OpenRouter |
-| `meta-llama/llama-3.1-70b-instruct` | OpenRouter, HuggingFace | OpenRouter |
-| `deepseek-ai/deepseek-r1` | Together, SiliconFlow | Together |
-| `qwen/qwq-32b-preview` | Together, SiliconFlow | Together |
-| `google/gemma-2-27b-it`, `-9b-it` | Together, HuggingFace | Together |
-| `mistralai/mistral-7b-instruct-v0.3` | Together, HuggingFace | Together |
-| `mistralai/mixtral-8x7b-instruct-v0.1` | Together, HuggingFace | Together |
-| `qwen/qwen2.5-{7,14,32,72}b-instruct` | SiliconFlow, HuggingFace | SiliconFlow |
-
-Twelve of these predate this work; `gpt-oss-120b` was added on 2026-09-08 with SambaNova's real
-catalogue. It was **not** removed to hide the clash - SambaNova genuinely serves it, and dropping
-a real model from the dropdown to flatter a heuristic is the wrong trade.
-
-**It only bites under `provider='Auto'`.** A user who names their provider never reaches
-`_identify_provider()`, and that is the normal case for a second provider on a shared model.
-
-**The clash is not resolvable from the model name** - the same open-weight model really is served
-by several providers, so any ordering is wrong for somebody. The fix is to consult the API key
-first: `_identify_provider()` already reads `api_key_patterns` at step 4, but step 1 wins before
-it. Making the exact-match step prefer the provider the key belongs to would resolve every row
-above where the key is distinguishable.
-
-**Blocked on the same gap as D11**: `API_KEY_PATTERNS` covers only Groq, Anthropic, xAI,
-OpenRouter, Perplexity, HuggingFace and (since 2026-09-08) Cerebras. Together, SiliconFlow and
-SambaNova have no pattern - SambaNova's keys are bare UUIDs and cannot get one - so the key-first
-rule would fix `gpt-oss-120b` and the OpenRouter/HuggingFace rows and leave the
-Together/SiliconFlow ones exactly as they are.
-
-**Dependency**: none technically; it wants a decision about whether Auto-mode ambiguity is worth
-changing shared routing for. **Trigger**: a user reporting that a model they picked went to the
-wrong provider, or the next time `_identify_provider()` is touched for another reason.
-
----
-
-### D18 - Dead code met during the language-identity work
-
-**Found**: 2026-10-15. **Effort**: Small.
-
-- `TranslationService.do_translation()` (`src/core/translation.py`) has no live caller -
-  `tests/test_callback_wiring.py` asserts the hotkey path uses `do_translate_or_fix()` instead.
-  It was left out of J6 on purpose (TODO.md section 10), so it still generates its source block
-  without the J6 hint; anyone reviving it would get the old rule.
-- `TranslatorApp._open_settings_dictionary_tab()` (`src/app.py`) has no caller.
-
-Both predate this work and were left alone under Rule 3. **Trigger**: the next cleanup pass, or
-anyone about to call either.
 
 ---
 

@@ -1033,10 +1033,6 @@ class DictionaryTabMixin:
                     title="Refresh Failed", parent=self.window
                 )
 
-    def open_dictionary_tab(self):
-        """Open settings window with Dictionary tab selected."""
-        self.open_tab("Dictionary")
-
     def open_tab(self, tab_name: str):
         """Open settings window with specified tab selected.
 

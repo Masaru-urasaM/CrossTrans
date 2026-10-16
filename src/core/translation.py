@@ -623,79 +623,16 @@ STRICT RULES (DO NOT include these rules in your response):
         ClipboardManager.restore_clipboard(original_clipboard)
         return None
 
-    def do_translation(self, target_language: str,
-                        callback: Optional[Callable[[], None]] = None,
-                        custom_prompt: str = "") -> None:
-        """Perform translation and put result in queue.
-
-        Queue item format: (original_text, translated_text, target_language, trial_info, furigana_text)
-        trial_info is a dict if in trial mode, None otherwise.
-        furigana_text is a string with {kanji|reading} notation if furigana enabled, None otherwise.
-        """
-        current_time = time.time()
-        if current_time - self.last_translation_time < COOLDOWN:
-            logging.info("Cooldown active, please wait...")
-            self.translation_queue.put(("", "Please wait a moment...", target_language, None))
-            return
-
-        self.last_translation_time = current_time
-        logging.info(f"Translating to {target_language}...")
-
-        try:
-            if not self._configure_api():
-                error_msg = "Error: No API key configured.\n\nPlease add your AI API key in Settings.\n\nGo to Settings > Guide tab for instructions on getting a free API key."
-                logging.warning(error_msg)
-                self.translation_queue.put(("", error_msg, target_language, None))
-                return
-
-            selected_text = self.get_selected_text()
-
-            if selected_text:
-                logging.info(f"Selected text: {selected_text[:50]}...")
-
-                # Normal translation (always)
-                translated = self.translate_text(selected_text, target_language, custom_prompt)
-
-                # Generate furigana offline if enabled and source is Japanese
-                furigana_text = None
-                if (not custom_prompt and self.config.get_furigana_enabled()
-                        and self._is_japanese_text(selected_text)):
-                    logging.info("Japanese text detected, generating furigana offline")
-                    furigana_text = self.generate_furigana(selected_text)
-
-                logging.info("Translation complete!")
-
-                # Include trial info if in trial mode
-                trial_info = self.get_trial_info()
-                self.translation_queue.put((selected_text, translated, target_language, trial_info, furigana_text))
-            else:
-                error_msg = "No text selected. Please select text and try again."
-                logging.warning(error_msg)
-                self.translation_queue.put(("", error_msg, target_language, None))
-        except TrialAPIError as e:
-            # Include trial info for trial mode errors (especially quota exhausted)
-            error_msg = f"Error: {str(e)}"
-            logging.error(error_msg)
-            trial_info = self.get_trial_info()
-            if trial_info:
-                # Mark as exhausted if this is a quota error
-                if "exhausted" in str(e).lower() or "quota" in str(e).lower():
-                    trial_info['is_exhausted'] = True
-            self.translation_queue.put(("", error_msg, target_language, trial_info))
-        except Exception as e:
-            error_msg = f"Error: {str(e)}"
-            logging.error(error_msg)
-            self.translation_queue.put(("", error_msg, target_language, None))
-
     def do_translate_or_fix(self, target_language: str) -> None:
         """Merged translate-or-fix for the language hotkeys (Win+Alt+V/E/J/C + custom).
 
-        Mirrors do_translation() (captures the live selection via Ctrl+C, honors the
-        shared translation cooldown, surfaces trial info, generates furigana for Japanese
-        source) but calls translate_or_fix() so the model auto-decides between translating
-        and grammar-fixing text already in target_language. The result is queued as the
-        same 5-tuple as do_translation() (is_grammar stays False downstream) because the
-        output is always genuinely in target_language in both branches.
+        Captures the live selection via Ctrl+C, honors the shared translation cooldown,
+        surfaces trial info and generates furigana for Japanese source, and calls
+        translate_or_fix() so the model auto-decides between translating and
+        grammar-fixing text already in target_language. The result is queued as the
+        5-tuple (original, result, target_language, trial_info, furigana_text) -
+        is_grammar stays False downstream - because the output is always genuinely in
+        target_language in both branches.
         """
         current_time = time.time()
         if current_time - self.last_translation_time < COOLDOWN:
@@ -758,9 +695,9 @@ STRICT RULES (DO NOT include these rules in your response):
 
         Used by the Quick Translate popup "Re-translate" button when a cached or
         previous result is bad, so the user is never stuck with it. Unlike
-        do_translation(), this does NOT capture the selection again and does NOT apply
-        COOLDOWN — it operates on text already obtained. The result is pushed to
-        translation_queue in the same 5-tuple format as do_translation().
+        do_translate_or_fix(), this does NOT capture the selection again and does NOT
+        apply COOLDOWN — it operates on text already obtained. The result is pushed to
+        translation_queue in the same 5-tuple format as do_translate_or_fix().
 
         `source_language` is the popup chooser's answer for kanji-only text the
         model could not place (J6): stated to the model, and recorded.
@@ -810,7 +747,7 @@ STRICT RULES (DO NOT include these rules in your response):
     def do_grammar_fix(self) -> None:
         """Fix the grammar of the currently selected text and queue the result.
 
-        Mirrors do_translation() (captures the live selection via Ctrl+C, honors a
+        Mirrors do_translate_or_fix() (captures the live selection via Ctrl+C, honors a
         cooldown, surfaces trial info) but calls fix_grammar() instead of translating.
         The result is pushed to translation_queue as a 6-tuple
         (original, corrected, "Grammar", trial_info, None, True) so the queue checker can
@@ -869,7 +806,7 @@ STRICT RULES (DO NOT include these rules in your response):
         the custom_prompt branch of translate_text(). Freeform asks are one-offs: the
         result is NOT written to history and is never served from / written to the R1
         cache. The result is pushed to translation_queue in the same 5-tuple format as
-        do_translation() (furigana off for freeform).
+        do_translate_or_fix() (furigana off for freeform).
 
         Args:
             raw_prompt: The exact prompt text to send to the model.

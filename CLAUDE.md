@@ -192,9 +192,12 @@ to the user's own provider - silent, and indistinguishable from a dead model. Ce
 until `csk-` was added (2026-09-08). Still uncovered: OpenAI, DeepSeek, Mistral, Together,
 SiliconFlow, SambaNova - and **SambaNova can never be covered**, its keys are bare UUIDs.
 
-**Thirteen model IDs are claimed by two providers at once**, and `_identify_provider()` returns
-the first match, so one of the two always loses (DEFERRED D12). It only matters under
-`provider='Auto'`. Do not "fix" it by deleting a real model from a provider's list.
+**Thirteen model IDs are claimed by two providers at once.** Since K8 (Decision 31)
+`_identify_provider()` lets the key decide between them (`_claimant_for_key()`): the provider whose
+prefix the key carries, else one with no known prefix (a key without `csk-` is not Cerebras's, so
+gpt-oss-120b goes to SambaNova), else the first. Together vs SiliconFlow stays unresolvable - neither
+has a prefix. It only matters under `provider='Auto'`. Do not "fix" it by deleting a real model from
+a provider's list.
 
 ### Key module: `src/core/remote_config.py`
 - Singleton `RemoteConfigManager` with thread-safe RLock
@@ -974,7 +977,7 @@ had, which is why non-Japanese Dictionary mode is unchanged.
 - `src/ui/dictionary_render.py` - dictionary result run model: `split_dictionary_text()`,
   `field_policy()`, `source_language_hint()`, `overhead_px()`
 - `src/core/translation.py` - `generate_furigana()` / `_is_japanese_text()` delegate to the
-  engine; queue integration in `do_translation()` (5-item tuple)
+  engine; queue integration in `do_translate_or_fix()` (5-item tuple)
 - `src/ui/quick_translate.py` - `_render_furigana()` (delegate), `show()` height budget,
   `_ruby_enabled()` / `_ruby_hint()`, replace preview, custom-prompt flattening,
   `show_dictionary_result()` (RubyText + run insertion), `DICT_RESULT_FONT`

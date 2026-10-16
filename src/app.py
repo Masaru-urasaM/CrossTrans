@@ -1628,13 +1628,6 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
             except tk.TclError:
                 pass  # Window destroyed
 
-    def _open_settings_dictionary_tab(self):
-        """Switch to Dictionary tab in already-open settings window."""
-        if self.settings_window and hasattr(self.settings_window, 'open_dictionary_tab'):
-            self.settings_window.open_dictionary_tab()
-            # Re-focus window after switching tab
-            self._focus_settings_window()
-
     def _open_history(self):
         """Open history dialog."""
         if self.popup:

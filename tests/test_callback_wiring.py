@@ -66,3 +66,14 @@ def test_hotkey_normal_branch_uses_merged_path():
     src = inspect.getsource(TranslatorApp._on_hotkey_translate)
     assert 'do_translate_or_fix(language)' in src
     assert 'do_translation(language)' not in src
+
+
+def test_the_dead_entry_points_stay_gone():
+    """D18 (removed 2026-10-16): do_translation() lost its last caller when the language
+    hotkeys moved to do_translate_or_fix(), and never learned the J6 source hint - anyone
+    reviving it would get the old rule. _open_settings_dictionary_tab() had no caller,
+    and SettingsWindow.open_dictionary_tab() had no other."""
+    from src.ui.settings.dictionary_tab import DictionaryTabMixin
+    assert not hasattr(TranslationService, 'do_translation')
+    assert not hasattr(TranslatorApp, '_open_settings_dictionary_tab')
+    assert not hasattr(DictionaryTabMixin, 'open_dictionary_tab')
