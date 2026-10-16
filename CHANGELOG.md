@@ -4,6 +4,41 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase K10 — The measurements J left open: the trial model, phrases, screenshots (2026-10-16)
+
+Real API calls on the user's own keys and the trial proxy - 52 in all (trial 10, Groq 20, Google
+22, two of them rate-limited and re-run). `config.json`'s hash was taken before and after every
+run and never changed.
+
+**Measured**
+- **The trial model (llama-3.3-70b through the trial proxy), the ten false friends alone,
+  translate mode**: the `[[SOURCE: ...]]` line came back **10/10** and never leaked into a
+  translation; verdicts Japanese 4, Unknown 4, Chinese 2 (汽車, 床 - the words every model takes
+  for Chinese alone). The worry that a trial user would see the "Japanese / Chinese" row on every
+  kanji-only text does not hold: it is as often as on Gemini and gpt-oss (3-4 in ten).
+- **Ten kanji-only phrases of known language** (the new `--input phrases`, five Japanese headline
+  compounds, five Chinese sentences): gpt-oss-120b on Groq, each twice - marker **20/20**, right
+  language **19/20**, the miss an Unknown; gemini-2.5-flash - marker **10/10**, right **9/10**, the
+  miss an Unknown. **No phrase was ever answered with the wrong language**, and every repeat agreed
+  with the first. With context the models settle what a word alone cannot; when unsure they say so,
+  and the app asks.
+- **Screenshots** (the new `tools/eval_ocr_prompt.py`: ten texts drawn with Windows' own Japanese,
+  Simplified and Traditional fonts, sent through the app's `ocr_prompt()` and read with its
+  `parse_ocr_result()`), gemini-2.5-flash: every answer had all three sections including
+  `===SOURCE LANGUAGE===` (**10/10**), every text was read exactly (**10/10**), and the language
+  was right **10/10** - kanji-only signs and headlines (立入禁止, 首相官邸前抗議集会, 東京大学) and
+  Chinese sentences nothing in the text settles (他在大學學習中文。, 今天天氣很好。) included.
+- **Not measured**: OpenAI, Anthropic, DeepSeek, Mistral and the rest - no key for them here.
+
+**Added**
+- `tools/eval_ocr_prompt.py` (`--providers`, `--key`, `--texts`, `--delay`); output
+  `logs/eval/ocr_<label>.jsonl`, images in `logs/eval/ocr_images/`.
+
+**Tests**: 1392 -> 1413 (+21, `tests/test_eval_ocr_prompt.py`: every case's "what settles it"
+matches the app's own evidence, both languages covered, a case drawn into an image - with Arial
+where a CI image lacks the Japanese fonts, so it never skips - and the scoring of full, Unknown,
+misread and section-less answers).
+
 ### Phase K9 — Tooling: the mutation runner, the CI floor, repeats and phrases (2026-10-16)
 
 **Added**

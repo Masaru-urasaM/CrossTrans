@@ -737,6 +737,10 @@ characters - never read it as a verdict.** The cache is not namespaced by verdic
 came back 10/10 on gemini-2.5-flash and gpt-oss-120b, never leaked; Unknown 3-4 in ten;
 汽車 and 工作 answered Chinese, confidently - a word alone cannot do better; context or the user
 can. Dictionary with the sentence and the source stated: 10/10 Japanese on three providers.
+Since K10 (2026-10-16): the trial model wrote the marker 10/10 (Unknown 4, Chinese 2); ten
+kanji-only *phrases* (`--input phrases`) came back in the right language 19/20 on gpt-oss and 9/10
+on Gemini, never the wrong one (the misses were Unknown); screenshots (`tools/eval_ocr_prompt.py`)
+named the language right 10/10 with every section present.
 
 **`TODO.md`** - the plan these phases came from (findings F1-F9, phases J0-J12) - was deleted on
 completion; code and docs that cite it mean `git show 5cc8736:TODO.md`. The summary, the
