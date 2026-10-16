@@ -4,6 +4,18 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+Everything below `[1.9.20]` ships as **1.9.21**: the user chose the number on 2026-10-16, and
+`VERSION` says so. Not tagged and not built as a release yet.
+
+### Release prep — 1.9.21 chosen, merged into main (2026-10-16)
+
+- `VERSION` 1.9.20 -> 1.9.21 (`src/constants.py`; the CLAUDE.md title follows).
+- Decisions 28-32, made during the K follow-ups, approved by the user.
+- `feature/japanese-language-identity` (J0-J12, K1-K13) merged into `main` and pushed with the H1
+  work that was already there - the first push since 1.9.20, so the first CI run of `tests.yml`.
+
+**Tests**: 1502 (no change).
+
 ### Phase K13 — Final check and archive (2026-10-16)
 
 - **The suite on a fresh clone with only requirements.txt installed** - item 1's last step,

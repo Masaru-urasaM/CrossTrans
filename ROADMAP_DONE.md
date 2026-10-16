@@ -37,8 +37,9 @@ no window of the test process on the user's desktop and no focus taken, in four 
 mutation run. K13: a fresh clone on a requirements-only venv - 1491 passed, 11 skipped (nine need
 fugashi + UniDic, one a built EXE, one the real clipboard), 0 failed.
 
-**Made without the user** (revisit if they object): Decisions 28-32. The user asked for every item
-at once; K12's options were built before the user chose between them.
+**Made without the user, then approved**: Decisions 28-32. The user asked for every item at once,
+and K12's options were built before the user chose between them; the user approved all five on
+2026-10-16.
 
 **Still the user's**: merging into `main`, pushing, the version (1.9.21 or 1.9.22) and the tag;
 D19's option (bundle unidic-lite, ~249 MB, or not); keys for D11's eight providers; deploying the

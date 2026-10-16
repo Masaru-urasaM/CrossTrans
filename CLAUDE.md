@@ -1,4 +1,4 @@
-# CrossTrans v1.9.20 - AI Context
+# CrossTrans v1.9.21 - AI Context
 
 ## Project Overview
 CrossTrans is a Windows desktop translation app using AI APIs (15 providers, 180+ models).

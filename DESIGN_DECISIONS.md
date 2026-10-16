@@ -10,7 +10,7 @@ approaches. Newest first.
 **Date**: 2026-10-16
 **Status**: RESOLVED (the user: the tests threw windows over the screen, interrupted other work and
 used up the translation quota. The options below were proposed; the goal's stop hook asked for a
-fix before the user chose, so the recommended ones were built - revisit if the user objects)
+fix before the user chose, so the recommended ones were built). Approved by the user on 2026-10-16, with Decisions 28-32.
 
 **Problem**: The Tk tests mapped real windows on the developer's desktop, and the app's windows
 take the focus by design. Nothing kept a test off the network, the clipboard or the keyboard, and
@@ -47,7 +47,7 @@ the lost-format case was seen. The eval tools send nothing until `--confirm-call
 
 **Date**: 2026-10-16
 **Status**: RESOLVED (DEFERRED D12 asked for "a decision about whether Auto-mode ambiguity is worth
-changing shared routing for"; the user asked for every proposed item to be done)
+changing shared routing for"; the user asked for every proposed item to be done). Approved by the user on 2026-10-16, with Decisions 28-32.
 
 **Problem**: Thirteen model IDs appear under two providers in `model_provider_map`, and
 `_identify_provider()` returned the first, so under provider 'Auto' one provider's users always
@@ -76,7 +76,7 @@ SiliconFlow (two prefix-less claimants) is left as it was.
 
 **Date**: 2026-10-16
 **Status**: RESOLVED (measured, as the proposal asked; decided while doing the post-J12 follow-ups
-the user asked for in full - revisit if they object)
+the user asked for in full). Approved by the user on 2026-10-16, with Decisions 28-32.
 
 **Problem**: Half of all Chinese sentences (46 634 of Tatoeba's 89 179) hold no glyph that only
 Chinese writes, so the app treats them like kanji-only Japanese: a marker clause on every
@@ -112,8 +112,8 @@ Decisions 21, 22, 24.
 ### Decision 29 - A placed term can be changed; a placed sentence cannot
 
 **Date**: 2026-10-16
-**Status**: RESOLVED (decided while doing the post-J12 follow-ups the user asked for in full -
-revisit if they object)
+**Status**: RESOLVED (decided while doing the post-J12 follow-ups the user asked for in full).
+Approved by the user on 2026-10-16, with Decisions 28-32.
 
 **Problem**: When a model places kanji-only text confidently and wrongly - measured: 汽車 and 工作
 alone came back Chinese - the popup offered no way to say otherwise; the J6 row appeared only
@@ -142,8 +142,8 @@ Decisions 22, 27, 28.
 ### Decision 28 - The user's answer is a verdict, and it replaces a model's in History
 
 **Date**: 2026-10-16
-**Status**: RESOLVED (decided while doing the post-J12 follow-ups the user asked for in full -
-revisit if they object)
+**Status**: RESOLVED (decided while doing the post-J12 follow-ups the user asked for in full).
+Approved by the user on 2026-10-16, with Decisions 28-32.
 
 **Problem**: The Dictionary's "Kanji-only text: Japanese or Chinese?" answer was used for one
 lookup and forgotten. Keeping it raises two questions: where, and what happens to a model's
