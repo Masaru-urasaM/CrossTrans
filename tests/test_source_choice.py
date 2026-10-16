@@ -6,12 +6,15 @@ but only the popup's chooser ever kept the user's answer, and only because it
 re-translated. K3 keeps the Dictionary dialog's answer too: as the text's verdict
 for this session (`TranslationService.remember_user_source`) and on History's
 entries of that exact text (`HistoryManager.set_source_verdict`), where it
-replaces a model's, since the user's pick outranks it.
+replaces a model's, since the user's pick outranks it. K4 lets the user change a
+term a model placed - 汽車 and 工作 come back Chinese, confidently - from the
+popup: "Kanji-only text - read as Chinese. [Read as Japanese]".
 
-Nothing here needs a display.
+The widget tests use the `tk_root` fixture, which skips without a display.
 """
 import inspect
 import logging
+import tkinter as tk
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,7 +22,10 @@ import pytest
 import src.core  # noqa: F401  (must precede `config`: see project CLAUDE.md)
 from src.core.history import HistoryManager
 from src.core.lang_id import CHINESE_SIMPLIFIED, CHINESE_TRADITIONAL, JAPANESE
+from src.core.source_marker import (ROW_ASK, ROW_CHANGE, language_label, other_language,
+                                    source_row)
 from src.core.translation import TranslationService
+from src.ui.quick_translate import SOURCE_CHOOSER_PX, QuickTranslateManager
 
 
 class HistoryConfig:
@@ -178,3 +184,133 @@ class TestApp:
         from src.app import TranslatorApp
         source = inspect.getsource(TranslatorApp.__init__)
         assert 'on_source_chosen=self._on_source_chosen' in source
+
+
+# --------------------------------------------------------------------------- #
+# K4 - which row a surface shows (pure)
+# --------------------------------------------------------------------------- #
+class TestSourceRow:
+    @pytest.mark.parametrize("text, verdict, expected", [
+        ("汽車", None, ROW_ASK),                       # nobody placed it
+        ("汽車", "Unknown", ROW_ASK),                  # "Unknown" is no verdict
+        ("汽車", "English", ROW_ASK),                  # nor is a language that is not CJK
+        ("汽車", CHINESE_SIMPLIFIED, ROW_CHANGE),      # a model placed a term
+        ("工作", CHINESE_TRADITIONAL, ROW_CHANGE),
+        ("勉強", JAPANESE, ROW_CHANGE),
+        ("東京大学", "Chinese", ROW_CHANGE),            # the marker's own spelling
+        ("東京 大学", JAPANESE, None),                  # whitespace: a sentence
+        ("東京、大阪", JAPANESE, None),                 # punctuation: a sentence
+        ("這是我的書。", CHINESE_TRADITIONAL, None),
+        ("東京、大阪", None, ROW_ASK),                  # an unplaced sentence still asks
+        ("勉強します", None, None),                     # kana settles it
+        ("我们", JAPANESE, None),                       # so does a Chinese-only glyph
+        ("I love 東京", None, None),                    # not mostly CJK
+        ("", None, None),
+        (None, JAPANESE, None),
+    ])
+    def test_which_row(self, text, verdict, expected):
+        assert source_row(text, verdict) == expected
+
+    @pytest.mark.parametrize("language, other", [
+        (JAPANESE, CHINESE_SIMPLIFIED), (CHINESE_SIMPLIFIED, JAPANESE),
+        (CHINESE_TRADITIONAL, JAPANESE), ("Chinese", JAPANESE)])
+    def test_the_other_language(self, language, other):
+        assert other_language(language) == other
+
+    @pytest.mark.parametrize("language, label", [
+        (JAPANESE, "Japanese"), (CHINESE_SIMPLIFIED, "Chinese"),
+        (CHINESE_TRADITIONAL, "Chinese")])
+    def test_a_row_names_no_chinese_script(self, language, label):
+        assert language_label(language) == label
+
+
+# --------------------------------------------------------------------------- #
+# K4 - the popup's row for a term a model placed
+# --------------------------------------------------------------------------- #
+class PopupConfig:
+    def get_furigana_enabled(self):
+        return True
+
+    def get_quick_replace(self):
+        return False
+
+
+@pytest.fixture
+def popup(tk_root):
+    mgr = QuickTranslateManager(tk_root, PopupConfig())
+    mgr._last_mouse_x, mgr._last_mouse_y = 500, 300
+    mgr.choices = []
+    mgr.configure_callbacks(on_choose_source=mgr.choices.append)
+    yield mgr
+    mgr.close()
+
+
+def row_parts(row):
+    labels = [child.cget('text') for child in row.winfo_children()
+              if child.winfo_class() in ('TLabel', 'Label')]
+    buttons = [child for child in row.winfo_children() if isinstance(child, tk.Button)]
+    return labels, buttons
+
+
+class TestPopupChangeRow:
+    def test_a_chinese_verdict_offers_japanese(self, popup):
+        popup.show("Car", "English", None, "汽車", source_lang=CHINESE_SIMPLIFIED)
+        labels, buttons = row_parts(popup.popup_source_chooser)
+        assert labels == ["Kanji-only text - read as Chinese."]
+        assert [b.cget('text') for b in buttons] == ["Read as Japanese"]
+        buttons[0].invoke()
+        assert popup.choices == [JAPANESE]
+
+    def test_a_japanese_verdict_offers_chinese(self, popup):
+        popup.show("Study", "English", None, "勉強", source_lang=JAPANESE)
+        labels, buttons = row_parts(popup.popup_source_chooser)
+        assert labels == ["Kanji-only text - read as Japanese."]
+        buttons[0].invoke()
+        assert popup.choices == [CHINESE_SIMPLIFIED]
+
+    def test_the_row_is_in_the_height_budget(self, popup, tk_root):
+        def height():
+            tk_root.update_idletasks()
+            return int(popup.popup.geometry().split('+')[0].split('x')[1])
+        popup.show("Car", "English", None, "Kisha")
+        without = height()
+        popup.show("Car", "English", None, "汽車", source_lang=CHINESE_SIMPLIFIED)
+        assert height() == without + SOURCE_CHOOSER_PX
+
+    def test_a_sentence_a_model_placed_gets_no_row(self, popup):
+        popup.show("This is my book.", "English", None, "這是我的書。",
+                   source_lang=CHINESE_TRADITIONAL)
+        assert popup.popup_source_chooser is None
+
+    def test_a_grammar_fix_gets_no_row(self, popup):
+        popup.show("汽車", "Grammar", None, "汽車", is_grammar=True,
+                   source_lang=CHINESE_SIMPLIFIED)
+        assert popup.popup_source_chooser is None
+
+    def test_the_unplaced_row_is_unchanged(self, popup):
+        popup.show("Teacher", "English", None, "先生")
+        labels, buttons = row_parts(popup.popup_source_chooser)
+        assert labels == ["Kanji-only text - read it as:"]
+        assert [b.cget('text') for b in buttons] == ["Japanese", "Chinese"]
+
+
+class _SyncThread:
+    def __init__(self, target=None, daemon=None, **kwargs):
+        self._target = target
+
+    def start(self):
+        self._target()
+
+
+class TestPopupChoiceIsKept:
+    def test_the_answer_is_kept_before_the_request(self, monkeypatch):
+        from src.app import TranslatorApp
+        monkeypatch.setattr('threading.Thread', _SyncThread)
+        app = TranslatorApp.__new__(TranslatorApp)
+        app.quick_translate_manager = MagicMock()
+        app.translation_service = MagicMock()
+        app.current_original, app.current_target_lang = "汽車", "English"
+        app._on_quick_translate_choose_source(JAPANESE)
+        names = [name for name, _args, _kwargs in app.translation_service.mock_calls]
+        assert names == ['remember_user_source', 'redo_translation']
+        app.translation_service.remember_user_source.assert_called_once_with("汽車", JAPANESE)

@@ -407,17 +407,20 @@ class TranslatorApp:
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_quick_translate_choose_source(self, language: str):
-        """The popup's "Kanji-only text - read it as" answer: translate again, stated.
+        """The popup's Japanese / Chinese row: translate again, with the answer stated.
 
-        The model could not place the text, so its translation may carry the
-        other language's sense; the user's answer goes to the model and becomes
-        the text's verdict (J6, Decision 27).
+        Asked (nobody placed the text) or changed (a model placed a term, K4),
+        the translation may carry the other language's sense; the answer goes to
+        the model and is the text's verdict (J6, Decision 27) - kept before the
+        request, so a failed or custom re-translation still keeps it, and on
+        History's older entries too, over a model's (Decision 28).
         """
         text = self.current_original
         target_lang = self.current_target_lang
         if not text:
             return
         logging.info(f"[LangID] user chose source={language} chars={len(text)}")
+        self.translation_service.remember_user_source(text, language)
         self.quick_translate_manager.show_loading(target_lang)
 
         def worker():

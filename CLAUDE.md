@@ -538,10 +538,14 @@ read 汽車, 工作, 床 as Chinese (3/10 each).
   the model to decide per headword and name its decision in field 2.
 - **The popup's "Kanji-only text - read it as: [Japanese] [Chinese]" row** (J6, Decision 27):
   shown above the buttons when a translation of kanji that prove nothing came back without a
-  verdict (`QuickTranslateManager._asks_source`); `SOURCE_CHOOSER_PX` joins the height budget only
-  then. An answer re-translates with that source stated (`redo_translation(...,
-  source_language=)`) and becomes the text's verdict - readings alone would sit above a meaning
-  the model may have taken from the other language.
+  verdict; `SOURCE_CHOOSER_PX` joins the height budget only then. An answer re-translates with
+  that source stated (`redo_translation(..., source_language=)`) and becomes the text's verdict -
+  readings alone would sit above a meaning the model may have taken from the other language.
+  **When a model did place it** and the text is a term, the row reads "Kanji-only text - read as
+  Chinese. [Read as Japanese]" instead (K4): a word alone is where models are confidently wrong
+  (汽車, 工作). A sentence a model placed gets no row (Decision 29). Which row:
+  `source_marker.source_row()`, drawn by `quick_translate.fill_source_row()` - the main window's
+  row (K5) uses both.
 - **Kanji that prove nothing** (`detect_language()` -> `("Unknown", AMBIGUOUS_CJK_CONFIDENCE)`):
   the word window opens in the language a model reported for that exact text
   (`TranslationService.source_verdict()` - the popup's text always has one, the main window's
@@ -706,7 +710,7 @@ unknown; a surface that needs a language asks.
 | Text whose characters settle it | nothing asked; `SOURCE LANGUAGE: the text above is X.` stated | `source_marker.source_clause()` |
 | Dictionary lookup | field 2 (Source Language) | `dictionary_prompt` (J1) |
 | Screenshot OCR | `===SOURCE LANGUAGE===` section | `screenshot_handler.ocr_prompt()` (J8) |
-| The user | the popup's "Kanji-only text - read it as: [Japanese] [Chinese]" row (re-translates, Decision 27); the Dictionary's "Kanji-only text: Japanese or Chinese?" dialog (Decision 26) | `QuickTranslateManager._build_source_chooser()`, `DictionaryPopup._open_ambiguous_kanji()` |
+| The user | the popup's "Kanji-only text - read it as: [Japanese] [Chinese]" row, or "read as Chinese. [Read as Japanese]" for a term a model placed (re-translates, Decisions 27 and 29); the Dictionary's "Kanji-only text: Japanese or Chinese?" dialog (Decision 26, kept since K3) | `source_marker.source_row()`, `QuickTranslateManager._build_source_chooser()`, `DictionaryPopup._open_ambiguous_kanji()` |
 
 **Where it is kept**: `TranslationService.last_source_language` (per call) and
 `source_verdict(text)` (this session, bounded, then History's `source_verdict` field). An

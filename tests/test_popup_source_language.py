@@ -21,8 +21,8 @@ import pytest
 import src.core  # noqa: F401  (must precede `config`: see project CLAUDE.md)
 from src.core import furigana as F
 from src.core.history import HistoryManager
-from src.core.lang_id import CHINESE_SIMPLIFIED, JAPANESE
-from src.core.source_marker import stated_clause
+from src.core.lang_id import CHINESE_SIMPLIFIED, CHINESE_TRADITIONAL, JAPANESE
+from src.core.source_marker import ROW_ASK, ROW_CHANGE, stated_clause
 from src.core.translation import TranslationService
 from src.ui.quick_translate import SOURCE_CHOOSER_PX, QuickTranslateManager
 
@@ -152,18 +152,20 @@ def test_ruby_hint(target, is_grammar, original, source, expected):
 
 
 @pytest.mark.parametrize("original, source, is_grammar, is_error, expected", [
-    ("先生", None, False, False, True),
-    ("先生", JAPANESE, False, False, False),
-    ("先生", CHINESE_SIMPLIFIED, False, False, False),
-    ("先生です", None, False, False, False),        # kana: placed
-    ("我们", None, False, False, False),            # a Chinese glyph: placed
-    ("Hello", None, False, False, False),
-    ("先生", None, True, False, False),             # a grammar fix
-    ("先生", None, False, True, False),             # a failure notice
-    ("", None, False, False, False),
+    ("先生", None, False, False, ROW_ASK),
+    ("先生", JAPANESE, False, False, ROW_CHANGE),             # K4: a placed term can change
+    ("先生", CHINESE_SIMPLIFIED, False, False, ROW_CHANGE),
+    ("先生です", None, False, False, None),        # kana: placed
+    ("我们", None, False, False, None),            # a Chinese glyph: placed
+    ("Hello", None, False, False, None),
+    ("先生", None, True, False, None),             # a grammar fix
+    ("先生", None, False, True, None),             # a failure notice
+    ("", None, False, False, None),
+    ("這是我的書。", CHINESE_TRADITIONAL, False, False, None),   # a placed sentence
+    ("先生", JAPANESE, True, False, None),         # a grammar fix, placed
 ])
-def test_asks_source(original, source, is_grammar, is_error, expected):
-    assert QuickTranslateManager._asks_source(original, source, is_grammar, is_error) is expected
+def test_source_row(original, source, is_grammar, is_error, expected):
+    assert QuickTranslateManager._source_row(original, source, is_grammar, is_error) == expected
 
 
 class FakeConfig:
@@ -220,8 +222,9 @@ class TestPopup:
         labels = [b.cget('text') for b in buttons(manager.popup_source_chooser)]
         assert labels == ["Japanese", "Chinese"]
 
-    @pytest.mark.parametrize("original, source", [("先生", JAPANESE), ("先生です", None),
-                                                  ("Sensei", None)])
+    # A term a model placed gets the K4 row instead (tests/test_source_choice.py).
+    @pytest.mark.parametrize("original, source", [("這是我的書。", CHINESE_TRADITIONAL),
+                                                  ("先生です", None), ("Sensei", None)])
     def test_no_chooser_when_the_language_is_known(self, manager, original, source):
         manager.show("Teacher", "English", None, original, source_lang=source)
         assert manager.popup_source_chooser is None

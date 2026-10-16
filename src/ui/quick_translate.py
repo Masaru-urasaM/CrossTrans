@@ -22,7 +22,8 @@ except ImportError:
 from src.core import lang_id
 from src.core.furigana import RubySegment
 from src.core.nlp_manager import nlp_manager
-from src.core.source_marker import source_clause
+from src.core.source_marker import (ROW_CHANGE, language_label, other_language,
+                                    source_row)
 from src.ui.dictionary_render import overhead_px, split_dictionary_text
 from src.ui.ruby_text import (RubyText, estimate_notation_px,
                               estimate_ruby_overhead_px, insert_output)
@@ -59,6 +60,33 @@ def is_error_text(translated: str) -> str:
 # popup's height budget only when the row is shown, like ATTRIBUTION_PX.
 SOURCE_CHOOSER_FONT = ('Segoe UI', 9)
 SOURCE_CHOOSER_PX = 36
+
+
+def fill_source_row(row, mode: str, verdict: Optional[str],
+                    on_choose: Callable[[str], None]) -> None:
+    """The label and buttons of a Japanese / Chinese row - the popup's and the
+    main window's (`source_marker.source_row` decides which):
+
+    - ROW_ASK: "Kanji-only text - read it as: [Japanese] [Chinese]" (J6).
+    - ROW_CHANGE: "Kanji-only text - read as Chinese. [Read as Japanese]" (K4):
+      what a model - or the user, earlier - settled, and the way to the other.
+
+    `on_choose` gets lang_id.JAPANESE or lang_id.CHINESE_SIMPLIFIED.
+    """
+    if mode == ROW_CHANGE:
+        text = f"Kanji-only text - read as {language_label(verdict)}."
+        other = other_language(verdict)
+        choices = ((other, f"Read as {language_label(other)}"),)
+    else:
+        text = "Kanji-only text - read it as:"
+        choices = ((lang_id.JAPANESE, "Japanese"), (lang_id.CHINESE_SIMPLIFIED, "Chinese"))
+    ttk.Label(row, text=text, font=SOURCE_CHOOSER_FONT, foreground='#bbbbbb').pack(side=LEFT)
+    for language, label in choices:
+        tk.Button(row, text=label, command=lambda chosen=language: on_choose(chosen),
+                  autostyle=False, bg='#495057', fg='#ffffff',
+                  activebackground='#5a6268', activeforeground='#ffffff',
+                  font=SOURCE_CHOOSER_FONT, relief='flat', padx=10, pady=2,
+                  cursor='hand2').pack(side=LEFT, padx=(6, 0))
 
 # Dictionary result window font. Monospace is load-bearing: _align_dictionary_text
 # pads the labels with spaces so every value starts at the same column.
@@ -525,7 +553,7 @@ class QuickTranslateManager:
 
         # One hint for the height budget and the box alike, or the box clips.
         ruby_hint = self._ruby_hint(target_lang, is_grammar, original, source_lang)
-        ask_source = self._asks_source(original, source_lang, is_grammar, is_error)
+        source_mode = self._source_row(original, source_lang, is_grammar, is_error)
 
         # Calculate size (MIN_HEIGHT already handled in calculate_size)
         width, height = self.calculate_size(translated)
@@ -539,7 +567,7 @@ class QuickTranslateManager:
         if trial_info and trial_info.get('is_trial') and not is_error:
             height += 35  # Extra space for trial header row
 
-        if ask_source:
+        if source_mode:
             height += SOURCE_CHOOSER_PX
 
         # Add extra height for the furigana section. Measured from real font
@@ -799,9 +827,10 @@ class QuickTranslateManager:
             close_btn_kwargs["bootstyle"] = "secondary"
         ttk.Button(self._btn_frame, **close_btn_kwargs).pack(side=RIGHT)
 
-        # Above the buttons: kanji-only text whose language nobody settled
-        if ask_source:
-            self._build_source_chooser(main_frame)
+        # Above the buttons: kanji-only text whose language nobody settled, or
+        # a term someone did - and the way to the other language (K4)
+        if source_mode:
+            self._build_source_chooser(main_frame, source_mode, source_lang)
 
         # Furigana section (if available)
         if furigana_text and not is_error:
@@ -887,16 +916,18 @@ class QuickTranslateManager:
         return lang_id.output_hint(source, target_lang)
 
     @staticmethod
-    def _asks_source(original: str, source_lang: Optional[str], is_grammar: bool,
-                     is_error: bool) -> bool:
-        """Whether to offer the Japanese / Chinese chooser: a translation of kanji
-        that neither the characters nor a model settled (Decision 22)."""
-        if is_grammar or is_error or not original or source_lang:
-            return False
-        return source_clause(original).asks
+    def _source_row(original: str, source_lang: Optional[str], is_grammar: bool,
+                    is_error: bool) -> Optional[str]:
+        """Which Japanese / Chinese row to offer (`source_marker.source_row`):
+        ROW_ASK for kanji that neither the characters nor a model settled
+        (Decision 22), ROW_CHANGE for a term a model or the user did (K4) -
+        never on a grammar fix or a failure notice."""
+        if is_grammar or is_error or not original:
+            return None
+        return source_row(original, source_lang)
 
-    def _build_source_chooser(self, parent) -> None:
-        """"Kanji-only text - read it as: [Japanese] [Chinese]", above the buttons.
+    def _build_source_chooser(self, parent, mode: str, verdict: Optional[str]) -> None:
+        """The Japanese / Chinese row, above the buttons (`fill_source_row`).
 
         A row, not a dialog: the translation is already on screen, and nothing
         is blocked while the question stands. Answering re-translates with the
@@ -908,16 +939,7 @@ class QuickTranslateManager:
         row.pack(side=BOTTOM, fill=X, pady=(8, 0))
         row.bind("<Button-1>", self._start_move)
         row.bind("<B1-Motion>", self._on_drag)
-        ttk.Label(row, text="Kanji-only text - read it as:", font=SOURCE_CHOOSER_FONT,
-                  foreground='#bbbbbb').pack(side=LEFT)
-        for language, label in ((lang_id.JAPANESE, "Japanese"),
-                                (lang_id.CHINESE_SIMPLIFIED, "Chinese")):
-            tk.Button(row, text=label,
-                      command=lambda chosen=language: self._handle_choose_source(chosen),
-                      autostyle=False, bg='#495057', fg='#ffffff',
-                      activebackground='#5a6268', activeforeground='#ffffff',
-                      font=SOURCE_CHOOSER_FONT, relief='flat', padx=10, pady=2,
-                      cursor='hand2').pack(side=LEFT, padx=(6, 0))
+        fill_source_row(row, mode, verdict, self._handle_choose_source)
         self.popup_source_chooser = row
 
     def _handle_choose_source(self, language: str) -> None:

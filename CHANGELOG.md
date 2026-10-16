@@ -4,6 +4,32 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase K4 — A term a model placed can be read as the other language (2026-10-16)
+
+**Added**
+- **"Kanji-only text - read as Chinese. [Read as Japanese]"** on the quick-translate popup. A
+  model asked about a word alone answers confidently and is sometimes wrong - measured in J1/J4,
+  汽車 and 工作 came back Chinese ("car", "work") - and then there was no way to say otherwise:
+  the J6 row only appeared when the model said Unknown. Now a term the model (or the user,
+  earlier) placed shows what it was read as, and one button for the other language; it
+  re-translates with that language stated, as the J6 row does (Decision 27). A sentence - any
+  whitespace or sentence punctuation - gets no such row: it carries its own context, and the
+  models read it correctly; a row under every Chinese sentence would be noise (Decision 29).
+- `source_marker.source_row(text, verdict)` -> `ROW_ASK` / `ROW_CHANGE` / None, with
+  `other_language()` and `language_label()` - pure, shared with the main window (K5).
+  `quick_translate.fill_source_row()` draws either row; `_asks_source()` became `_source_row()`.
+
+**Changed**
+- **The popup's answer is kept before the re-translation is sent**
+  (`remember_user_source`, K3), so it holds even when that request fails, and it replaces the
+  model's verdict on History's older entries of the text (Decision 28).
+
+**Tests**: 1232 -> 1264 (+32): `TestSourceRow` (16 cases, the other language, the labels),
+`TestPopupChangeRow` (both directions, the height budget, no row for a placed sentence or a
+grammar fix, the J6 row unchanged), the answer kept before the request; in
+`tests/test_popup_source_language.py` the `_asks_source` table became `_source_row`'s (+2 cases),
+and the "no row when known" case for a placed term moved to the new row. 9 mutations killed.
+
 ### Phase K3 — The Dictionary keeps the user's "Japanese or Chinese?" answer (2026-10-16)
 
 **Fixed**

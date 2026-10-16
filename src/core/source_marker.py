@@ -21,8 +21,8 @@ Pure logic: no Tk, no config, no API.
 import re
 from typing import NamedTuple, Optional, Tuple
 
-from src.core.lang_id import (CHINESE, HAN_RE, JAPANESE, KANA_EVIDENCE_RE,
-                              normalize_language, text_evidence)
+from src.core.lang_id import (CHINESE, CHINESE_SIMPLIFIED, HAN_RE, JAPANESE,
+                              KANA_EVIDENCE_RE, normalize_language, text_evidence)
 
 # At least this share of the text's letters must be kanji or kana before the
 # prompt says anything about Japanese or Chinese. "I love 你" is English with one
@@ -159,3 +159,51 @@ def strip_stray_markers(answer: str) -> str:
     if not answer or not _MARKER_RE.search(answer):
         return answer
     return parse_source_marker(answer)[0]
+
+
+# --------------------------------------------------------------------------- #
+# The row a surface shows about kanji its characters cannot place
+# --------------------------------------------------------------------------- #
+# The popup's (J6, K4) and the main window's (K5). ROW_ASK: nobody placed the text
+# - "read it as: [Japanese] [Chinese]". ROW_CHANGE: a model or the user did, and
+# the text is a term - "read as Chinese. [Read as Japanese]". A term alone is
+# where models were measured confidently wrong (汽車 and 工作 came back Chinese,
+# J1/J4); a sentence carries its own context, and a row under every one would be
+# noise.
+ROW_ASK = "ask"
+ROW_CHANGE = "change"
+
+# Whitespace or sentence punctuation: a sentence, not a term.
+_SENTENCE_RE = re.compile(r'[\s、。，．！？：；.,!?:;]')
+
+
+def source_row(text: Optional[str], verdict: Optional[str]) -> Optional[str]:
+    """Which Japanese / Chinese row a surface offers for `text`, or None.
+
+    Args:
+        text: The source text.
+        verdict: The language a model or the user settled for exactly that
+            text, or None.
+
+    Returns:
+        ROW_ASK when the characters cannot place the text and nobody has;
+        ROW_CHANGE when someone has and the text is a term; None when the text
+        is not mostly CJK, its characters settle it, or it is a sentence
+        someone placed.
+    """
+    if not text or not source_clause(text).asks:
+        return None
+    if not (verdict and _verdict(verdict)):
+        return ROW_ASK
+    return None if _SENTENCE_RE.search(text.strip()) else ROW_CHANGE
+
+
+def other_language(language: Optional[str]) -> str:
+    """The language a ROW_CHANGE row offers instead: Japanese <-> Chinese."""
+    return CHINESE_SIMPLIFIED if normalize_language(language) == JAPANESE else JAPANESE
+
+
+def language_label(language: Optional[str]) -> str:
+    """How a row names a language: "Japanese" or "Chinese" - the question is
+    which of the two, not which Chinese script."""
+    return "Japanese" if normalize_language(language) == JAPANESE else "Chinese"

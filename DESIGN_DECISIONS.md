@@ -5,6 +5,36 @@ approaches. Newest first.
 
 ---
 
+### Decision 29 - A placed term can be changed; a placed sentence cannot
+
+**Date**: 2026-10-16
+**Status**: RESOLVED (decided while doing the post-J12 follow-ups the user asked for in full -
+revisit if they object)
+
+**Problem**: When a model places kanji-only text confidently and wrongly - measured: 汽車 and 工作
+alone came back Chinese - the popup offered no way to say otherwise; the J6 row appeared only
+for Unknown. Where should a "read as the other language" control appear?
+
+**Options considered**:
+1. **On every text whose language a model (or the user) settled** - Pros: always reachable.
+   Cons: a row under every Traditional-Chinese sentence whose glyphs prove nothing - the models
+   read those correctly, so it is noise on the commonest case.
+2. **Only on terms** (no whitespace, no sentence punctuation) - Pros: exactly where the models
+   were measured wrong - a word alone has no context; quiet on sentences. Cons: a sentence a
+   model misread cannot be flipped from the popup (none was seen in the measurements).
+3. **Nowhere; rely on the Dictionary dialog** - Cons: the Dictionary does not ask once a verdict
+   exists (Decision 26), so a confident mistake would stick.
+
+**Resolution**: **Option 2** (`source_marker.source_row()` -> `ROW_CHANGE`). The row names what
+the text was read as and offers the other language; answering re-translates with it stated
+(Decision 27) and keeps it over the model's verdict (Decision 28). The same rule drives the main
+window's row (K5).
+
+**References**: `src/core/source_marker.py`, `src/ui/quick_translate.py`, CHANGELOG "Phase K4",
+Decisions 22, 27, 28.
+
+---
+
 ### Decision 28 - The user's answer is a verdict, and it replaces a model's in History
 
 **Date**: 2026-10-16
