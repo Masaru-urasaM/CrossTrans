@@ -4,6 +4,38 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase K1 — The suite on a clean machine (2026-10-16)
+
+The first of the follow-ups proposed after J12: run the suite the way CI will - a fresh venv
+with `requirements.txt` and nothing else - instead of on the development PC, which also has the
+Japanese NLP pack (fugashi + UniDic). `.github/workflows/tests.yml` is among the commits on
+`main` that were never pushed, so CI has **never run**; this is what its first run would have
+found.
+
+**Fixed**
+- **Five word-chip tests failed without the Japanese NLP pack** (`tests/test_word_chips_ruby.py`,
+  since F6). Dictionary mode tokenizes Japanese with the pack; without it the word area splits
+  on whitespace, so the test sentence came back as one chip and `chip(frame, "勉強")` found
+  nothing. The tests are about the chips, not the tokenizer: the pack's split of the two test
+  sentences is now recorded in the file and pinned at the `nlp_manager` boundary, and a new test
+  checks the record against the real pack wherever the pack is installed.
+- **One of them asserted fugashi's reading**: 今日 -> きょう in 今日は日本語を勉強します。. With
+  pykakasi alone the line reads 今日 as こんにち (its greeting entry 今日は -> こんにちは), though
+  今日 alone is きょう. The test is about where a chip's reading comes from - the line, not the
+  chip - so it now compares the chip with what the line reads. Which reading is right stays with
+  the engine's fugashi-only tests (`TestReadingQuality`), which already assert きょう.
+- The J12 entry below quoted the Vietnamese test data it removed; reworded without the quotes.
+
+**Found - DEFERRED D19**: pykakasi, the only reading provider a fresh install has, reads at least
+one word differently from fugashi in **898 of 3000** random Tatoeba sentences (30%) - 彼の as
+かの, 君 as くん, 人 as にん among the most frequent. Not fixed: the options trade the EXE's size
+against reading quality, which is the user's call.
+
+**Tests**: 1183 -> 1184 (+1, the record check). Clean venv (Python 3.14.0, pykakasi 2.3.0, no
+fugashi): **1169 passed / 5 failed / 9 skipped** before, **1175 passed / 0 failed / 9 skipped**
+after - the compound test that skipped there now runs, and the record check skips. The nine
+skips are the tests that need the Japanese pack, inside the CI guard's ceiling of ten.
+
 ### Phase J12 — Final check, docs and archive (2026-10-15)
 
 The last phase of the Japanese language-identity work: an end-to-end check of the whole flow,
@@ -16,7 +48,7 @@ the documentation, and the archive. The work is complete on its branch; nothing 
   first line was `[[SOURCE: Unknown]]`. `source_marker.strip_stray_markers()` now removes the
   double-bracket form from every answer `_call_with_source()` returns, whether the prompt asked
   or not; a bare `SOURCE: ...` line is left alone when nothing asked, since it could be the text.
-- **Vietnamese test data** ("Xin chào", "Tiếng Việt", "Thầy giáo" in four new test files) broke
+- **Vietnamese test data** (a greeting, a language name and a noun in four new test files) broke
   the project's no-Vietnamese rule: replaced by French, Korean and Russian samples, the two
   Vietnamese-only detection cases by Cyrillic ones, so the count holds.
 - **The mutation runner could test the wrong mutant**: two same-size mutants written within one

@@ -200,3 +200,45 @@ each row on one canvas as `RubyLine` does for its lines; or page the list. **Dep
 
 Both predate this work and were left alone under Rule 3. **Trigger**: the next cleanup pass, or
 anyone about to call either.
+
+---
+
+### D19 - pykakasi, the one reading provider every install has, misreads common words
+
+**Found**: 2026-10-16, running the suite on a clean venv (Phase K1). **Effort**: Small to Large,
+by option.
+
+A fresh install has one reading provider, pykakasi. fugashi + UniDic arrives only with the
+Japanese NLP pack (Settings -> Dictionary), so a user who never opens that tab - most users -
+reads every Japanese surface through pykakasi. Measured on 3000 random Tatoeba sentences that
+contain kanji (CC-BY 2.0 FR, `random.seed(20261016)` over the 244 364 such sentences): **898
+(30%)** have at least one word the two providers read differently; 165 distinct differences.
+Not every difference is a pykakasi error - 私 わたし / わたくし and 明日 あした / あす are both
+valid, and in お母さん it is fugashi's はは that is wrong - but the most frequent include plain
+mistakes:
+
+| Word | pykakasi | fugashi | Sentences (of 3000) | Example |
+|---|---|---|---|---|
+| 人 | にん | ひと | 85 | 私が頼れる人を |
+| 彼 | か | かれ | 66 | 彼の自尊心 (pykakasi reads 彼の as かの) |
+| 君 | くん | きみ | 54 | 君の計画 |
+| 金 | きん | かね | 27 | その金を渡した |
+| 入 | い | はい | 12 | 本題に入る |
+| 今日 | こんにち | きょう | 10 | 今日は気分が悪い (the greeting entry 今日は) |
+| 怒 | いか | おこ | 10 | 怒って電話を切った |
+
+That is "blank beats a wrong reading" (Decision 8) failing in the default configuration, not in
+an edge case. It predates the language-identity work: the provider chain is F1's, and its
+docstring already names 今日 -> こんにち as the reason fugashi is preferred.
+
+**Options**:
+1. **Ship fugashi + unidic-lite in the EXE** - every user gets the provider the tests are written
+   against. unidic-lite is 249 MB installed (a 47 MB download); the EXE is 66 MB today.
+2. **Point Japanese readers at the pack** - a one-time hint the first time pykakasi draws a
+   reading, linking to Settings -> Dictionary.
+3. **Correct pykakasi's worst entries by hand** (彼の, 今日は, 人...) - whack-a-mole, and every
+   correction is itself a guess about context, which is what the principle forbids.
+4. **Leave it**, and say so in the README.
+
+**Dependency**: the user's choice - it trades download size against reading quality. **Trigger**:
+that decision, or a user reporting a wrong reading.
