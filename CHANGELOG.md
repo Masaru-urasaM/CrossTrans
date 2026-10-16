@@ -4,6 +4,39 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase K11 — The EXE, built and checked (2026-10-16)
+
+**Built** - the branch at K10, version still 1.9.20 (the release number is the user's call), as
+`dist\CrossTrans_v1.9.20_branch_2026-10-16.exe` (66 022 675 bytes; 1.9.20 was 65 888 683). Not
+with `build_exe.bat`: its step 1 is `rmdir /s /q "dist"`, which would have deleted the released
+1.9.20 and 1.9.19 EXEs and a 1.9.19 test build that exists nowhere else, and its `pause` hangs
+an unattended run. Its steps were run by hand instead, into a scratch directory: the pre-flight
+check, PyInstaller with `CrossTrans.spec`, the post-build check; the EXE was then copied into
+`dist\` under a name no release uses.
+
+**Added**
+- **The post-build check now checks the glyph-evidence codecs** (`verify_furigana_bundle.py --exe`,
+  so `build_exe.bat` runs it with no change): `encodings.euc_jis_2004`, `cp932`, `gb2312` and
+  `big5hkscs` - `lang_id.GLYPH_CODECS`, which a test keeps in step. Without one, `lang_id` turns
+  glyph evidence off and the only sign is a line in the EXE's log.
+- **Found while checking the check**: the first version read only the PYZ and called the new
+  build's codecs missing. PyInstaller puts the `encodings` package in `base_library.zip`, with
+  what Python needs to start; `bundled_module_names()` reads both. It also showed the released
+  1.9.20 carries the four codecs too - PyInstaller bundles the whole package by itself, so the
+  spec's hidden imports (J8) are insurance, not the cause.
+
+**Checked** - the branch build: `kanwadict4.db` bundled (1 158 archive entries), the four codecs
+bundled, `src.core.lang_id` and the K-phase modules in the PYZ. Not checked here: running it.
+The app's glyph evidence is switched on lazily, at the first kanji-only text, so the log line
+"[LangID] glyph evidence disabled" can only be looked for after a real translation - the manual
+steps below.
+
+**Tests**: 1413 -> 1421 (+8, `tests/test_furigana_hardening.py`: the codec list is `lang_id`'s,
+the spec bundles it, all present passes, a missing one is named, codecs in base_library.zip and
+modules in the PYZ both count, a build without the codecs fails the guard, an unreadable file is
+reported not raised; the real-build test now also checks the codecs of any build that holds
+`lang_id`). 5 mutations killed, with `tools/mutation_check.py`.
+
 ### Phase K10 — The measurements J left open: the trial model, phrases, screenshots (2026-10-16)
 
 Real API calls on the user's own keys and the trial proxy - 52 in all (trial 10, Groq 20, Google

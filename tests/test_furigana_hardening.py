@@ -288,12 +288,91 @@ class TestBuildGuardChecks:
         with pytest.raises(SystemExit):
             guard.main([])
 
-    def test_a_real_build_carries_the_dictionary(self):
+    def test_a_real_build_carries_the_dictionary_and_the_codecs(self):
         builds = sorted((ROOT / "dist").glob("CrossTrans*.exe")) if (ROOT / "dist").is_dir() else []
         if not builds:
             pytest.skip("no built EXE in dist/ to inspect")
         ok, message = guard.check_exe(str(builds[-1]))
         assert ok, message
+        # A build with lang_id in it must carry the codecs it reads glyphs with;
+        # releases up to 1.9.20 predate lang_id (their base_library.zip happens to
+        # hold the codecs anyway - PyInstaller bundles the whole encodings package).
+        if "src.core.lang_id" in guard.bundled_module_names(str(builds[-1])):
+            ok, message = guard.check_codecs(str(builds[-1]))
+            assert ok, message
+
+    def test_the_codecs_are_lang_ids(self):
+        from src.core import lang_id
+        assert guard.CODEC_MODULES == tuple(f"encodings.{c}" for c in lang_id.GLYPH_CODECS)
+
+    def test_the_spec_bundles_the_codecs(self):
+        spec = (ROOT / "CrossTrans.spec").read_text(encoding="utf-8")
+        for module in guard.CODEC_MODULES:
+            assert f"'{module}'" in spec, module
+
+    def test_all_codecs_present_is_ok(self, monkeypatch):
+        monkeypatch.setattr(guard, "bundled_module_names",
+                            lambda path: set(guard.CODEC_MODULES) | {"encodings.utf_8"})
+        ok, message = guard.check_codecs(str(ROOT / "main.py"))
+        assert ok, message
+
+    def test_a_missing_codec_is_named(self, monkeypatch):
+        monkeypatch.setattr(guard, "bundled_module_names",
+                            lambda path: set(guard.CODEC_MODULES) - {"encodings.big5hkscs"})
+        ok, message = guard.check_codecs(str(ROOT / "main.py"))
+        assert ok is False
+        assert "encodings.big5hkscs MISSING" in message
+
+    def test_codecs_in_base_library_zip_count(self, tmp_path, monkeypatch):
+        # Where PyInstaller really puts the encodings package: a zip of .pyc in
+        # the CArchive, not the PYZ (measured on the K11 build).
+        import io
+        import zipfile
+        library = io.BytesIO()
+        with zipfile.ZipFile(library, "w") as zf:
+            for module in guard.CODEC_MODULES:
+                zf.writestr(module.replace(".", "/") + ".pyc", b"")
+            zf.writestr("encodings/__init__.pyc", b"")
+
+        class Reader:
+            def __init__(self, path):
+                pass
+
+            def extract(self, name):
+                return library.getvalue()
+
+        monkeypatch.setattr(guard, "archive_names", lambda path: ["base_library.zip"])
+        monkeypatch.setattr("PyInstaller.archive.readers.CArchiveReader", Reader)
+        names = guard.bundled_module_names(str(tmp_path / "x.exe"))
+        assert set(guard.CODEC_MODULES) <= names and "encodings" in names
+
+    def test_modules_in_the_pyz_count(self, tmp_path, monkeypatch):
+        class Pyz:
+            toc = {"src.core.lang_id": None, "src.app": None}
+
+        class Reader:
+            def __init__(self, path):
+                pass
+
+            def open_embedded_archive(self, name):
+                return Pyz()
+
+        monkeypatch.setattr(guard, "archive_names", lambda path: ["PYZ.pyz"])
+        monkeypatch.setattr("PyInstaller.archive.readers.CArchiveReader", Reader)
+        assert guard.bundled_module_names(str(tmp_path / "x.exe")) == {"src.core.lang_id",
+                                                                       "src.app"}
+
+    def test_a_build_without_the_codecs_fails_the_guard(self, monkeypatch, capsys):
+        monkeypatch.setattr(guard, "check_exe", lambda path: (True, "dictionary there"))
+        monkeypatch.setattr(guard, "check_codecs", lambda path: (False, "codecs MISSING"))
+        assert guard.main(["--exe", "x.exe"]) == 1
+        assert "[furigana bundle] codecs: FAILED - codecs MISSING" in capsys.readouterr().out
+
+    def test_a_file_that_is_not_an_archive_fails_the_codec_check_quietly(self):
+        ok, message = guard.check_codecs(str(ROOT / "main.py"))
+        assert ok is False and "archive" in message
+        ok, message = guard.check_codecs(str(ROOT / "no-such-build.exe"))
+        assert ok is False and "no such file" in message
 
 
 class TestBuildScriptInvokesTheGuard:

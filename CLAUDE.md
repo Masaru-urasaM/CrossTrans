@@ -310,7 +310,13 @@ python -m PyInstaller CrossTrans.spec --clean --noconfirm
 `build_exe.bat` verifies that pykakasi's `kanwadict4.db` is available before building and
 actually bundled afterwards (`tools/verify_furigana_bundle.py`). Without it furigana silently
 renders as plain text — nothing crashes — and pykakasi is the only reading provider a fresh
-install has. A failed pre-flight aborts the build; a failed post-build check warns loudly.
+install has. A failed pre-flight aborts the build; a failed post-build check warns loudly. Since
+K11 the post-build check also confirms the four codecs `lang_id` reads glyph evidence with - they
+live in `base_library.zip`, not the PYZ.
+
+**`build_exe.bat` deletes `dist\` first** (`rmdir /s /q "dist"`) - every EXE kept there, released
+ones included - and ends in `pause`, which hangs an unattended run. To build without losing them,
+run its steps by hand with `--distpath`/`--workpath` elsewhere (K11).
 
 **The rename is verified, and SUCCESS means SUCCESS.** `ren` fails with "a duplicate file name
 exists" when `dist\CrossTrans_v{version}.exe` is already there — the ordinary case, since the
