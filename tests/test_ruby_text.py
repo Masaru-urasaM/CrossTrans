@@ -577,13 +577,14 @@ class TestCopySelection:
         widget.insert_plain(tk.END, "hello world")
         assert self._copy(widget, '1.0', 'end-1c') == "hello world"
 
-    def test_it_really_reaches_the_windows_clipboard(self, widget):
+    def test_it_really_reaches_the_windows_clipboard(self, widget, real_clipboard):
         """The one deliberate round trip through the real clipboard.
 
         `_copy` is hermetic by design, which leaves nothing checking that Tk
         actually hands the text to Windows. This does - and skips rather than
         fails when another process owns the clipboard, so it can never flake
-        the suite the way the old helper did.
+        the suite the way the old helper did. It overwrites the user's
+        clipboard, so it runs on CI or when asked for (`real_clipboard`, K12).
         """
         widget.insert_notation(tk.END, NOTATION)
         widget.tag_add('sel', '1.0', 'end-1c')

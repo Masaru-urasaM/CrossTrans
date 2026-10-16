@@ -6,6 +6,8 @@ import time
 import uuid
 from typing import List, Dict, Any, Optional
 
+from src.core import lang_id
+
 
 class HistoryManager:
     """Manages translation history with a limit on entries."""
@@ -17,8 +19,16 @@ class HistoryManager:
 
     def add_entry(self, original: str, translated: str, target_lang: str,
                   source_type: str = "text", model_used: str = "Auto",
-                  source_lang: str = ""):
-        """Add a new translation entry to history."""
+                  source_lang: str = "", source_verdict: str = ""):
+        """Add a new translation entry to history.
+
+        Args:
+            source_lang: The source language label shown in the History list;
+                detected from the characters when empty.
+            source_verdict: The language a model reported for `original`
+                (Decision 22). Stored only when there is one - it is what tells a
+                model's verdict apart from a detected label later.
+        """
         if not self.config.get('history_enabled', True):
             return
 
@@ -40,6 +50,8 @@ class HistoryManager:
             'source_type': source_type,
             'model_used': model_used
         }
+        if source_verdict:
+            entry['source_verdict'] = source_verdict
 
         history = self.config.get('history', [])
         history.insert(0, entry)
@@ -91,6 +103,42 @@ class HistoryManager:
                 if translated and not translated.startswith('Error:'):
                     return entry
         return None
+
+    def find_source_verdict(self, original: str) -> Optional[str]:
+        """The language a model reported for this exact text, from the newest
+        entry that recorded one - whatever its target language - or None."""
+        if not original:
+            return None
+        for entry in self.config.get('history', []):
+            if entry.get('original') == original and entry.get('source_verdict'):
+                return entry['source_verdict']
+        return None
+
+    def set_source_verdict(self, original: str, verdict: str) -> int:
+        """Record the language the user settled for `original` on every entry of
+        exactly that text, as its verdict and its label.
+
+        The user's pick outranks a model's (Decision 22), so it replaces theirs
+        too: find_source_verdict() reads the newest entry, and an older one left
+        disagreeing would come back if the newer were deleted.
+
+        Returns:
+            How many entries changed.
+        """
+        if not original or not verdict:
+            return 0
+        history = self.config.get('history', [])
+        changed = 0
+        for entry in history:
+            if entry.get('original') == original and (
+                    entry.get('source_verdict') != verdict
+                    or entry.get('source_lang') != verdict):
+                entry['source_verdict'] = verdict
+                entry['source_lang'] = verdict
+                changed += 1
+        if changed:
+            self.config.set('history', history)
+        return changed
 
     def find_cached(self, original: str, target_lang: str,
                     source_type: str = 'text') -> Optional[str]:
@@ -149,12 +197,17 @@ class HistoryManager:
         if total == 0:
             return "Unknown"
 
-        if hiragana + katakana > 0:
+        if lang_id.has_kana(text):
             return "Japanese"
         if korean > total * 0.3:
             return "Korean"
         if cjk > total * 0.3:
-            return "Chinese"
+            # Kanji alone: what the glyphs (or, K6, the function words) prove,
+            # else unknown - 勉強 used to be labelled "Chinese" (TODO.md F5). The
+            # model's verdict, when there is one, is passed in by the caller
+            # instead (source_lang).
+            evidence = lang_id.text_evidence(text)
+            return evidence.language if evidence else "Unknown"
         if vietnamese > 0:
             return "Vietnamese"
         if cyrillic > total * 0.3:

@@ -9,7 +9,7 @@ import ctypes
 import queue
 import logging
 import threading
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import pyperclip
 import tkinter as tk
@@ -49,8 +49,9 @@ from src.ui.settings import SettingsWindow
 from src.ui.dialogs import APIErrorDialog, TrialExhaustedDialog, TrialFeatureDialog
 from src.ui.history_dialog import HistoryDialog
 from src.ui.toast import ToastManager, ToastType
-from src.ui.quick_translate import QuickTranslateManager, is_error_text
-from src.core import furigana
+from src.ui.quick_translate import QuickTranslateManager, fill_source_row, is_error_text
+from src.core import furigana, lang_id
+from src.core.source_marker import ROW_ASK, ROW_CHANGE, source_row
 from src.ui.ruby_text import MAX_ANNOTATE_CHARS, RubyText, insert_output
 from src.ui.tray import TrayManager
 from src.utils.updates import (
@@ -63,7 +64,7 @@ from src.core.file_processor import FileProcessor
 from src.ui.attachments import AttachmentArea
 from src.core.multimodal import MultimodalProcessor
 from src.core.screenshot import ScreenshotCapture
-from src.utils.ui_helpers import set_dark_title_bar, filter_dictionary_words
+from src.utils.ui_helpers import set_dark_title_bar
 from src.ui.expanded_window import ExpandedTranslationWindow
 from src.core.update_ui_manager import UpdateUIManager
 from src.core.trial_manager import TrialManager
@@ -165,11 +166,11 @@ class TranslatorApp:
             on_copy_and_replace=self._on_quick_translate_copy_and_replace,
             on_open_translator=self._on_quick_translate_open_translator,
             on_open_settings=lambda: self._show_settings_tab("API Key"),
-            on_open_settings_dictionary_tab=self._show_settings_dictionary_tab,
-            on_dictionary_lookup=self._on_quick_translate_dictionary_lookup,
+            on_open_dictionary=self._on_quick_translate_open_dictionary,
             on_open_settings_hotkeys_tab=self._show_settings_hotkeys_tab,
             on_re_translate=self._on_quick_translate_retranslate,
-            on_custom_prompt_send=self._on_quick_translate_custom_prompt_send
+            on_custom_prompt_send=self._on_quick_translate_custom_prompt_send,
+            on_choose_source=self._on_quick_translate_choose_source
         )
 
         # Screenshot handler
@@ -192,7 +193,7 @@ class TranslatorApp:
         self.dictionary_popup.configure_callbacks(
             on_show_settings_tab=self._show_settings_tab,
             get_selected_language=lambda: self.selected_language,
-            get_popup=lambda: self.popup
+            on_source_chosen=self._on_source_chosen
         )
 
         # Tray manager
@@ -336,7 +337,8 @@ class TranslatorApp:
 
     def show_quick_translate(self, original: str, translated: str, target_lang: str,
                              trial_info: dict = None, furigana_text: str = None,
-                             is_grammar: bool = False, model_info: str = None):
+                             is_grammar: bool = False, model_info: str = None,
+                             source_lang: str = None):
         """Show compact popup near mouse cursor with translation result.
 
         Args:
@@ -350,9 +352,14 @@ class TranslatorApp:
                 Defaults to whoever served the result that just arrived, which is what
                 every caller wants - the screenshot handler and the translation queue both
                 reach this method after the service has recorded it.
+            source_lang: The language settled for `original`. Defaults to the verdict
+                the service holds for exactly that text (J4) - read here, like the
+                credit, rather than carried through the queue.
         """
         if model_info is None:
             model_info = self.translation_service.last_attribution
+        if source_lang is None:
+            source_lang = self.translation_service.source_verdict(original)
 
         self.current_original = original
         self.current_translated = translated
@@ -365,7 +372,7 @@ class TranslatorApp:
 
         self.quick_translate_manager.show(translated, target_lang, trial_info, original,
                                           furigana_text=furigana_text, is_grammar=is_grammar,
-                                          model_info=model_info)
+                                          model_info=model_info, source_lang=source_lang)
 
     def close_quick_translate(self):
         """Close the quick translate popup."""
@@ -397,6 +404,29 @@ class TranslatorApp:
 
         def worker():
             self.translation_service.redo_translation(text, target_lang)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_quick_translate_choose_source(self, language: str):
+        """The popup's Japanese / Chinese row: translate again, with the answer stated.
+
+        Asked (nobody placed the text) or changed (a model placed a term, K4),
+        the translation may carry the other language's sense; the answer goes to
+        the model and is the text's verdict (J6, Decision 27) - kept before the
+        request, so a failed or custom re-translation still keeps it, and on
+        History's older entries too, over a model's (Decision 28).
+        """
+        text = self.current_original
+        target_lang = self.current_target_lang
+        if not text:
+            return
+        logging.info(f"[LangID] user chose source={language} chars={len(text)}")
+        self.translation_service.remember_user_source(text, language)
+        self.quick_translate_manager.show_loading(target_lang)
+
+        def worker():
+            self.translation_service.redo_translation(text, target_lang,
+                                                      source_language=language)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -488,45 +518,14 @@ class TranslatorApp:
         # Clear pending screenshot (will be managed by AttachmentArea now)
         self.screenshot_handler.clear_pending_screenshot()
 
-    def _on_quick_translate_dictionary_lookup(self, words: list, target_lang: str):
-        """Handle dictionary lookup from quick translate popup.
+    def _on_quick_translate_open_dictionary(self, text: str, target_lang: str,
+                                            anchor: Optional[tk.Misc] = None):
+        """The popup's Dictionary button: the main window's flow, beside the popup.
 
-        Uses batch lookup (single API call) for efficiency.
+        One Dictionary-mode implementation serves both buttons (DEFERRED D13);
+        the popup only says what to analyse, into which language, and where.
         """
-        if not words:
-            return
-
-        # Filter out punctuation, symbols, and special characters
-        filtered_words = filter_dictionary_words(words)
-        if not filtered_words:
-            self.toast.show_info("No valid words to look up (only punctuation/symbols)")
-            return
-
-        display_text = ", ".join(filtered_words[:3]) + ("..." if len(filtered_words) > 3 else "")
-        self.toast.show_info(f"Looking up {len(filtered_words)} word(s): {display_text}")
-
-        def do_lookup():
-            try:
-                # Single API call for all words (optimized batch lookup)
-                result = self.translation_service.dictionary_lookup(filtered_words, target_lang)
-                # Get trial info after API call (quota may have changed)
-                trial_info = self.translation_service.get_trial_info()
-                # Show result in a new popup at mouse position (pass words for highlighting)
-                self.root.after(0, lambda: self._show_quick_translate_dictionary_result(result, target_lang, trial_info, filtered_words))
-            except Exception as e:
-                # Stop animation on error
-                self.root.after(0, lambda: self.quick_translate_manager.stop_dictionary_animation())
-                self.root.after(0, lambda: self.toast.show_error(f"Lookup failed: {str(e)}"))
-
-        import threading
-        threading.Thread(target=do_lookup, daemon=True).start()
-
-    def _show_quick_translate_dictionary_result(self, result: str, target_lang: str, trial_info: dict = None,
-                                               looked_up_words: list = None):
-        """Show dictionary result in a SEPARATE window (not replacing quick translate)."""
-        # Create a new SEPARATE dictionary result window
-        self.quick_translate_manager.capture_mouse_position()
-        self.quick_translate_manager.show_dictionary_result(result, target_lang, trial_info, looked_up_words)
+        self.dictionary_popup.open_from_text(text, target_language=target_lang, anchor=anchor)
 
     def on_second_instance(self):
         """Another CrossTrans was launched: raise this one instead of starting it.
@@ -790,6 +789,13 @@ class TranslatorApp:
 
         ttk.Label(original_header, text="Original:", font=('Segoe UI', 10)).pack(side=LEFT)
 
+        # The Japanese / Chinese row for kanji-only input (K5), packed after the
+        # label by _refresh_source_row() when there is something to say
+        self._source_row = ttk.Frame(original_header)
+        self._source_row_state = None
+        # A translation handed over with the text (Open Translator) is of exactly it
+        self._translated_input = (original or '').strip() if translated else None
+
         # Dictionary button - opens popup with word buttons for original text
         # Use tk.Button for consistent reddish-brown color
         self.dict_btn = tk.Button(
@@ -992,8 +998,14 @@ class TranslatorApp:
         if hasattr(self, 'translate_btn'):
             self.translate_btn.configure(text=f"Translate → {self.selected_language}")
 
-    def _do_retranslate(self):
-        """Perform translation from popup."""
+    def _do_retranslate(self, source_language: Optional[str] = None):
+        """Perform translation from popup.
+
+        Args:
+            source_language: The Japanese / Chinese answer from the row beside
+                "Original:" (K5): stated to the model, and the cache skipped -
+                it holds the translation the answer is correcting.
+        """
         original = self.original_text.get('1.0', tk.END).strip()
 
         # Check for attachments
@@ -1021,6 +1033,7 @@ class TranslatorApp:
         def translate_thread():
             translated = ""
             extracted_original = ""
+            source_text = None
 
             if has_attachments:
                 # Collect all attachments for single API call
@@ -1149,10 +1162,13 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
             else:
                 # Standard text translation (no attachments)
                 translated = self.translation_service.translate_text(
-                    original, self.selected_language, custom_prompt)
+                    original, self.selected_language, custom_prompt,
+                    skip_cache=bool(source_language), source_language=source_language)
+                source_text = original
 
             if self.popup:
-                self.popup.after(0, lambda: self._update_translation_with_original(translated, extracted_original))
+                self.popup.after(0, lambda: self._update_translation_with_original(
+                    translated, extracted_original, source_text=source_text))
 
         threading.Thread(target=translate_thread, daemon=True).start()
 
@@ -1184,11 +1200,13 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
     def _update_grammar_result(self, corrected: str):
         """Write the grammar-fix result into the output box and reset the button."""
         try:
-            # No language hint: a grammar fix keeps the source language, which
-            # is auto-detected and not known here. Japanese with kana still
-            # annotates on its own evidence.
+            # A grammar fix keeps the source language: Japanese when the input's
+            # characters or its verdict say so (J7), else no hint - kanji-only
+            # output then stays plain rather than guessed at.
+            source = self._input_source()
             self.trans_text.clear()
             insert_output(self.trans_text, tk.END, corrected,
+                          lang_hint=lang_id.JAPANESE if source == lang_id.JAPANESE else None,
                           enabled=self._ruby_enabled())
         except tk.TclError:
             return  # Popup closed mid-flight
@@ -1215,10 +1233,19 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         except Exception:
             self.popup.title("CrossTrans")
 
-    def _update_translation_with_original(self, translated: str, extracted_original: str = ""):
-        """Update translation result and optionally the original text in popup."""
+    def _update_translation_with_original(self, translated: str, extracted_original: str = "",
+                                          source_text: Optional[str] = None):
+        """Update translation result and optionally the original text in popup.
+
+        Args:
+            source_text: The text that was translated, when it was the input box's
+                own text - what the Japanese / Chinese row asks about (K5).
+        """
         # Stop animation
         self._stop_translate_animation()
+
+        if source_text is not None and not is_error_text(translated):
+            self._translated_input = source_text
 
         # Update original text box if extracted_original is provided
         if extracted_original:
@@ -1228,13 +1255,20 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         # Update translation text box (RubyText restores the disabled state)
         self.trans_text.clear()
         insert_output(self.trans_text, tk.END, translated,
-                      lang_hint=self.selected_language,
+                      lang_hint=lang_id.output_hint(self._input_source(),
+                                                    self.selected_language),
                       enabled=self._ruby_enabled())
         self.translate_btn.configure(text=f"Translate → {self.selected_language}",
                                      state='normal')
 
         # Update title with trial info after each translation
         self._update_popup_title_with_trial()
+
+        # The translation may have brought a verdict for the input (J4): the
+        # Reading pane can read kanji-only Japanese now, and the language row
+        # (K5) can say what the model made of it.
+        if self._reading_pane_alive():
+            self._schedule_reading_refresh(delay_ms=1)
 
     def _start_translate_animation(self):
         """Start the translation button animation (dots + pulse)."""
@@ -1312,6 +1346,7 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
             parent: Frame to pack into
             translated: Text to display
             target_lang: Target language, the authoritative annotation hint
+                (with the input's settled language, `lang_id.output_hint`)
         """
         self.trans_text = RubyText(parent, height=10, wrap=tk.WORD,
                                    bg='#2b2b2b', base_fg='#ffffff',
@@ -1320,10 +1355,21 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
                                    spacing1=0, spacing3=0, cursor='xterm',
                                    padx=10, pady=10)
         insert_output(self.trans_text, '1.0', translated,
-                      lang_hint=target_lang, enabled=self._ruby_enabled())
+                      lang_hint=lang_id.output_hint(self._input_source(), target_lang),
+                      enabled=self._ruby_enabled())
         self.trans_text.config(state='disabled')  # Make read-only
         self.trans_text.pack(fill=BOTH, expand=True, pady=(5, 0))
         return self.trans_text
+
+    def _input_source(self) -> Optional[str]:
+        """The input box's language as far as it is settled: its characters,
+        else the verdict a model (or the user) gave when exactly this text was
+        translated - `TranslationService.source_language()`. No request, ever."""
+        try:
+            text = self.original_text.get('1.0', 'end-1c')
+        except tk.TclError:
+            return None
+        return self.translation_service.source_language(text)
 
     def _ruby_enabled(self) -> bool:
         """Whether result text should carry furigana (Settings toggle).
@@ -1409,6 +1455,9 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         self._reading_pane_job = None
         if not self._reading_pane_alive():
             return
+        # The language row describes the same input, and must not wait on the
+        # furigana toggle or the pane's collapse state below.
+        self._refresh_source_row()
 
         # The Settings toggle is read here, not cached, so switching furigana
         # off takes effect on the next edit like every other surface.
@@ -1425,10 +1474,13 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         if available <= 1:
             available = max(200, self.original_text.winfo_width() - 30)
 
-        # No lang_hint: the source language is unknown, so kanji-only text
-        # stays plain rather than being guessed at (it reads as Chinese).
-        if len(text) <= MAX_ANNOTATE_CHARS and furigana.should_annotate(text):
-            self._reading_text.set_ruby(text)
+        # The hint is the input's settled language: its own evidence, else the
+        # verdict from translating exactly this text (J7). Typing never sends a
+        # request and this pane never opens a window, so kanji-only text that
+        # nobody has placed stays plain rather than being guessed at.
+        hint = lang_id.JAPANESE if self._input_source() == lang_id.JAPANESE else None
+        if len(text) <= MAX_ANNOTATE_CHARS and furigana.should_annotate(text, hint):
+            self._reading_text.set_ruby(text, hint)
         else:
             # Mirroring unannotatable text would just duplicate the box above.
             self._reading_text.set_plain(READING_PANE_PLACEHOLDER,
@@ -1473,7 +1525,8 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         # get_plain(): get() would hand over text with every annotated word
         # deleted, so the expanded window would show a broken sentence.
         translated = self.trans_text.get_plain().strip()
-        self.expanded_window.show(translated, self.selected_language)
+        self.expanded_window.show(translated, self.selected_language,
+                                  source_language=self._input_source())
 
     def _copy_translation(self):
         """Copy translation to clipboard."""
@@ -1495,7 +1548,63 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
     def _open_dictionary_popup(self):
         """Open dictionary popup window with word buttons for original text."""
         original = self.original_text.get('1.0', tk.END).strip()
-        self.dictionary_popup.open_from_text(original, self.popup)
+        self.dictionary_popup.open_from_text(original)
+
+    def _refresh_source_row(self):
+        """The main window's Japanese / Chinese row, beside "Original:" (K5).
+
+        The popup's rule (`source_marker.source_row`, Decision 29) applied to the
+        input box: ask once a translation of exactly this text came back without
+        a verdict; offer the other language for a term a model or the user
+        placed. Untranslated, unplaced kanji ask nothing - typing is not a
+        question. Shown with furigana off too: the answer changes the meaning.
+        """
+        row = getattr(self, '_source_row', None)
+        try:
+            if row is None or not row.winfo_exists():
+                return
+            text = self.original_text.get('1.0', 'end-1c').strip()
+        except tk.TclError:
+            return
+        verdict = self.translation_service.source_verdict(text) if text else None
+        mode = source_row(text, verdict)
+        if mode == ROW_ASK and text != getattr(self, '_translated_input', None):
+            mode = None
+        state = (mode, lang_id.normalize_language(verdict) if mode == ROW_CHANGE else None)
+        if state == getattr(self, '_source_row_state', None):
+            return
+        self._source_row_state = state
+        for child in row.winfo_children():
+            child.destroy()
+        if mode:
+            fill_source_row(row, mode, verdict, self._choose_input_source)
+            row.pack(side=LEFT, padx=(12, 0))
+        else:
+            row.pack_forget()
+
+    def _choose_input_source(self, language: str):
+        """An answer from the main window's row (K5): kept as the input's verdict,
+        then the input is translated again with it stated - the popup's rule
+        (Decision 27). Ignored while a translation is running."""
+        text = self.original_text.get('1.0', tk.END).strip()
+        if not text:
+            return
+        try:
+            if str(self.translate_btn.cget('state')) == 'disabled':
+                return
+        except (tk.TclError, AttributeError):
+            return
+        logging.info(f"[LangID] user chose source={language} chars={len(text)} "
+                     f"via=main-window")
+        self.translation_service.remember_user_source(text, language)
+        self._schedule_reading_refresh(delay_ms=1)
+        self._do_retranslate(source_language=language)
+
+    def _on_source_chosen(self, text: str):
+        """The user said which language a text's kanji are (the Dictionary's
+        dialog, K3): the Reading pane reads the input again if it is that text."""
+        if self._reading_pane_alive():
+            self._schedule_reading_refresh(delay_ms=1)
 
     def _show_settings_hotkeys_tab(self):
         """Open settings window at Hotkeys tab.
@@ -1503,25 +1612,6 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         Used by popup gear icon to quickly access Replace mode toggle.
         """
         self._show_settings_tab("Hotkeys")
-
-    def _show_settings_dictionary_tab(self):
-        """Open settings window and navigate directly to Dictionary tab.
-
-        Used by popup "Install now" link to open Dictionary tab directly.
-        """
-        self.show_settings()
-        # Use multiple attempts with increasing delays to ensure window is ready
-        def try_open_tab(attempts=3):
-            if attempts <= 0:
-                return
-            if self.settings_window and hasattr(self.settings_window, 'open_dictionary_tab'):
-                self.settings_window.open_dictionary_tab()
-                # Focus the settings window after opening tab
-                self._focus_settings_window()
-            else:
-                # Retry with longer delay
-                self.root.after(200, lambda: try_open_tab(attempts - 1))
-        self.root.after(100, try_open_tab)
 
     def _focus_settings_window(self):
         """Bring Settings window to front and focus it."""
@@ -1538,17 +1628,11 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
             except tk.TclError:
                 pass  # Window destroyed
 
-    def _open_settings_dictionary_tab(self):
-        """Switch to Dictionary tab in already-open settings window."""
-        if self.settings_window and hasattr(self.settings_window, 'open_dictionary_tab'):
-            self.settings_window.open_dictionary_tab()
-            # Re-focus window after switching tab
-            self._focus_settings_window()
-
     def _open_history(self):
         """Open history dialog."""
         if self.popup:
-            HistoryDialog(self.popup, self.translation_service.history_manager, self._load_history_item)
+            HistoryDialog(self.popup, self.translation_service.history_manager, self._load_history_item,
+                          furigana_enabled=self._ruby_enabled())
 
     def _load_history_item(self, item):
         """Load a history item into the translator."""

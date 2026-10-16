@@ -123,11 +123,18 @@ CrossTrans is designed for people who work across multiple platforms and need in
 
 ### Furigana (Japanese Reading Guides)
 - **Hiragana above kanji, everywhere Japanese appears** — the quick-translate popup (both the
-  original text *and* the translation), the main window, the expanded view, the dictionary
-  result, and the clickable word chips in Dictionary mode. Translating *into* Japanese shows
-  readings too, not just translating out of it.
+  original text *and* the translation), screenshot translations, the main window, the expanded
+  view, the dictionary result, the clickable word chips in Dictionary mode, and the History
+  list. Translating *into* Japanese shows readings too, not just translating out of it.
+- **Kanji-only text: Japanese or Chinese?** — 勉強 or 東京大学 are written the same way in both
+  languages. CrossTrans settles it from the characters when it can (kana, or a character only
+  one of the two languages uses), and otherwise asks the AI model to name the language while it
+  translates. When the model cannot tell, the popup asks "Kanji-only text - read it as:
+  Japanese / Chinese" and translates again with your answer. Chinese is never given Japanese
+  readings.
 - **Reading pane** — the main window's input box gets a collapsible read-only pane underneath
-  showing the readings for whatever you type or paste, so the box you edit stays plain text
+  showing the readings for whatever you type or paste, so the box you edit stays plain text.
+  Kanji-only input gets its readings once you have translated it
 - **Offline processing** — no extra API call, no added latency. Readings come from fugashi/UniDic
   when the Japanese language pack is installed (Settings → Dictionary), which reads homographs
   correctly in context — 今日 as きょう, not こんにち — and from the bundled pykakasi otherwise
@@ -139,6 +146,10 @@ CrossTrans is designed for people who work across multiple platforms and need in
 ### Dictionary Mode
 - Click **Dictionary** button in popup to enter word selection mode
 - Click any word for detailed lookup: translation, definition, word type, pronunciation, synonyms, antonyms, examples
+- **Knows its languages** — the lookup is told which language the word is from and into, and sees
+  the sentence it came from, so a Japanese 汽車 is a steam train, not the Chinese "car".
+  Japanese pronunciation comes in hiragana, Chinese in pinyin, and Japanese → Japanese gives a
+  monolingual entry. Kanji-only text opens in the language its translation settled, or asks you
 - Smart word filtering across all languages (Latin, CJK, Cyrillic, Arabic, Thai, Korean)
 - **Language packs**: Go to Settings → Dictionary tab to install. Python 3.10+ must be on your system PATH for language pack downloads (the EXE itself does not require Python).
 

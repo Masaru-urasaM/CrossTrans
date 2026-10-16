@@ -129,12 +129,31 @@ class AIAPIManager:
         self.health_manager = health_manager
         self.model_rotation_enabled = model_rotation_enabled
 
+    @staticmethod
+    def _claimant_for_key(claimants: List[str], key: str) -> str:
+        """Which of the providers that list the same model a key belongs to (D12).
+
+        The provider whose key prefix the key carries; else the first that has no
+        known prefix - one whose prefix the key lacks is not its provider (a key
+        that is not csk-... is not a Cerebras key, so gpt-oss-120b goes to
+        SambaNova, whose keys are bare UUIDs); else the first, as before.
+        """
+        prefixes: Dict[str, List[str]] = {}
+        for prefix, provider in get_config().api_key_patterns.items():
+            prefixes.setdefault(provider, []).append(prefix)
+        for provider in claimants:
+            if any(key.startswith(prefix) for prefix in prefixes.get(provider, ())):
+                return provider
+        unexcluded = [provider for provider in claimants if provider not in prefixes]
+        return unexcluded[0] if unexcluded else claimants[0]
+
     def _identify_provider(self, model_name: str, api_key: str = "") -> str:  # noqa: C901
         """
         Identify API provider based on model name and API key format.
 
         Priority:
-        1. Exact match in MODEL_PROVIDER_MAP (case-insensitive)
+        1. Exact match in MODEL_PROVIDER_MAP (case-insensitive); between providers
+           that list the same model, the one the key belongs to (D12)
         2. Explicit provider prefix (openrouter/, together/, etc.)
         3. API key pattern (gsk_, sk-ant-, etc.)
         4. Model name pattern matching
@@ -144,11 +163,14 @@ class AIAPIManager:
         model_lower = model.lower()
         key = api_key.strip()
 
-        # 1. HIGHEST PRIORITY: Exact match in model_provider_map
-        for provider, models in get_config().model_provider_map.items():
-            for m in models:
-                if m.lower() == model_lower:
-                    return provider
+        # 1. HIGHEST PRIORITY: Exact match in model_provider_map. The same open
+        #    model is served by several providers (D12): then the key decides.
+        claimants = [provider for provider, models in get_config().model_provider_map.items()
+                     if any(m.lower() == model_lower for m in models)]
+        if claimants:
+            if len(claimants) > 1 and key:
+                return self._claimant_for_key(claimants, key)
+            return claimants[0]
 
         # 2. Check for explicit provider prefixes
         if model_lower.startswith('openrouter/'): return 'OpenRouter'

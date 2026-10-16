@@ -12,16 +12,19 @@ Skipped automatically when no display is available (see the `tk_root` fixture).
 """
 import time
 import tkinter as tk
+from unittest.mock import MagicMock
 
 import pytest
 
 import src.core  # noqa: F401  (must precede `config`: see project CLAUDE.md)
 from src.app import (
+    READING_PANE_DEBOUNCE_MS,
     READING_PANE_PLACEHOLDER,
     READING_PANE_PLACEHOLDER_TAG,
     TranslatorApp,
 )
 from src.core import furigana as F
+from src.core.translation import TranslationService
 from src.ui.ruby_text import MAX_ANNOTATE_CHARS, RubyText
 
 HAS_PROVIDER = pytest.mark.skipif(
@@ -68,12 +71,13 @@ def frame(tk_root):
     holder.destroy()
 
 
-def build(tk_root, frame, config, text=""):
+def build(tk_root, frame, config, text="", verdicts=None):
     """Build an app with just the input box and its Reading pane."""
     app = TranslatorApp.__new__(TranslatorApp)
     app.root = tk_root
     app.popup = tk_root          # the pane schedules its refresh on the popup
     app.config = config
+    app.translation_service = make_service(verdicts)
 
     app.original_text = tk.Text(frame, height=6, wrap=tk.WORD, undo=True,
                                 maxundo=-1)
@@ -83,6 +87,21 @@ def build(tk_root, frame, config, text=""):
     app._create_reading_pane(frame)
     tk_root.update_idletasks()
     return app
+
+
+def make_service(verdicts=None):
+    """A real TranslationService with nothing but its verdict memory (J7).
+
+    The main window reads the input's settled language through
+    `source_language()`; real code, so the tests cover it, with `verdicts` as
+    the texts a model has placed this session.
+    """
+    service = TranslationService.__new__(TranslationService)
+    service.history_manager = MagicMock()
+    service.history_manager.find_source_verdict.return_value = None
+    for text, verdict in (verdicts or {}).items():
+        service._remember_source_verdict(text, verdict)
+    return service
 
 
 def refresh(app, text=None):
@@ -304,3 +323,59 @@ class TestToggle:
         tk_root.update_idletasks()
         # Nothing was inserted, so no annotation work happened either.
         assert app._reading_text.get_plain() == ""
+
+
+# --------------------------------------------------------------------------- #
+# J7 - kanji-only input is read once a model has placed it
+# --------------------------------------------------------------------------- #
+class TestVerdicts:
+    def test_unplaced_kanji_shows_the_placeholder(self, tk_root, frame):
+        pane = refresh(build(tk_root, frame, FakeConfig(), "東京大学"))
+        assert pane.get_plain() == READING_PANE_PLACEHOLDER
+
+    @HAS_PROVIDER
+    def test_kanji_the_model_called_japanese_is_read(self, tk_root, frame):
+        app = build(tk_root, frame, FakeConfig(), "東京大学",
+                    verdicts={"東京大学": "Japanese"})
+        pane = refresh(app)
+        assert pane.has_ruby is True
+        assert pane.get_plain() == "東京大学"
+
+    @HAS_PROVIDER
+    def test_whitespace_around_the_input_still_finds_the_verdict(self, tk_root, frame):
+        # The translation is keyed on the stripped text; the box keeps its newline.
+        app = build(tk_root, frame, FakeConfig(), "東京大学\n", verdicts={"東京大学": "Japanese"})
+        assert refresh(app).has_ruby is True
+
+    def test_a_chinese_verdict_stays_plain(self, tk_root, frame):
+        app = build(tk_root, frame, FakeConfig(), "東京大学",
+                    verdicts={"東京大学": "Chinese (Simplified)"})
+        assert refresh(app).get_plain() == READING_PANE_PLACEHOLDER
+
+    def test_a_chinese_glyph_beats_a_japanese_verdict(self, tk_root, frame):
+        app = build(tk_root, frame, FakeConfig(), "我们", verdicts={"我们": "Japanese"})
+        assert refresh(app).get_plain() == READING_PANE_PLACEHOLDER
+
+    @HAS_PROVIDER
+    def test_a_finished_translation_refreshes_the_pane(self, tk_root, frame):
+        app = build(tk_root, frame, FakeConfig(), "東京大学")
+        assert refresh(app).get_plain() == READING_PANE_PLACEHOLDER
+        # Let every refresh already scheduled (construction, <<Modified>>) run
+        # out, so only the one the finished translation asks for can follow.
+        deadline = time.time() + (READING_PANE_DEBOUNCE_MS + 200) / 1000
+        while time.time() < deadline:
+            tk_root.update()
+            time.sleep(0.01)
+        assert app._reading_pane_job is None
+        app.trans_text = RubyText(frame)
+        app.selected_language = "English"
+        app.translate_btn = MagicMock()
+        app._stop_translate_animation = lambda: None
+        app._update_popup_title_with_trial = lambda: None
+        app.translation_service._remember_source_verdict("東京大学", "Japanese")
+        app._update_translation_with_original("The University of Tokyo")
+        deadline = time.time() + 1
+        while time.time() < deadline and not app._reading_text.has_ruby:
+            tk_root.update()
+            time.sleep(0.01)
+        assert app._reading_text.has_ruby is True

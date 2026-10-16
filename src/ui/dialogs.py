@@ -17,6 +17,21 @@ except ImportError:
     HAS_TTKBOOTSTRAP = False
 
 
+def _raise_without_grab(window):
+    """Bring a dialog to the front with topmost + lift + focus_force (D16).
+
+    Never grab_set() or transient(): every dialog here hangs off the app's root,
+    which is withdrawn. Tk withdraws a transient window whose master is withdrawn,
+    and a grab then holds every input of the app for a window nobody can see
+    (CLAUDE.md Known Issues). Even a mapped dialog's grab locks the popup and the
+    main window while it waits behind another application.
+    """
+    window.attributes('-topmost', True)
+    window.lift()
+    window.focus_force()
+    window.after(100, lambda: window.attributes('-topmost', False) if window.winfo_exists() else None)
+
+
 class APIErrorDialog:
     """Professional error dialog for API key issues."""
 
@@ -37,7 +52,6 @@ class APIErrorDialog:
         self.window.title("API Key Error - CrossTrans")
         self.window.geometry("500x400")
         self.window.resizable(False, False)
-        self.window.grab_set()
 
         # Center
         self.window.update_idletasks()
@@ -46,6 +60,7 @@ class APIErrorDialog:
         self.window.geometry(f"+{x}+{y}")
 
         self._create_widgets(error_message)
+        _raise_without_grab(self.window)
 
     def _create_widgets(self, error_message: str):
         """Create error dialog UI."""
@@ -135,7 +150,6 @@ class TrialExhaustedDialog:
         self.window.title("Trial Quota Exhausted - CrossTrans")
         self.window.geometry("500x350")
         self.window.resizable(False, False)
-        self.window.grab_set()
 
         # Center
         self.window.update_idletasks()
@@ -144,6 +158,7 @@ class TrialExhaustedDialog:
         self.window.geometry(f"+{x}+{y}")
 
         self._create_widgets()
+        _raise_without_grab(self.window)
 
     def _create_widgets(self):
         """Create dialog UI."""
@@ -227,7 +242,6 @@ class TrialFeatureDialog:
         self.window.title("Feature Not Available - CrossTrans")
         self.window.geometry("480x360")
         self.window.resizable(False, False)
-        self.window.grab_set()
 
         # Center
         self.window.update_idletasks()
@@ -236,6 +250,7 @@ class TrialFeatureDialog:
         self.window.geometry(f"+{x}+{y}")
 
         self._create_widgets(feature_name)
+        _raise_without_grab(self.window)
 
     def _create_widgets(self, feature_name: str):
         """Create dialog UI."""
@@ -328,10 +343,6 @@ class UpdateFailedDialog:
         self.window.title("Update Failed - CrossTrans")
         self.window.geometry("500x380")
         self.window.resizable(False, False)
-        self.window.grab_set()
-
-        # Make modal
-        self.window.transient(parent)
 
         # Center
         self.window.update_idletasks()
@@ -340,8 +351,10 @@ class UpdateFailedDialog:
         self.window.geometry(f"+{x}+{y}")
 
         self._create_update_failed_widgets(error_msg)
+        _raise_without_grab(self.window)
 
-        # Wait for dialog to close
+        # Wait for dialog to close - safe only because the window is mapped: with
+        # transient() on the withdrawn root it never was, and this waited forever (D16)
         self.window.wait_window()
 
     def _create_update_failed_widgets(self, error_msg: str):

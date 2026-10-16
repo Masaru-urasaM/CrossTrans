@@ -16,7 +16,11 @@ Two checks, because they fail for different reasons:
 
   --exe P   after building: did the data file actually reach the archive?
             Catches a spec that lost the `collect_data_files('pykakasi')` entry
-            and any bundling failure PyInstaller only warned about.
+            and any bundling failure PyInstaller only warned about. It also
+            checks the four codecs Japanese-vs-Chinese glyph evidence is read
+            from (K11): without one, `lang_id` turns that evidence off, kanji
+            that prove a language prove nothing, and the only sign is the line
+            "[LangID] glyph evidence disabled" in the EXE's log.
 
 The post-build check reads PyInstaller's own archive TOC rather than searching
 the binary for a filename, so it cannot be fooled by the name appearing in some
@@ -37,6 +41,14 @@ DATA_FILE = 'kanwadict4.db'
 # Where it lands inside the archive. PyInstaller writes TOC names with the host
 # separator, so compare on a normalized form.
 BUNDLED_PATH = 'pykakasi/data/kanwadict4.db'
+
+
+# The codecs `lang_id.GLYPH_CODECS` names. Their C halves are built into
+# python3XX.dll on Windows; these pure-Python wrappers are bundled only through
+# CrossTrans.spec's hiddenimports - nothing imports them by name - and they land
+# in base_library.zip with the rest of the `encodings` package, not in the PYZ.
+CODEC_MODULES = ('encodings.euc_jis_2004', 'encodings.cp932', 'encodings.gb2312',
+                 'encodings.big5hkscs')
 
 
 def _normalize(path: str) -> str:
@@ -81,6 +93,51 @@ def archive_names(exe_path):
     return list(toc) if isinstance(toc, dict) else [entry[-1] for entry in toc]
 
 
+def bundled_module_names(exe_path):
+    """Module names in the EXE: its PYZ archives, and base_library.zip - where
+    PyInstaller puts what Python needs to start, the `encodings` package among
+    it. Reading the PYZ alone called every good build's codecs missing."""
+    import io
+    import zipfile
+    from PyInstaller.archive.readers import CArchiveReader
+    reader = CArchiveReader(exe_path)
+    names = set()
+    for name in archive_names(exe_path):
+        lowered = str(name).lower()
+        if lowered.endswith('.pyz'):
+            toc = reader.open_embedded_archive(name).toc
+            names.update(toc if isinstance(toc, dict) else [entry[0] for entry in toc])
+        elif lowered.endswith('base_library.zip'):
+            with zipfile.ZipFile(io.BytesIO(reader.extract(name))) as library:
+                for entry in library.namelist():
+                    if entry.endswith('.pyc'):
+                        module = entry[:-len('.pyc')].replace('/', '.')
+                        if module.endswith('.__init__'):
+                            module = module[:-len('.__init__')]
+                        names.add(module)
+    return names
+
+
+def check_codecs(exe_path):
+    """Check a built EXE carries the glyph-evidence codecs.
+
+    Returns:
+        (ok, message)
+    """
+    if not os.path.isfile(exe_path):
+        return False, f"no such file: {exe_path}"
+    try:
+        names = bundled_module_names(exe_path)
+    except Exception as e:
+        return False, f"could not read the PyInstaller archive in {exe_path}: {e}"
+    missing = [module for module in CODEC_MODULES if module not in names]
+    if missing:
+        return False, (f"{', '.join(missing)} MISSING from {exe_path}. Kanji-only text "
+                       f"would never be settled by its glyphs. Check hiddenimports in "
+                       f"CrossTrans.spec")
+    return True, f"the {len(CODEC_MODULES)} glyph-evidence codecs are bundled"
+
+
 def check_exe(exe_path):
     """Check a built EXE actually carries the reading dictionary.
 
@@ -123,6 +180,9 @@ def main(argv=None):
     if args.exe:
         passed, message = check_exe(args.exe)
         print(f"[furigana bundle] exe:    {'OK' if passed else 'FAILED'} - {message}")
+        ok = ok and passed
+        passed, message = check_codecs(args.exe)
+        print(f"[furigana bundle] codecs: {'OK' if passed else 'FAILED'} - {message}")
         ok = ok and passed
     return 0 if ok else 1
 

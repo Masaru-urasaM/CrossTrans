@@ -5,6 +5,132 @@
 
 ---
 
+## K — Follow-ups to the language-identity work, then quiet tests — ✅ Done (2026-10-16) [unreleased, branch `feature/japanese-language-identity`]
+
+**Goal (user, 2026-10-16):** do all fifteen items proposed after J12 - the suite on a clean machine,
+the EXE and D16 before a release (items 1-3), the new feature's gaps (4-8), History and the old
+deferred items (9-11), AGENTS.md (12), tooling (13-15). Midway the user reported that the test runs
+threw windows over the screen and interrupted other work, and that the translation quota was used
+up: K12.
+
+| Phase | What | Commit | Tests |
+|---|---|---|---|
+| K1 | The suite on a clean venv (requirements only): 5 word-chip failures fixed; D19 found | `c00d284` | 1183 -> 1184 |
+| K2 | D16: the failed-update dialog no longer freezes the app | `ffea35b` | 1202 |
+| K3 | The Dictionary keeps the user's "Japanese or Chinese?" answer (Decision 28) | `2429741` | 1232 |
+| K4 | A term a model placed can be read as the other language (Decision 29) | `6927a23` | 1264 |
+| K5 | The main window's own Japanese / Chinese row | `41aeeac` | 1279 |
+| K6 | A Chinese sentence is known by its function words (Decision 30) | `2ee5ee4` | 1315 |
+| K7 | History: lines cut to the row in pixels, the first rows at once (D17) | `f4c178a` | 1331 |
+| K8 | D18 removed; D12 fixed - the key decides (Decision 31); D11 desk-checked | `efbc60b` | 1360 |
+| K9 | The mutation runner in tools/, the CI floor at 1350, eval repeats and phrases | `4eac224` | 1392 |
+| K10 | Real models: the trial model, phrases, screenshots (52 real calls) | `b5f6f92` | 1413 |
+| K11 | The EXE, built by hand (dist/ kept) and checked, the glyph codecs included | `e853854` | 1421 |
+| K12 | Quiet tests: a private desktop; no network, clipboard or keystrokes; the eval tools ask for the count (Decision 32) | `d6235cc` | 1502 |
+| K13 | Final check on a fresh clone, AGENTS.md regenerated, archive | this entry | 1502 |
+
+Items to phases: 1 -> K1 and K13, 2 -> K11, 3 -> K2, 4 -> K4, 5 -> K3, 6 -> K5, 7 -> K6, 8 -> K10,
+9 and 10 -> K7, 11 -> K8, 12 -> K13, 13-15 -> K9.
+
+**Checked, not assumed**: 110 mutations across K2-K12, all killed (`tools/mutation_check.py`). K12:
+no window of the test process on the user's desktop and no focus taken, in four full runs and every
+mutation run. K13: a fresh clone on a requirements-only venv - 1491 passed, 11 skipped (nine need
+fugashi + UniDic, one a built EXE, one the real clipboard), 0 failed.
+
+**Made without the user, then approved**: Decisions 28-32. The user asked for every item at once,
+and K12's options were built before the user chose between them; the user approved all five on
+2026-10-16.
+
+**Still the user's**: merging into `main`, pushing, the version (1.9.21 or 1.9.22) and the tag;
+D19's option (bundle unidic-lite, ~249 MB, or not); keys for D11's eight providers; deploying the
+Worker; and the manual checks:
+1. Popup, a term a model places: select 汽車 and press Win+Alt+E - a row "Kanji-only text - read as
+   Chinese. [Read as Japanese]"; the button re-translates it as Japanese, with readings.
+2. Popup, a Chinese sentence: 這是我的書。 - no row (its grammar settles it), translated as Chinese.
+3. Main window: type 汽車, Translate - the same row beside "Original:"; an answer re-translates, and
+   the Reading pane reads it once it is Japanese.
+4. Dictionary memory: main window, 手紙, Dictionary, answer "Japanese", close; Dictionary again -
+   no question.
+5. History: a long Japanese line ends in "..." at the row's edge; with 100 entries the window
+   opens at once.
+6. The failed-update dialog (D16): create `%TEMP%\crosstrans_update_error.txt` holding any text and
+   start the app - about a second later the "Update Failed" dialog appears in front, answers clicks,
+   and closes; the app is not frozen.
+7. The EXE (`dist\CrossTrans_v1.9.20_branch_2026-10-16.exe`): translate 東京大学, then
+   `%APPDATA%\CrossTrans\logs` holds no "[LangID] glyph evidence disabled".
+
+---
+
+## J — Japanese Language Identity: furigana on every Japanese surface, a Dictionary that knows its languages — ✅ Done (2026-10-15) [unreleased, branch `feature/japanese-language-identity`]
+
+**Goal (user, 2026-10-15):** show furigana wherever Japanese appears, the Dictionary included,
+and stop the Dictionary taking a Japanese word written only in kanji for Chinese - its prompt
+must know the language it translates *from* and *into*. Planned in `TODO.md` (deleted on
+completion; last version: `git show 5cc8736:TODO.md`).
+
+**The user's answers that shaped it** (Q1-Q10): the AI model decides what ambiguous kanji-only
+text is, the user settles what it cannot - **no Settings default** (Decision 22); translation
+prompts learn the source too (Q7); Japanese pronunciation in hiragana only, no romaji; the
+sentence is sent with a lookup (≤ 600 characters); Japanese -> Japanese is a monolingual entry
+with furigana; History rows in scope, toasts and the Replace preview's original not; screenshot
+OCR shown and stored; real API evaluation allowed; `h1-health-review` merged into `main` first.
+The two Dictionary-mode copies were then consolidated at the user's request (D13).
+
+| Phase | What | Commit | Tests |
+|---|---|---|---|
+| J0-J1 | Eval tool; the dictionary prompt states source -> target and sends the sentence | `7ce1034` | 676 -> 755 |
+| D13-D15 | One Dictionary mode for both buttons; failed lookups show their message; no `grab_set()` | `023a6b2` | 780 |
+| J2 | `lang_id`: Japanese vs Chinese from evidence only (Big5-HKSCS trap) | `bd95d96` | 903 |
+| J3 | The dictionary result reads the stated source and both languages of an entry | `4f2f84b` | 952 |
+| J4 | Translation prompts state the source or ask for a `[[SOURCE: ...]]` line | `e097658` | 1011 |
+| J5 | One detector; the Dictionary opens in the model's language or asks | `8c432b1` | 1071 |
+| J6 | Popup: source block, hints, "Japanese or Chinese?" row that re-translates | `b77c032` | 1118 |
+| J7 | Main window: Reading pane, output, grammar result, expanded view | `9710341` | 1132 |
+| J8 | Screenshot OCR shown with readings; History keeps the OCR text | `b76917a` | 1154 |
+| J9 | History rows carry readings (one canvas per line) | `5cc8736` | 1173 |
+| J12 | Final check (a stray marker reached the popup), docs, archive | this entry | 1183 |
+
+Every phase's tests were mutation-checked (revert the guarded line, see the suite fail,
+restore): 145 mutations (17 in J1, 128 since), all killed but one equivalent (J5). The final check re-ran every suite
+after finding that the runner could reuse a previous mutant's bytecode (same size, same second);
+the corrected runner deletes the module's `.pyc` and writes none.
+
+**Measured on real models** (Google gemini-2.5-flash, Groq gpt-oss-120b, trial llama-3.3-70b):
+Dictionary with the sentence and the source stated **10/10 Japanese** on all three (7/10 before);
+the translation marker **10/10** on Google and Groq, never leaked, Unknown 3-4 in ten. **Not
+measured live:** the screenshot section (needs a real capture) - unit-tested only.
+
+**Decisions:** 21 (state the source only when it is evidence; send the sentence), 22 (evidence,
+then the model, then the user), 23 (one Dictionary mode), 24 (Big5-HKSCS), 25 (the marker; cache
+not namespaced), 26 (no identification call - ask), 27 (the popup's answer re-translates).
+**26, 27 and 25's cache choice were made without the user** (asked to finish in one go) - each
+records why, and what to revisit.
+
+**Left over:** D16 (`UpdateFailedDialog` on the withdrawn root - the documented freeze trap),
+D17 (the History dialog takes ~1 s to open with 100 entries, before any readings), D18 (dead code).
+
+**Manual acceptance checklist** (run from source, Furigana ON; Dictionary rows need the Japanese
+language pack, row 8 also Chinese (Simplified)):
+
+| # | Do | Expect |
+|---|----|--------|
+| 1 | Select `勉強` in Notepad → Win+Alt+E | "Study" with 勉強[べんきょう] above it - or, when the model was unsure, a row "Kanji-only text - read it as: Japanese / Chinese": click Japanese → re-translated, readings shown |
+| 2 | Popup → Dictionary | Opens as Japanese, no dialog; the 勉強 chip shows べんきょう |
+| 3 | 勉強 → Dictionary Lookup | Title "Dictionary - Japanese → English"; `## [勉強]`, synonyms and examples with readings; Pronunciation in hiragana |
+| 4 | `友達に手紙を書きました。` → Win+Alt+E → Dictionary → 手紙 | "letter", never "toilet paper" |
+| 5 | `私は学生です。` → Win+Alt+E → Dictionary | No "Cannot detect language" dialog |
+| 6 | `study` → Win+Alt+J → Dictionary → study | 勉強 annotated; synonyms 学習, 研究 annotated |
+| 7 | `我们在学习中文。` → Win+Alt+E | No reading block, no chooser; Dictionary opens as Chinese |
+| 8 | Main window: type `東京大学` | Reading pane: placeholder. Press Translate → とうきょうだいがく (when the model said Japanese) |
+| 9 | Main window: type `大丈夫` → Dictionary without translating | "Kanji-only text: Japanese or Chinese?" with Japanese first |
+| 10 | Win+Alt+S over Japanese text | The OCR'd Japanese with readings above the translation; History shows the OCR text |
+| 11 | History | Japanese rows carry readings; clicking a reading loads the entry |
+| 12 | Settings → Furigana OFF | No readings anywhere; History rows plain |
+| 13 | Copy (button and Ctrl+C) from any annotated box | Plain text only |
+| 14 | `logs/translator_YYYYMMDD.log` | `[LangID]` and `[Dictionary]` lines carry counts and language names, never the text |
+
+---
+
 ## H1 — Health Review: the notice, the log, the vision strip — ✅ Done (2026-09-07) [unreleased]
 
 **Goal:** answer "is the project in good shape?" with measurements rather than documents, and fix

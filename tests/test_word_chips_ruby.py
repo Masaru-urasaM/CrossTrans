@@ -36,12 +36,41 @@ SEGMENTS = (RubySegment("取", "と"), RubySegment("り", None),
             RubySegment("消", "け"), RubySegment("し", None))
 PLAIN_SEGMENTS = (RubySegment("word", None),)
 
+# What the Japanese NLP pack (fugashi + UniDic) splits these sentences into,
+# recorded 2026-10-16. The word area is pinned to it so the chips are tested on
+# every machine: CI installs requirements.txt only, which has no Japanese pack,
+# and there the word area falls back to splitting on whitespace - one chip
+# holding the whole sentence, and five of these tests failed on a clean venv.
+# test_the_pinned_split_is_the_real_one checks the record wherever the pack is.
+JP_TOKENS = {
+    JP_SENTENCE: ["今日", "は", "日本", "語", "を", "勉強", "し", "ます", "。"],
+    JP_MULTI + "をします。": [JP_MULTI, "を", "し", "ます", "。"],
+}
+
 
 @pytest.fixture(autouse=True)
 def _clear_cache():
     F.clear_cache()
     yield
     F.clear_cache()
+
+
+@pytest.fixture(autouse=True)
+def _pinned_japanese_split(monkeypatch):
+    """The Japanese pack's split, pinned at the nlp_manager boundary."""
+    from src.core.nlp_manager import nlp_manager
+    real_installed, real_tokenize = nlp_manager.is_installed, nlp_manager.tokenize
+
+    def is_installed(language):
+        return language == "Japanese" or real_installed(language)
+
+    def tokenize(text, language):
+        if language == "Japanese" and text in JP_TOKENS:
+            return list(JP_TOKENS[text])
+        return real_tokenize(text, language)
+
+    monkeypatch.setattr(nlp_manager, 'is_installed', is_installed)
+    monkeypatch.setattr(nlp_manager, 'tokenize', tokenize)
 
 
 @pytest.fixture
@@ -205,6 +234,17 @@ class TestWordLabel:
 # The word area
 # --------------------------------------------------------------------------- #
 class TestWordArea:
+    def test_the_pinned_split_is_the_real_one(self, monkeypatch):
+        # The record above stands in for the Japanese pack; where the pack is
+        # installed, check the record still says what the pack says.
+        pytest.importorskip("fugashi", reason="requires the Japanese NLP pack")
+        monkeypatch.undo()
+        from src.core.nlp_manager import nlp_manager
+        if not nlp_manager.is_installed("Japanese"):
+            pytest.skip("requires the Japanese NLP pack (fugashi + unidic)")
+        for text, tokens in JP_TOKENS.items():
+            assert nlp_manager.tokenize(text, "Japanese") == tokens, text
+
     @HAS_PROVIDER
     def test_japanese_chips_are_annotated(self, make_frame):
         frame = make_frame()
@@ -213,8 +253,15 @@ class TestWordArea:
 
     @HAS_PROVIDER
     def test_reading_uses_the_sentence_not_the_chip(self, make_frame):
+        # The chip shows what the whole line reads, whichever provider reads it:
+        # fugashi gives きょう; pykakasi alone (CI, a fresh install) takes the
+        # line's 今日は for the greeting, こんにち, though 今日 alone is きょう.
+        # Which reading is right is the engine's test (TestReadingQuality).
         frame = make_frame()
-        assert chip(frame, "今日").row.readings[0].cget('text') == "きょう"
+        in_line = [seg.ruby for seg in F.annotate(JP_SENTENCE, "Japanese")
+                   if seg.base == "今日"]
+        assert in_line and in_line[0]
+        assert chip(frame, "今日").row.readings[0].cget('text') == in_line[0]
 
     @HAS_PROVIDER
     def test_a_chip_that_splits_a_compound_stays_bare(self, make_frame):

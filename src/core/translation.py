@@ -5,6 +5,8 @@ Handles text translation using AI APIs with clipboard integration.
 import time
 import queue
 import logging
+import threading
+from collections import OrderedDict
 from typing import Optional, Callable, Tuple, Dict
 
 import keyboard
@@ -13,6 +15,10 @@ from src.constants import COOLDOWN, TRIAL_MODE_ENABLED, TRIAL_MODEL, TRIAL_PROXY
 from src.core import furigana
 from src.core.text_cleanup import strip_thinking_tags
 from src.core.clipboard import ClipboardManager
+from src.core.dictionary_prompt import build_dictionary_prompt, extract_context
+from src.core import lang_id
+from src.core.source_marker import (parse_source_marker, source_clause, stated_clause,
+                                    strip_stray_markers)
 from src.core.api_manager import AIAPIManager
 from src.core.history import HistoryManager
 from src.core.provider_health import ProviderHealthManager
@@ -23,6 +29,16 @@ from config import Config
 
 class TranslationService:
     """Handles all translation-related operations."""
+
+    # The language a model reported for the most recent translation of ambiguous
+    # kanji-only text (its [[SOURCE: ...]] line, Decision 22), or None. Like
+    # last_attribution: read it right after the call it belongs to. Class-level
+    # defaults, because tests and tools build the service with __new__.
+    last_source_language: Optional[str] = None
+    # Verdicts for the texts translated this session, newest last; History keeps
+    # them across restarts (source_verdict()).
+    SOURCE_VERDICTS_MAX = 64
+    _source_verdicts_lock = threading.Lock()
 
     def __init__(self, config: Config,
                  notification_callback: Optional[Callable[[str], None]] = None) -> None:
@@ -156,7 +172,8 @@ class TranslationService:
 
     def translate_text(self, text: str, target_language: str,
                        custom_prompt: Optional[str] = None,
-                       skip_cache: bool = False) -> str:
+                       skip_cache: bool = False,
+                       source_language: Optional[str] = None) -> str:
         """Translate text to target language using AI API.
 
         Args:
@@ -165,6 +182,9 @@ class TranslationService:
             custom_prompt: Optional extra instructions (disables caching for this call).
             skip_cache: When True, bypass the history-backed cache and always call the
                 API (used by the popup "Re-translate" button to force a fresh result).
+            source_language: A source language the user settled (the popup's
+                Japanese / Chinese chooser): stated to the model, and recorded as
+                this text's verdict.
         """
         has_custom_prompt = custom_prompt and custom_prompt.strip()
 
@@ -178,7 +198,9 @@ class TranslationService:
             if cached is not None:
                 logging.info("Cache hit - returning stored translation, skipping API call")
                 self.last_attribution = self._cached_attribution(cached)
+                self.last_source_language = cached.get('source_verdict') or None
                 return cached['translated']
+        self.last_source_language = None
 
         if has_custom_prompt:
             # Has custom prompt → follow custom prompt, more flexible.
@@ -213,10 +235,12 @@ Rules (DO NOT include these in your response):
         prompt = base_prompt
 
         try:
-            result = self._call_model(prompt)
-
-            # Clean up AI thinking tags from result
-            result = self._strip_thinking_tags(result)
+            if has_custom_prompt:
+                # The user's own instructions are sent exactly as written.
+                result, verdict = self._strip_thinking_tags(self._call_model(prompt)), None
+            else:
+                result, verdict = self._call_with_source(prompt, text, source_language)
+            self._remember_source_verdict(text, verdict)
 
             # Save to history on success. Custom-prompt results are tagged 'custom' so the
             # R1 cache (find_cached) never serves them in place of a plain translation,
@@ -224,7 +248,8 @@ Rules (DO NOT include these in your response):
             self.history_manager.add_entry(
                 text, result, target_language,
                 source_type='custom' if has_custom_prompt else 'text',
-                model_used=self.last_attribution or 'Auto')
+                model_used=self.last_attribution or 'Auto',
+                source_lang=verdict or '', source_verdict=verdict or '')
             return result
         except TrialAPIError as e:
             return f"Error: {str(e)}"
@@ -267,7 +292,9 @@ Rules (DO NOT include these in your response):
             if cached is not None:
                 logging.info("Merged cache hit - returning stored result, skipping API call")
                 self.last_attribution = self._cached_attribution(cached)
+                self.last_source_language = cached.get('source_verdict') or None
                 return cached['translated']
+        self.last_source_language = None
 
         prompt = f"""You are a translation-and-grammar fixer tool. Decide automatically between two modes based on the
 language of the text below, then output ONLY the result.
@@ -295,16 +322,15 @@ STRICT RULES (DO NOT include these rules in your response):
    translate it. In translate mode, output ONLY {target_language}."""
 
         try:
-            result = self._call_model(prompt)
-
-            # Clean up AI thinking tags from result
-            result = self._strip_thinking_tags(result)
+            result, verdict = self._call_with_source(prompt, text)
+            self._remember_source_verdict(text, verdict)
 
             # Store under the 'merged' namespace so repeat requests are cached but never
             # served in place of (or served) a plain translation.
             self.history_manager.add_entry(
                 text, result, target_language, source_type='merged',
-                model_used=self.last_attribution or 'Auto')
+                model_used=self.last_attribution or 'Auto',
+                source_lang=verdict or '', source_verdict=verdict or '')
             return result
         except TrialAPIError as e:
             return f"Error: {str(e)}"
@@ -314,7 +340,9 @@ STRICT RULES (DO NOT include these rules in your response):
                 return "Error: Invalid API key. Please check your API key in Settings."
             return f"Error: {error_msg}"
 
-    def dictionary_lookup(self, text, target_language: str) -> str:
+    def dictionary_lookup(self, text, target_language: str,
+                          source_language: Optional[str] = None,
+                          context: Optional[str] = None) -> str:
         """Perform dictionary lookup for one or more words.
 
         Accepts either a single word/phrase (str) or a list of words.
@@ -323,6 +351,11 @@ STRICT RULES (DO NOT include these rules in your response):
         Args:
             text: Word/phrase (str) or list of words to look up
             target_language: Target language for definitions/translations
+            source_language: The words' language when the caller knows it - see
+                `dictionary_prompt.dictionary_source_language()`. None lets the model
+                decide, and it names its decision in field 2.
+            context: The text the words were selected from. Only the sentences that
+                contain a word are sent (`dictionary_prompt.extract_context()`).
 
         Returns:
             Dictionary-formatted response with translation, definition, etc.
@@ -336,44 +369,11 @@ STRICT RULES (DO NOT include these rules in your response):
         if not words:
             return ""
 
-        # Build numbered word list (same format for 1 or many words)
-        word_list = "\n".join(f"{i+1}. {word}" for i, word in enumerate(words))
-
-        # Unified prompt for all cases
-        prompt = f"""You are a professional dictionary. Provide dictionary entries.
-
-**Target Language**: {target_language}
-
-**Words to look up**:
-{word_list}
-
-**OUTPUT FORMAT** (MUST follow for EACH word):
-
-## [Word]
-
-1. **Translation**: actual {target_language} translation (REQUIRED)
-2. **Source Language**: detected language
-3. **Definition**: explanation in {target_language} (REQUIRED)
-4. **Word Type**: noun/verb/adjective/adverb/etc.
-5. **Pronunciation**: /IPA/
-6. **Synonyms** (if any): synonym1 → {target_language} translation, synonym2 → {target_language} translation, synonym3 → {target_language} translation
-7. **Antonyms** (if any): antonym1 → {target_language} translation, antonym2 → {target_language} translation, antonym3 → {target_language} translation
-8. **Examples**:
-   - Source language sentence → {target_language} translation
-   - Source language sentence → {target_language} translation
-
----
-
-**CRITICAL**:
-- ALWAYS start each entry with ## [Word] header (for me highlighting it later)
-- FILL IN all fields - never leave blank after colon
-- Synonyms/Antonyms: list in source language with {target_language} translation, comma-separated. Write "None" if no synonyms/antonyms exist.
-- Examples must be in source language (same as input word)
-- All translations must be in {target_language}
-- Provide entry for ALL {len(words)} word(s)
-- Pronunciation: provide both IPA and {target_language} phonetic
-  Example: hello → /həˈloʊ/, /ハロー/ (if target is Japanese)
-  Example: 雨氷 → /uːhjou/, /u-hyô/ (if target is Vietnamese)"""
+        context_text = extract_context(context, words)
+        # Counts and language names only - never the user's text.
+        logging.info(f"[Dictionary] lookup n={len(words)} source={source_language or 'auto'} "
+                     f"target={target_language} context_chars={len(context_text)}")
+        prompt = build_dictionary_prompt(words, target_language, source_language, context_text)
 
         try:
             result = self._call_model(prompt)
@@ -437,6 +437,111 @@ STRICT RULES (DO NOT include these rules in your response):
             if "API_KEY_INVALID" in error_msg or "API key not valid" in error_msg:
                 return "Error: Invalid API key. Please check your API key in Settings."
             return f"Error: {error_msg}"
+
+    def _call_with_source(self, prompt: str, text: str,
+                          source_language: Optional[str] = None) -> Tuple[str, Optional[str]]:
+        """Call the model about `text` with its source-language clause appended.
+
+        Mostly-CJK text gets its language stated when the characters prove it, or
+        the model is asked to name it on a marker line, which is read and removed
+        here (Decision 22, `source_marker`). Any other text is sent unchanged.
+        A `source_language` the user settled is stated instead, and is the verdict.
+
+        Returns:
+            (result without the marker, the verdict or None)
+        """
+        if source_language:
+            clause = stated_clause(source_language)
+            result = self._strip_thinking_tags(self._call_model(prompt + clause.text))
+            logging.info(f"[LangID] translation verdict={clause.stated} via=user "
+                         f"chars={len(text)}")
+            return strip_stray_markers(result), clause.stated
+        clause = source_clause(text)
+        result = self._strip_thinking_tags(self._call_model(prompt + clause.text))
+        if not clause.asks:
+            return strip_stray_markers(result), None
+        result, verdict, found = parse_source_marker(result)
+        # Counts and language names only - never the user's text.
+        logging.info(f"[LangID] translation verdict={verdict or 'none'} "
+                     f"marker={'found' if found else 'missing'} chars={len(text)}")
+        return result, verdict
+
+    def _source_verdict_store(self) -> "OrderedDict[str, str]":
+        store = self.__dict__.get('_source_verdicts')
+        if store is None:
+            with self._source_verdicts_lock:
+                store = self.__dict__.setdefault('_source_verdicts', OrderedDict())
+        return store
+
+    def _remember_source_verdict(self, text: str, verdict: Optional[str]) -> None:
+        """Record a call's verdict: as `last_source_language`, and for the text."""
+        self.last_source_language = verdict
+        if not verdict or not text:
+            return
+        self._store_source_verdict(text, verdict)
+
+    def _store_source_verdict(self, text: str, verdict: str) -> None:
+        store = self._source_verdict_store()
+        with self._source_verdicts_lock:
+            store[text] = verdict
+            store.move_to_end(text)
+            while len(store) > self.SOURCE_VERDICTS_MAX:
+                store.popitem(last=False)
+
+    def remember_user_source(self, text: str, language: str) -> Optional[str]:
+        """Record the language the user settled for `text` outside a translation -
+        the Dictionary's "Kanji-only text: Japanese or Chinese?" dialog, or before
+        a re-translation the user asked for (K3).
+
+        Kept like a model's verdict: for this session, and on History's entries
+        of exactly this text so it survives a restart - where it replaces a
+        model's, since the user's pick outranks it (Decision 22). It leaves
+        `last_source_language` alone: that belongs to the last translation.
+
+        Returns:
+            The verdict recorded, or None when `language` is neither Japanese nor
+            Chinese (a pick of another pack says nothing about the kanji).
+        """
+        verdict = lang_id.normalize_language(language)
+        if not text or not (verdict == lang_id.JAPANESE or verdict in lang_id.CHINESE):
+            return None
+        self._store_source_verdict(text, verdict)
+        setter = getattr(getattr(self, 'history_manager', None), 'set_source_verdict', None)
+        if setter:
+            setter(text, verdict)
+        # Counts and language names only - never the user's text.
+        logging.info(f"[LangID] user settled source={verdict} chars={len(text)}")
+        return verdict
+
+    def source_language(self, text: str) -> Optional[str]:
+        """The language of a source text as far as it is settled: its characters
+        first, else the verdict for exactly this text (Decision 22), else None.
+        Never a guess, and never a request."""
+        if not text or not text.strip():
+            return None
+        return lang_id.resolve(text, model=self.source_verdict(text.strip())).language
+
+    def _source_hint(self, text: str) -> Optional[str]:
+        """The reading hint for a source text: "Japanese" when source_language()
+        says so, else None."""
+        return lang_id.JAPANESE if self.source_language(text) == lang_id.JAPANESE else None
+
+    def source_verdict(self, text: str) -> Optional[str]:
+        """The language a model reported for exactly this text, or None.
+
+        This session's translations first, then History, which keeps verdicts
+        across restarts. Only ever a model's verdict - never a label guessed from
+        the characters (History's `source_lang` is often that).
+        """
+        if not text:
+            return None
+        store = self._source_verdict_store()
+        with self._source_verdicts_lock:
+            verdict = store.get(text)
+        if verdict:
+            return verdict
+        finder = getattr(self.history_manager, 'find_source_verdict', None)
+        return finder(text) if finder else None
 
     def _call_model(self, prompt: str) -> str:
         """Send one prompt to whichever backend is active and record who answered.
@@ -518,79 +623,16 @@ STRICT RULES (DO NOT include these rules in your response):
         ClipboardManager.restore_clipboard(original_clipboard)
         return None
 
-    def do_translation(self, target_language: str,
-                        callback: Optional[Callable[[], None]] = None,
-                        custom_prompt: str = "") -> None:
-        """Perform translation and put result in queue.
-
-        Queue item format: (original_text, translated_text, target_language, trial_info, furigana_text)
-        trial_info is a dict if in trial mode, None otherwise.
-        furigana_text is a string with {kanji|reading} notation if furigana enabled, None otherwise.
-        """
-        current_time = time.time()
-        if current_time - self.last_translation_time < COOLDOWN:
-            logging.info("Cooldown active, please wait...")
-            self.translation_queue.put(("", "Please wait a moment...", target_language, None))
-            return
-
-        self.last_translation_time = current_time
-        logging.info(f"Translating to {target_language}...")
-
-        try:
-            if not self._configure_api():
-                error_msg = "Error: No API key configured.\n\nPlease add your AI API key in Settings.\n\nGo to Settings > Guide tab for instructions on getting a free API key."
-                logging.warning(error_msg)
-                self.translation_queue.put(("", error_msg, target_language, None))
-                return
-
-            selected_text = self.get_selected_text()
-
-            if selected_text:
-                logging.info(f"Selected text: {selected_text[:50]}...")
-
-                # Normal translation (always)
-                translated = self.translate_text(selected_text, target_language, custom_prompt)
-
-                # Generate furigana offline if enabled and source is Japanese
-                furigana_text = None
-                if (not custom_prompt and self.config.get_furigana_enabled()
-                        and self._is_japanese_text(selected_text)):
-                    logging.info("Japanese text detected, generating furigana offline")
-                    furigana_text = self.generate_furigana(selected_text)
-
-                logging.info("Translation complete!")
-
-                # Include trial info if in trial mode
-                trial_info = self.get_trial_info()
-                self.translation_queue.put((selected_text, translated, target_language, trial_info, furigana_text))
-            else:
-                error_msg = "No text selected. Please select text and try again."
-                logging.warning(error_msg)
-                self.translation_queue.put(("", error_msg, target_language, None))
-        except TrialAPIError as e:
-            # Include trial info for trial mode errors (especially quota exhausted)
-            error_msg = f"Error: {str(e)}"
-            logging.error(error_msg)
-            trial_info = self.get_trial_info()
-            if trial_info:
-                # Mark as exhausted if this is a quota error
-                if "exhausted" in str(e).lower() or "quota" in str(e).lower():
-                    trial_info['is_exhausted'] = True
-            self.translation_queue.put(("", error_msg, target_language, trial_info))
-        except Exception as e:
-            error_msg = f"Error: {str(e)}"
-            logging.error(error_msg)
-            self.translation_queue.put(("", error_msg, target_language, None))
-
     def do_translate_or_fix(self, target_language: str) -> None:
         """Merged translate-or-fix for the language hotkeys (Win+Alt+V/E/J/C + custom).
 
-        Mirrors do_translation() (captures the live selection via Ctrl+C, honors the
-        shared translation cooldown, surfaces trial info, generates furigana for Japanese
-        source) but calls translate_or_fix() so the model auto-decides between translating
-        and grammar-fixing text already in target_language. The result is queued as the
-        same 5-tuple as do_translation() (is_grammar stays False downstream) because the
-        output is always genuinely in target_language in both branches.
+        Captures the live selection via Ctrl+C, honors the shared translation cooldown,
+        surfaces trial info and generates furigana for Japanese source, and calls
+        translate_or_fix() so the model auto-decides between translating and
+        grammar-fixing text already in target_language. The result is queued as the
+        5-tuple (original, result, target_language, trial_info, furigana_text) -
+        is_grammar stays False downstream - because the output is always genuinely in
+        target_language in both branches.
         """
         current_time = time.time()
         if current_time - self.last_translation_time < COOLDOWN:
@@ -616,12 +658,14 @@ STRICT RULES (DO NOT include these rules in your response):
                 # One merged prompt: translate, or grammar-fix if already in target_language.
                 result = self.translate_or_fix(selected_text, target_language)
 
-                # Generate furigana offline if enabled and source is Japanese.
+                # Generate furigana offline if enabled and source is Japanese. The
+                # hint lets kanji-only text the model called Japanese be read (J6).
                 furigana_text = None
                 if (self.config.get_furigana_enabled()
                         and self._is_japanese_text(selected_text)):
                     logging.info("Japanese text detected, generating furigana offline")
-                    furigana_text = self.generate_furigana(selected_text)
+                    furigana_text = self.generate_furigana(selected_text,
+                                                           self._source_hint(selected_text))
 
                 logging.info("Translate-or-fix complete!")
 
@@ -645,14 +689,18 @@ STRICT RULES (DO NOT include these rules in your response):
             logging.error(error_msg)
             self.translation_queue.put(("", error_msg, target_language, None))
 
-    def redo_translation(self, text: str, target_language: str) -> None:
+    def redo_translation(self, text: str, target_language: str,
+                         source_language: Optional[str] = None) -> None:
         """Force a fresh API translation of already-known text (bypass cache).
 
         Used by the Quick Translate popup "Re-translate" button when a cached or
         previous result is bad, so the user is never stuck with it. Unlike
-        do_translation(), this does NOT capture the selection again and does NOT apply
-        COOLDOWN — it operates on text already obtained. The result is pushed to
-        translation_queue in the same 5-tuple format as do_translation().
+        do_translate_or_fix(), this does NOT capture the selection again and does NOT
+        apply COOLDOWN — it operates on text already obtained. The result is pushed to
+        translation_queue in the same 5-tuple format as do_translate_or_fix().
+
+        `source_language` is the popup chooser's answer for kanji-only text the
+        model could not place (J6): stated to the model, and recorded.
         """
         logging.info(f"Re-translating to {target_language} (forced, skip cache)...")
 
@@ -670,13 +718,14 @@ STRICT RULES (DO NOT include these rules in your response):
                 return
 
             # Force a real API call, bypassing the history-backed cache.
-            translated = self.translate_text(text, target_language, skip_cache=True)
+            translated = self.translate_text(text, target_language, skip_cache=True,
+                                             source_language=source_language)
 
             # Generate furigana offline if enabled and source is Japanese (plain path).
             furigana_text = None
             if self.config.get_furigana_enabled() and self._is_japanese_text(text):
                 logging.info("Japanese text detected, generating furigana offline")
-                furigana_text = self.generate_furigana(text)
+                furigana_text = self.generate_furigana(text, self._source_hint(text))
 
             logging.info("Re-translation complete!")
 
@@ -698,7 +747,7 @@ STRICT RULES (DO NOT include these rules in your response):
     def do_grammar_fix(self) -> None:
         """Fix the grammar of the currently selected text and queue the result.
 
-        Mirrors do_translation() (captures the live selection via Ctrl+C, honors a
+        Mirrors do_translate_or_fix() (captures the live selection via Ctrl+C, honors a
         cooldown, surfaces trial info) but calls fix_grammar() instead of translating.
         The result is pushed to translation_queue as a 6-tuple
         (original, corrected, "Grammar", trial_info, None, True) so the queue checker can
@@ -757,7 +806,7 @@ STRICT RULES (DO NOT include these rules in your response):
         the custom_prompt branch of translate_text(). Freeform asks are one-offs: the
         result is NOT written to history and is never served from / written to the R1
         cache. The result is pushed to translation_queue in the same 5-tuple format as
-        do_translation() (furigana off for freeform).
+        do_translate_or_fix() (furigana off for freeform).
 
         Args:
             raw_prompt: The exact prompt text to send to the model.

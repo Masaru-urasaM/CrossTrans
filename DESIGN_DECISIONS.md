@@ -5,6 +5,446 @@ approaches. Newest first.
 
 ---
 
+### Decision 32 - Tests run on a private desktop and cannot leave the test session
+
+**Date**: 2026-10-16
+**Status**: RESOLVED (the user: the tests threw windows over the screen, interrupted other work and
+used up the translation quota. The options below were proposed; the goal's stop hook asked for a
+fix before the user chose, so the recommended ones were built). Approved by the user on 2026-10-16, with Decisions 28-32.
+
+**Problem**: The Tk tests mapped real windows on the developer's desktop, and the app's windows
+take the focus by design. Nothing kept a test off the network, the clipboard or the keyboard, and
+the eval tools spent real quota without showing a count first.
+
+**Options considered**:
+1. **A private desktop for the Tk thread** (`CreateDesktopW` + `SetThreadDesktop`) - Pros: the
+   windows stay real (mapped, measured, focusable - measured 2026-10-16); no test changes; plain
+   `pytest` and the mutation runner are covered. Cons: Windows only; must happen before the thread
+   owns a window or a hook; desktops share the window station's clipboard, so it is not covered.
+2. **Offscreen geometry and no-op `focus_force` / `lift` / `-topmost`** - Cons: changes the
+   behaviour under test (the dialog tests assert topmost and focus); a newly mapped window is still
+   activated and still gets a taskbar button.
+3. **Skip the Tk tests locally** - Cons: about 350 fewer tests where they matter; breaks "the
+   test count never goes down".
+4. **A private window station**, which would isolate the clipboard too - refused for this user:
+   Windows error 5.
+5. For the one real-clipboard test: **save and restore around it** - Cons: cannot put every
+   format back (files copied in Explorer, some images), and a clipboard history records it anyway;
+   **only on CI or when asked for** - Cons: one local skip.
+
+**Resolution**: Option 1, plus refusals for the network (but loopback, and never the lock port),
+clipboard writes (Tk's clipboard kept in memory), keystrokes, hotkeys, browser windows and registry
+writes - each recorded, so a swallowed refusal still fails its test. The real-clipboard test runs
+on CI or with `CROSSTRANS_TESTS_REAL_CLIPBOARD=1`: the proposal said save and restore, dropped once
+the lost-format case was seen. The eval tools send nothing until `--confirm-calls N` matches.
+
+**References**: `tests/quiet_session.py`, `tests/conftest.py`, `tests/test_quiet_session.py`,
+`tools/eval_dictionary_prompt.py`, `tools/eval_ocr_prompt.py`
+
+---
+
+### Decision 31 - Between providers that list the same model, the key decides
+
+**Date**: 2026-10-16
+**Status**: RESOLVED (DEFERRED D12 asked for "a decision about whether Auto-mode ambiguity is worth
+changing shared routing for"; the user asked for every proposed item to be done). Approved by the user on 2026-10-16, with Decisions 28-32.
+
+**Problem**: Thirteen model IDs appear under two providers in `model_provider_map`, and
+`_identify_provider()` returned the first, so under provider 'Auto' one provider's users always
+sent their key to the other's API.
+
+**Options considered**:
+1. **Reorder or delete entries** - Cons: any order is wrong for somebody; deleting a model a
+   provider really serves hides it from its users (rejected in D12 itself).
+2. **The key, positively**: the claimant whose prefix the key carries - Pros: exact where a prefix
+   exists. Cons: SambaNova (bare UUID keys), Together and SiliconFlow have none, so gpt-oss-120b
+   stays Cerebras's for SambaNova users.
+3. **The key, positively and by elimination**: as 2, then drop a claimant whose known prefix the key
+   lacks - Pros: also settles every row where only one claimant is prefix-less (SambaNova, and
+   Together/SiliconFlow against HuggingFace). Cons: relies on a provider never issuing a key
+   without its prefix - the same assumption step 4 of `_identify_provider()` already makes.
+
+**Resolution**: **Option 3** (`AIAPIManager._claimant_for_key()`); only between claimants, only with
+a key - no key, or a key no claimant's rule settles, keeps the first, as before. Together vs
+SiliconFlow (two prefix-less claimants) is left as it was.
+
+**References**: `src/core/api_manager.py`, `tests/test_provider_claims.py`, CHANGELOG "Phase K8".
+
+---
+
+### Decision 30 - Chinese by its function words: two of 是很們這嗎呢吧麼你她它, in a sentence
+
+**Date**: 2026-10-16
+**Status**: RESOLVED (measured, as the proposal asked; decided while doing the post-J12 follow-ups
+the user asked for in full). Approved by the user on 2026-10-16, with Decisions 28-32.
+
+**Problem**: Half of all Chinese sentences (46 634 of Tatoeba's 89 179) hold no glyph that only
+Chinese writes, so the app treats them like kanji-only Japanese: a marker clause on every
+translation, and "Japanese or Chinese?" in the main window's Dictionary for 這是我的書。. Which
+text-level rule could settle them without ever calling Japanese text Chinese - which costs more
+than the question: evidence is stated to the model, readings vanish, and no row offers to undo it?
+
+**Options considered** (Chinese = share of the 46 634 settled; Japanese = called Chinese among the
+100 open Tatoeba sentences, the 177 555 all-kanji dictionary words as terms / one-word sentences /
+10 000 lists, and 20 000 stress compounds of two words each holding a listed character):
+1. **A long kanji-only sentence** (6+ hanzi ending 。！？) - 81% Chinese; 14 of the 100 Japanese
+   sentences. Rejected.
+2. **A fullwidth comma ，** - 13% Chinese; 0 sentences, but every academic-style list 東京，大阪
+   turns Chinese by construction. Rejected.
+3. **Two distinct of 是很們這嗎呢吧麼你她它 + 的了我**, punctuated - 49% Chinese; 1 one-word
+   sentence (我們。) and **31%** of the stress compounds (目的完了。, 是正完了。). Rejected: Japanese
+   writes 的, 了 and 我 in compounds.
+4. **Two distinct of 是很們這嗎呢吧麼你她它**, punctuated - **17.3%** Chinese; **0** on every
+   Japanese set, 4 of 20 000 stress compounds (all nonsense: 腹這是川。).
+5. **No rule** - Pros: nothing to get wrong. Cons: the question and the marker stay on half of
+   all Chinese sentences.
+
+**Resolution**: **Option 4** (`lang_id.grammar_evidence()`, evidence `'zh-grammar'`, after kana and
+glyphs and never against a Japanese-only glyph). The modest share is the price of a rule that
+measured clean; the sentences it leaves go to the model, which reads a sentence correctly. A text
+without punctuation is a term, and terms stay the model's and the user's (Decision 29).
+
+**References**: `src/core/lang_id.py`, `tools/measure_cjk_evidence.py`, CHANGELOG "Phase K6",
+Decisions 21, 22, 24.
+
+---
+
+### Decision 29 - A placed term can be changed; a placed sentence cannot
+
+**Date**: 2026-10-16
+**Status**: RESOLVED (decided while doing the post-J12 follow-ups the user asked for in full).
+Approved by the user on 2026-10-16, with Decisions 28-32.
+
+**Problem**: When a model places kanji-only text confidently and wrongly - measured: 汽車 and 工作
+alone came back Chinese - the popup offered no way to say otherwise; the J6 row appeared only
+for Unknown. Where should a "read as the other language" control appear?
+
+**Options considered**:
+1. **On every text whose language a model (or the user) settled** - Pros: always reachable.
+   Cons: a row under every Traditional-Chinese sentence whose glyphs prove nothing - the models
+   read those correctly, so it is noise on the commonest case.
+2. **Only on terms** (no whitespace, no sentence punctuation) - Pros: exactly where the models
+   were measured wrong - a word alone has no context; quiet on sentences. Cons: a sentence a
+   model misread cannot be flipped from the popup (none was seen in the measurements).
+3. **Nowhere; rely on the Dictionary dialog** - Cons: the Dictionary does not ask once a verdict
+   exists (Decision 26), so a confident mistake would stick.
+
+**Resolution**: **Option 2** (`source_marker.source_row()` -> `ROW_CHANGE`). The row names what
+the text was read as and offers the other language; answering re-translates with it stated
+(Decision 27) and keeps it over the model's verdict (Decision 28). The same rule drives the main
+window's row (K5).
+
+**References**: `src/core/source_marker.py`, `src/ui/quick_translate.py`, CHANGELOG "Phase K4",
+Decisions 22, 27, 28.
+
+---
+
+### Decision 28 - The user's answer is a verdict, and it replaces a model's in History
+
+**Date**: 2026-10-16
+**Status**: RESOLVED (decided while doing the post-J12 follow-ups the user asked for in full).
+Approved by the user on 2026-10-16, with Decisions 28-32.
+
+**Problem**: The Dictionary's "Kanji-only text: Japanese or Chinese?" answer was used for one
+lookup and forgotten. Keeping it raises two questions: where, and what happens to a model's
+verdict for the same text already stored in History.
+
+**Options considered**:
+1. **Session memory only** - Pros: no stored data changes. Cons: lost on restart; History's rows
+   for that text stay unread.
+2. **Memory, plus History's entries of that text - only those without a verdict** - Pros: never
+   overwrites a model. Cons: when the model said Chinese and the user says Japanese, the
+   model's answer keeps coming back from History after a restart.
+3. **Memory, plus every History entry of that text, replacing a model's verdict and the label**
+   - Pros: Decision 22 puts what the user knows ahead of everything else; one answer per text,
+   whichever entry is read. Cons: History no longer records what that model said.
+
+**Resolution**: **Option 3** (`remember_user_source()` -> `set_source_verdict()`). The label is
+rewritten with the verdict so the History list says what the readings now assume. A pick of a
+pack that is neither Japanese nor Chinese is not a verdict and is not kept. History records
+what the app believes about the text, not an audit of the models - the log keeps that
+(`[LangID] translation verdict=..`).
+
+**References**: `src/core/translation.py`, `src/core/history.py`, `src/ui/dictionary_popup.py`,
+CHANGELOG "Phase K3", Decisions 22 and 26.
+
+---
+
+### Decision 27 - The popup's answer to "Japanese or Chinese?" re-translates; it does not just add readings
+
+**Date**: 2026-10-15
+**Status**: RESOLVED (TODO.md J6 left the choice to this phase; decided on J4's measurements)
+
+**Problem**: When a hotkey translation of kanji-only text comes back without a source language
+(the model said Unknown, or wrote no marker), the popup offers "Japanese / Chinese". What should
+an answer do?
+
+**Options considered**:
+1. **Re-translate with the stated source** - Pros: the meaning follows the answer; the readings
+   and the translation agree. Cons: one more request (only when the user answers).
+2. **Only add the readings** - Pros: free, instant. Cons: J4 measured that a translation the
+   model could not place may carry the other language's sense (Groq: 先生 → "Mr.", 床 → "bed/floor";
+   Gemini: 結構 → "Structure") - readings for せんせい above "Mr." would look right and be wrong.
+
+**Resolution**: **Option 1.** The answer is stated in the prompt (`stated_clause`) and stored as
+the text's verdict (`source_verdict` in memory and History), so the Dictionary and later lookups
+of the same text need not ask again. The question is a row inside the popup, not a dialog:
+the translation stays readable and nothing is blocked while it stands.
+
+**References**: `QuickTranslateManager._asks_source()` / `_build_source_chooser()`,
+`TranslatorApp._on_quick_translate_choose_source()`, `TranslationService.redo_translation()`,
+CHANGELOG "Phase J6", Decisions 22 and 25.
+
+---
+
+### Decision 26 - Ambiguous kanji in the Dictionary: reuse a verdict, else ask - no identification call
+
+**Date**: 2026-10-15
+**Status**: RESOLVED (the user left this open in TODO.md J5; decided on J4's measurements -
+revisit if the user prefers the call)
+
+**Problem**: After J5 the Dictionary knows when kanji-only text proves nothing. Decision 22 says
+the model decides, then the user. When the text was translated, a model verdict already exists
+(J4). When the user typed into the main window and pressed Dictionary without translating, none
+does.
+
+**Options considered**:
+1. **One short identification call** ("Japanese, Chinese or Unknown?") - Pros: the model
+   decides, as Q1 asked. Cons: a request (and trial quota) and a wait before the window opens;
+   measured on a word alone (J4), 2 in 10 answers confidently wrong (汽車, 工作) and 3-4 Unknown -
+   so the user would often see the dialog anyway, or a wrong window with no prompt to fix it.
+2. **Ask the user directly** - Pros: instant, free, and the user knows what they typed. Cons:
+   one click.
+3. **Assume Japanese** - declined as Q1 option (c)-like; never.
+
+**Resolution**: **Option 2, after reusing any verdict** for that exact text
+(`TranslationService.source_verdict()`, this session or History). The dialog lists Japanese and
+the Chinese packs first and pre-selects the first, so Enter answers it - the user still confirms.
+A verdict-opened window states the language to the lookup prompt (it is the model's decision).
+
+**References**: `DictionaryPopup._open_ambiguous_kanji()`, `nlp_manager.AMBIGUOUS_CJK_CONFIDENCE`,
+CHANGELOG "Phase J5", Decision 22, Decision 25.
+
+---
+
+### Decision 25 - How a translation prompt asks the model for the source language
+
+**Date**: 2026-10-15
+**Status**: RESOLVED
+
+**Problem**: Decision 22 lets the AI model decide whether ambiguous kanji-only text is Japanese or
+Chinese, and Q7 made the ordinary translation prompts source-aware. The model's decision has to
+come back out of a call whose answer is shown to the user, pasted by Replace and cached in History.
+
+**Options considered**:
+1. **A marker line in the answer** (`[[SOURCE: Japanese]]`), read and removed by the app - Pros:
+   no extra call; measured compliance 10/10 on both providers. Cons: depends on the model; a stray
+   marker must never reach the user.
+2. **A separate identification call** - Pros: clean output. Cons: one more call (and trial quota)
+   on every ambiguous selection.
+3. **Structured output (JSON)** - Cons: the providers differ in support, and a JSON envelope
+   around a translation is fragile in exactly the uncensored, verbatim cases the prompts protect.
+
+**Resolution**: **Option 1**, only for mostly-CJK text that the characters cannot place; text they
+can place has its language *stated* instead, and every other text is sent unchanged. Details that
+were weighed:
+- **The request goes last** in the prompt, after the rules it is an exception to ("output only the
+  result").
+- **No favourite**: the wording never says which language is likelier, and its example (娘,
+  "daughter" / "mother") is not one of the measured words (Decision 21's lesson).
+- **Unknown is allowed** and means no verdict. Measured: 3-4 in ten - that is where the user is
+  asked (J6). Confidently wrong answers (汽車 "car", 工作 "work") are not caught by this; only
+  context or the user can.
+- **The cache is not namespaced by verdict.** An entry made before J4 has no verdict and serves
+  as before; Re-translate gets a fresh one. Namespacing would re-ask every cached kanji-only text
+  once, for a marker most of them do not need.
+- **The verdict has its own field** (`source_verdict`), never `source_lang`: History has always
+  filled `source_lang` from the characters, which says "Chinese" for every kanji-only text.
+- **Mixed text is left alone** below 50% kanji + kana among its letters ("I love 你" is English),
+  and Hangul excludes Korean.
+
+**References**: `src/core/source_marker.py`, `TranslationService._call_with_source()` /
+`source_verdict()`, `HistoryManager.find_source_verdict()`, CHANGELOG "Phase J4",
+`logs/eval/translate_before.jsonl` / `translate_after.jsonl`, TODO.md J4.
+
+---
+
+### Decision 24 - Glyph evidence: "Japanese-only" excludes Big5-HKSCS, not just Big5
+
+**Date**: 2026-10-15
+**Status**: RESOLVED
+
+**Problem**: `src/core/lang_id.py` reads evidence from single characters: a kanji only Japanese
+writes proves Japanese, one Japanese cannot write proves Chinese. "Only Japanese writes" means
+"in a Japanese character set and in no Chinese one". TODO.md F9 measured the rule with CP932
+minus GB2312 minus Big5 (959 code points) and found no Chinese word called Japanese - but its
+Traditional samples were Taiwan-style. Hong Kong writes 衆 裏 綫 衞 啓 峯 where Taiwan writes
+眾 裡 線 衛 啟 峰, and those Hong Kong forms are outside Big5 and inside CP932.
+
+**Options considered** (measured on `tests/test_lang_id.py`'s fixtures):
+1. **Big5** - Pros: 959 Japanese-only glyphs; 77 of 311 Japanese words settled by glyph.
+   Cons: **12 of 13 Hong Kong strings called Japanese** (這裏, 公衆, 路綫, 衞生 ...): Japanese
+   readings on Chinese text, the outcome Decision 8 ranks worst.
+2. **Big5-HKSCS** (a superset of Big5) - Pros: no Hong Kong string called Japanese. Cons: HKSCS
+   also carries Japanese forms (駅 発 円 県 込 鉄), so 959 -> 571 Japanese-only glyphs and 55 of
+   311 Japanese words settled by glyph; the 22 that lose it become ambiguous (never Chinese).
+3. **Big5 plus a hand-kept list of Hong Kong forms** - Pros: keeps more coverage. Cons: a
+   curated list nobody can verify is complete; it fails silently on the form it misses.
+4. **GBK / GB18030 as the Chinese set** - Cons: they hold almost every ideograph, so nothing
+   would be Japanese-only (already rejected in F9).
+
+**Resolution**: **Option 2.** "Blank beats a wrong reading" decides it: a word that loses its
+glyph evidence is still settled by kana, its context, a model's verdict or the user, while a
+Hong Kong text called Japanese would be annotated wrongly with nothing to stop it. Do not swap
+back to Big5 to "recover coverage". JIS X 0213 (not CP932) stays the "can be Japanese" set, for
+the 2010 Jōyō kanji 剝 頰 塡.
+
+**References**: `src/core/lang_id.py` (module docstring, `glyph_class()`), TODO.md F9 and J2,
+`tests/test_lang_id.py` (`test_hong_kong_forms_are_never_japanese`, `test_coverage_is_recorded`).
+
+---
+
+### Decision 23 - One Dictionary mode: the popup delegates to `DictionaryPopup`
+
+**Date**: 2026-10-15
+**Status**: RESOLVED
+
+**Problem**: Dictionary mode - NLP check, language detection, the "Select Source Language"
+dialog, the word window and the lookup - existed twice: `src/ui/dictionary_popup.py` for the main
+window's button and ~400 lines inside `src/ui/quick_translate.py` for the popup's, plus a third
+copy of the lookup in `app.py`. The copies had drifted (D15: one used `grab_set()`, the other the
+safe pattern; window sizes and dialog placement differed) and shared one bug (D14). Phases J3, J5
+and J6 of the language-identity work would each have been written twice more. The user first
+chose to change both in lockstep (TODO.md Q8), then asked for the consolidation itself.
+
+**Options considered**:
+1. **Keep both, change them in lockstep** - Pros: no refactor. Cons: every change twice, and the
+   copies drift anyway; this was the state that produced D14/D15.
+2. **A new shared module** that both classes call - Pros: neutral ownership. Cons: a third place,
+   and both classes keep thin wrappers that still have to agree.
+3. **`DictionaryPopup` owns the flow; the popup only asks for it** - Pros: `DictionaryPopup` was
+   already the extracted owner of Dictionary mode (it shows its results through
+   `QuickTranslateManager` too); the popup's part shrinks to "this text, into this language,
+   beside me". Cons: the main window's and the popup's small differences (where the window opens,
+   whose target language) become parameters.
+
+**Resolution**: **Option 3.** `open_from_text(text, *, target_language=None, anchor=None)`;
+`QuickTranslateManager` gets one callback, `on_open_dictionary(text, target_lang, popup)`, which
+`TranslatorApp._on_quick_translate_open_dictionary()` forwards. Placement is the pure
+`word_window_geometry()` / `dialog_geometry()`, so the one real difference between the buttons -
+"beside the popup" vs "centred" - is tested without a window manager. Deliberately unified rather
+than parameterised: window size (700x350, the main window's), dialog position (next to the
+pointer, the popup's), the not-installed dialog (the main window's text), the dialogs' modality
+(the popup's safe pattern). `tests/test_dictionary_flow.py` asserts the popup keeps no copy.
+
+**References**: CHANGELOG "Phase D13-D15", TODO.md Q8, CLAUDE.md "Dictionary Mode",
+`tests/test_dictionary_flow.py`.
+
+---
+
+### Decision 22 - Ambiguous kanji-only text: evidence first, then the model, then the user
+
+**Date**: 2026-10-15
+**Status**: RESOLVED (principle - the user's choice). The mechanism (TODO.md §3.1) is proposed and
+awaits approval phase by phase (J4-J6).
+
+**Problem**: "Furigana everywhere Japanese appears" runs into text written only in kanji. Without
+kana it cannot always be told from Chinese: of 54 kanji-only Japanese words sampled, 32 carry a
+Japanese-only glyph (経, 気, 駅 ...) and **22 carry nothing** (勉強, 手紙, 東京大学, 先生). Today such
+text gets no readings wherever the caller does not already know the language, and
+`nlp_manager.detect_language()` calls every one of them "Chinese (Simplified)".
+
+**Options considered**:
+1. **A Settings choice** - "Text written only in kanji is: Auto / Japanese / Chinese / Unknown",
+   Auto inferred from the Windows UI language, locales and keyboard layouts (this PC: system
+   locale 0x0411 and a Japanese keyboard → Japanese). Pros: offline, deterministic, free. Cons:
+   under a Japanese default an ambiguous Chinese *word* gets Japanese readings; one more setting.
+   **Recommended in TODO.md, declined by the user.**
+2. **Keep today's rule** (no readings without proof). Cons: does not meet the request.
+3. **Always Japanese.** Cons: wrong readings on Chinese, for every user.
+4. **The AI model decides; when it cannot, the user decides in a window.** Pros: uses judgement
+   the app already pays for - a translation or lookup of that text is being made anyway. Cons:
+   depends on prompt compliance, which differs by provider and must be measured; a verdict
+   exists only after a call.
+
+**Resolution**: **Option 4, chosen by the user** (2026-10-15). The order is: what the caller
+knows (a translation's target; the user's pick) → evidence in the text (kana, Japanese-only or
+Chinese-only glyphs) → evidence in its context → the language a model call *reported* for that
+exact text → otherwise the user, through a window - but only where the app cannot continue
+without a language (Dictionary mode; a popup whose translation reported "Unknown"). Passive
+surfaces (Reading pane, History rows, word chips) never open a window; they stay plain.
+**Evidence overrides the model**: kana in the text beats a model that said "Chinese".
+
+The verdict is collected from calls already being made - dictionary field 2 (Decision 21), a
+marker line in the translation prompts for ambiguous text only (Q7, also the user's choice), a
+section in the OCR prompt - so ambiguity costs no extra call in the common case.
+
+"Blank beats a wrong reading" (Decision 8) still holds: a model verdict is consulted only for
+text the evidence cannot settle, and "Unknown" never produces a reading.
+
+**Do not re-propose** a Settings default or Windows-locale inference for this, and do not tell a
+model which language to prefer: a frequency tie-break already measured as a Chinese bias
+(Decision 21), and a Japanese tie-break would be option 1 in disguise.
+
+**References**: TODO.md §3 (Q1, Q7) and §3.1, Decision 8, Decision 21, findings F4/F9 in TODO.md.
+
+---
+
+### Decision 21 - The dictionary prompt states the source language only when it is evidence, and sends the sentence
+
+**Date**: 2026-10-15
+**Status**: RESOLVED
+
+**Problem**: The dictionary prompt carried the target language and the bare headwords, and asked
+the model to "detect" the source language in field 2. A kanji-only headword is ambiguous alone -
+手紙 is "letter" in Japanese, "toilet paper" in Chinese - and both Dictionary windows already
+knew a language (their titles said "Dictionary (Japanese → Vietnamese)") but dropped it, along
+with the sentence the word came from. Measured with the old prompt on ten false friends:
+gemini-2.5-flash, gpt-oss-120b and the trial's llama-3.3-70b each gave the Chinese sense for
+汽車, 工作 and 床 (7/10 Japanese each). A model that decides "Chinese" writes a Chinese entry, and
+the result window, which takes its reading hint from field 2, then shows it without furigana.
+
+**Options considered**:
+1. **State the window's language, always.** Simplest. Cons: the window's language is often a
+   guess - `detect_language()` answers "Chinese (Simplified)" for *any* kanji-only text and the
+   first installed European pack for any Latin text - and a guess stated as fact makes the model
+   follow it: 勉強 selected alone would be looked up as Chinese on purpose.
+2. **State it only when it is evidence** - the user picked it in the dialog, or detection proved
+   Japanese (it needs kana to say so) - otherwise say "not given" and let the model decide and
+   name its decision in field 2. Send the sentences that contain the headword either way.
+3. **Fix detection first, then the prompt.** Cons: nothing improves until the language-identity
+   core exists, and the lookup would still lose the sentence.
+
+**Resolution**: Option 2. `src/core/dictionary_prompt.py` builds the prompt as pure logic;
+`dictionary_source_language(language, user_chosen)` is the trust rule; `extract_context()` sends
+the sentences containing a headword (cap 600 characters - an educated guess); the pronunciation
+follows the source (Japanese: hiragana only, the user's choice; Chinese: pinyin; Korean: Revised
+Romanization; else /IPA/ + a target phonetic); source = target gives a monolingual entry. With a
+Japanese sentence sent and the source stated, all three providers gave the Japanese sense **10/10**.
+
+**A tie-break that looked neutral and was not.** The first wording of "not given" told the model,
+without context, to choose "the language in which it is more commonly written exactly as given".
+gpt-oss-120b then answered 先生 alone as Chinese "Mr." (the old prompt: "teacher"); without the
+sentence, "teacher" again. One run each - weak evidence - but the bias is structural: Chinese text
+is more abundant, so "more common" means Chinese for every shared spelling. Removed, with a test.
+**Do not reintroduce a frequency tie-break**, and per Decision 22 not a Japanese lean either.
+
+**Known limit**: a headword alone, with no source and no context, is no better than before
+(gpt-oss-120b 6/10 against 7/10, within noise) - there is nothing new to decide from. Decision
+22's later phases remove the case: the Dictionary opens in the language the translation's model
+verdict or the user settled, and that language is then stated.
+
+**Also seen**: the trial model translated 床 as "floor" and gave its reading as とこ (the bed/alcove
+reading; "floor" is ゆか). Field 5 is printed as text, not as furigana, so it is a wrong
+pronunciation line rather than a wrong reading over the word; no prompt fixes a weak model.
+
+**References**: `src/core/dictionary_prompt.py`, `TranslationService.dictionary_lookup()`,
+`src/ui/dictionary_popup.py`, `src/ui/quick_translate.py`, `src/app.py`,
+`tests/test_dictionary_prompt.py`, `tools/eval_dictionary_prompt.py` and its local output
+`logs/eval/dictionary_{before,after}.jsonl`, TODO.md J0/J1, Decision 22.
+
+---
+
 ### Decision 20 - OpenRouter's defaults stay free, and a default must route to its own provider
 
 **Date**: 2026-09-08
@@ -951,7 +1391,7 @@ bar, making 7 actions + close — crowded.
 2. **Two-row bar** — keep width, wrap to a second row. Adds height.
 3. **"⋯" overflow menu** — keep narrow, hide less-used actions. More code, less discoverable.
 
-**Resolution**: Developer chose **single wide bar** ("Một hàng, nới rộng") — simplest, lowest
+**Resolution**: Developer chose **single wide bar** ("One row, widened") — simplest, lowest
 risk. `MIN_WIDTH = 670` in `quick_translate.py`.
 
 **References**: `src/ui/quick_translate.py`.

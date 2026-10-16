@@ -378,6 +378,142 @@ def insert_output(widget: 'RubyText', index, text: str,
         widget.insert_plain(index, text, tags)
 
 
+ELLIPSIS = "..."
+
+
+def fit_segments(widget: tk.Misc, segments: Sequence[RubySegment], available_px: int, *,
+                 base_font=None, ruby_font=None,
+                 more: bool = False) -> Tuple[Tuple[RubySegment, ...], bool]:
+    """The part of a line that fits `available_px` pixels, "..." included when
+    anything is cut, and whether anything was.
+
+    Measured as `RubyLine` draws it - a ruby pair takes the wider of its base
+    and its reading - so a plain label measured with the same base font fits
+    too. A plain run may be cut between characters; a ruby pair is kept whole or
+    dropped, since half of 東京 with all of とうきょう above it is a wrong
+    reading. `more` says the segments are already the head of a longer line, so
+    the ellipsis is due even when they fit. Used where a line must fit a row
+    (History, K7): cutting by character count let 57 CJK characters run 685 px
+    into a 560 px row, clipped, with the "..." never shown.
+    """
+    base_font = _as_font_tuple(base_font, BASE_FONT_SIZE)
+    ruby_font = _as_font_tuple(ruby_font, RUBY_FONT_SIZE)
+
+    def width(segment: RubySegment) -> int:
+        base = _line_width(widget, base_font, segment.base)
+        return max(base, _line_width(widget, ruby_font, segment.ruby)) if segment.ruby else base
+
+    segments = tuple(segments)
+    if not more and sum(width(segment) for segment in segments) <= available_px:
+        return segments, False
+
+    budget = available_px - _line_width(widget, base_font, ELLIPSIS)
+    kept: List[RubySegment] = []
+    used = 0
+    for segment in segments:
+        size = width(segment)
+        if used + size <= budget:
+            kept.append(segment)
+            used += size
+            continue
+        if not segment.ruby:
+            part = ""
+            for ch in segment.base:
+                size = _line_width(widget, base_font, ch)
+                if used + size > budget:
+                    break
+                part += ch
+                used += size
+            if part:
+                kept.append(RubySegment(part, None))
+        break
+    return tuple(kept) + (RubySegment(ELLIPSIS, None),), True
+
+
+# Fonts and character widths for RubyLine, shared by every line. A Font made per
+# line made Tk search for a CJK fallback font afresh on every measure - 0.7 ms a
+# call, 1.9 s of a 3.3 s History open with 100 Japanese entries (measured, J9).
+# Fonts belong to an interpreter, so they are keyed by it; a character's width
+# is the font's, so widths are shared. Summing per-character widths ignores
+# kerning, as tk_layout_model() already does - a pixel at most on a list row.
+_LINE_FONTS: Dict[Tuple[object, Tuple[str, int]], font.Font] = {}
+_LINE_CHAR_WIDTHS: Dict[Tuple[Tuple[str, int], str], int] = {}
+
+
+def _line_font(widget: tk.Misc, spec: Tuple[str, int]) -> font.Font:
+    key = (widget.tk, spec)
+    cached = _LINE_FONTS.get(key)
+    if cached is None:
+        cached = _LINE_FONTS[key] = font.Font(widget, family=spec[0], size=spec[1])
+    return cached
+
+
+def _line_width(widget: tk.Misc, spec: Tuple[str, int], text: str) -> int:
+    total = 0
+    for ch in text:
+        width = _LINE_CHAR_WIDTHS.get((spec, ch))
+        if width is None:
+            width = _LINE_CHAR_WIDTHS[(spec, ch)] = int(_line_font(widget, spec).measure(ch))
+        total += width
+    return total
+
+
+class RubyLine(tk.Canvas):
+    """One line of text with readings above its kanji, drawn on a single canvas.
+
+    For long lists - the History rows (J9). A `RubyRow` is a frame plus two
+    labels per segment, and on Windows every Tk widget is a native child window:
+    100 Japanese History entries built that way came to ~4,500 widgets and took
+    4.1 s to open (measured, 2026-10-15; the dialog took 1.0-1.6 s without
+    readings). Canvas text items are not windows, so a line costs one widget.
+
+    Each ruby pair gets a slot as wide as the wider of its base and reading,
+    with both centred in it, so a long reading (東京 / とうきょう) never runs into
+    its neighbours - the canvas counterpart of `RubyText`'s spreading. Not
+    selectable: nothing on a list row is.
+
+    Attributes:
+        segments: What was drawn, for reading the line back (I1).
+    """
+
+    def __init__(self, parent, segments: Sequence[RubySegment], *,
+                 base_font=None, ruby_font=None, bg: str = DEFAULT_BG,
+                 base_fg: str = KANJI_FG, ruby_fg: str = RUBY_FG,
+                 cursor: Optional[str] = None):
+        self.segments = tuple(segments)
+        base_font = _as_font_tuple(base_font, BASE_FONT_SIZE)
+        ruby_font = _as_font_tuple(ruby_font, RUBY_FONT_SIZE)
+        top = (_line_font(parent, ruby_font).metrics('linespace')
+               if any(seg.ruby for seg in self.segments) else 0)
+        extra = {'cursor': cursor} if cursor else {}
+        super().__init__(parent, bg=bg, bd=0, highlightthickness=0,
+                         height=top + _line_font(parent, base_font).metrics('linespace'),
+                         **extra, **NO_AUTOSTYLE)
+
+        x = 0
+        for text, reading in self.segments:
+            width = _line_width(self, base_font, text)
+            if reading:
+                slot = max(width, _line_width(self, ruby_font, reading))
+                self.create_text(x + slot / 2, 0, text=reading, anchor='n',
+                                 font=ruby_font, fill=ruby_fg)
+                self.create_text(x + slot / 2, top, text=text, anchor='n',
+                                 font=base_font, fill=base_fg)
+                x += slot
+            else:
+                self.create_text(x, top, text=text, anchor='nw', font=base_font, fill=base_fg)
+                x += width
+        self.configure(width=max(1, int(round(x))))
+
+    @property
+    def has_ruby(self) -> bool:
+        return any(seg.ruby for seg in self.segments)
+
+    def get_plain(self) -> str:
+        """The line's text, without readings."""
+        return ''.join(seg.base for seg in self.segments)
+
+
 class RubyRow:
     """A standalone two-row ruby chip: readings on top, bases below.
 

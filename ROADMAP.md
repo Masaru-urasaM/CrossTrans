@@ -19,10 +19,25 @@ The previous public release was 1.9.19 (2026-08-18, furigana everywhere).
 Every roadmap item up to and including 1.9.20 is complete and archived — nothing is
 half-finished, and there is no work in progress.
 
-**Unreleased work sits on `main`** (2026-09-07): the H1 health-review fixes — archived in
-`ROADMAP_DONE.md`, detailed in `CHANGELOG.md` → Unreleased, reasoned in Decisions 12–14. Suite
-551 → 593. **Not yet released**: no version bump, no tag, no build. That is the only thing
-outstanding.
+**Unreleased work on `main`**: the H1 health-review fixes (2026-09-07/08) — archived in
+`ROADMAP_DONE.md`, detailed in `CHANGELOG.md` → Unreleased, reasoned in Decisions 12–20. They sat
+on the unmerged branch `h1-health-review` until **2026-10-15**, when it was merged into `main`
+(`f28a276`, `--no-ff`, not pushed). Suite 551 → 676. **Not yet released**: no version bump, no
+tag, no build.
+
+**Unreleased work on branch `feature/japanese-language-identity`** (2026-10-15): Japanese
+language identity — furigana on every Japanese surface and a Dictionary that knows which
+language it looks up, plus one Dictionary mode for both buttons (D13–D15). Archived in
+`ROADMAP_DONE.md` ("J"), detailed in `CHANGELOG.md` → Unreleased, reasoned in Decisions 21–27.
+Branched from `main` after the H1 merge; **not merged into `main`, not pushed**. Suite 676 → 1183.
+
+**Follow-ups on the same branch (2026-10-16, phases K1–K13)**: the fifteen items proposed after
+J12, which the user asked for in full - the suite on a clean machine, the EXE, D16, the verdict
+gaps of the new feature, History, the old deferred items, AGENTS.md, tooling and measurements -
+and quiet tests (K12), after the user reported that test runs threw windows over the screen and
+the measurements used up the translation quota. Archived in `ROADMAP_DONE.md` ("K"), detailed in
+`CHANGELOG.md` → Unreleased, reasoned in Decisions 28–32. Suite 1183 → 1502. **Not merged into
+`main`, not pushed.**
 
 ---
 
@@ -30,7 +45,7 @@ outstanding.
 
 | Item | Status | Notes |
 |------|--------|-------|
-| Cut 1.9.21 | 📋 Planned | Bump `VERSION`, run `build_exe.bat`, tag, write release notes. The work it would ship is already on `main` and tested |
+| Cut 1.9.21 | 🔨 In progress | Chosen by the user on 2026-10-16: `VERSION` bumped, the branch merged into `main` and pushed. Still to do: run `build_exe.bat` (it deletes `dist\` first, released EXEs included - move them out, or build by hand as in K11), tag, write release notes. The H1 work is on `main` and tested; the language-identity work is on its branch - merge it first if it ships in 1.9.21 rather than 1.9.22 (the user's call) |
 
 ---
 
@@ -45,5 +60,15 @@ to 18), and closing them surfaced **D11**. `DEFERRED.md` now holds **D11** and *
 narrowed three times on 2026-09-08: Google's three defaults were dead and were replaced and made
 self-maintaining (Decision 19); OpenRouter's two were dead *and* mis-routed to Together
 (Decision 20); then keys arrived for Cerebras and SambaNova, whose lists were 6/6 and 11/12 dead.
-Five providers checked, not one table clean - eight remain, each needing its own key. **D12** is
-the cross-provider model-name clash that surfaced from the same work. None is scheduled; each carries its own trigger condition.
+Five providers checked, not one table clean - eight remain, each needing its own key (desk-checked
+against the providers' own deprecation pages on 2026-10-16, K8: Anthropic, xAI and DeepSeek are
+entirely gone, Together and OpenAI going this month). **D12** is the cross-provider model-name clash
+that surfaced from the same work (**closed 2026-10-16**, K8: the key decides). **D13–D15** came out of the
+language-identity work on 2026-10-15 (Dictionary mode implemented twice, a failed lookup's toast
+that raised `NameError`, the main-window dialogs' `grab_set()`) and were **closed the same day**.
+Closing D15 surfaced **D16**: `UpdateFailedDialog` is a `grab_set()` + `transient()` +
+`wait_window()` dialog on the withdrawn root - the documented freeze trap, on the failed-update
+path (**closed 2026-10-16**, K2). The language-identity work then added **D17** (the History dialog takes ~1 s to open with
+100 entries, before any readings; **closed 2026-10-16**, K7) and **D18** (two pieces of dead code; **removed 2026-10-16**, K8). None is scheduled; each
+carries its own trigger condition. **D19** (2026-10-16, K1): pykakasi - the one reading provider
+every install has - reads a word differently from fugashi in 30% of real sentences.

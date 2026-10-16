@@ -6,6 +6,7 @@ copy functionality, and character/word/line counts.
 """
 import tkinter as tk
 from tkinter import BOTH, X
+from typing import Optional
 
 import pyperclip
 
@@ -16,6 +17,7 @@ except ImportError:
     from tkinter import ttk
     HAS_TTKBOOTSTRAP = False
 
+from src.core.lang_id import output_hint
 from src.ui.ruby_text import RubyText, insert_output
 from src.utils.ui_helpers import set_dark_title_bar
 
@@ -44,12 +46,15 @@ class ExpandedTranslationWindow:
         self.toast = toast_manager
         self.config = config
 
-    def show(self, translated: str, target_language: str) -> None:
+    def show(self, translated: str, target_language: str,
+             source_language: Optional[str] = None) -> None:
         """Show the expanded translation window.
 
         Args:
             translated: The translated text to display
             target_language: The target language name for the title
+            source_language: The source text's settled language, if any - with the
+                target it decides the readings (`lang_id.output_hint`)
         """
         if not translated:
             self.toast.show_warning("No translation to expand")
@@ -154,7 +159,7 @@ class ExpandedTranslationWindow:
                                  selectbackground='#0d6efd',
                                  selectforeground='white')
         insert_output(expanded_text, '1.0', translated,
-                      lang_hint=target_language,
+                      lang_hint=output_hint(source_language, target_language),
                       enabled=bool(self.config
                                    and self.config.get_furigana_enabled()))
         expanded_text.config(state='disabled')

@@ -4,6 +4,934 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+Everything below `[1.9.20]` ships as **1.9.21**: the user chose the number on 2026-10-16, and
+`VERSION` says so. Not tagged and not built as a release yet.
+
+### Release prep — 1.9.21 chosen, merged into main (2026-10-16)
+
+- `VERSION` 1.9.20 -> 1.9.21 (`src/constants.py`; the CLAUDE.md title follows).
+- Decisions 28-32, made during the K follow-ups, approved by the user.
+- `feature/japanese-language-identity` (J0-J12, K1-K13) merged into `main` and pushed with the H1
+  work that was already there - the first push since 1.9.20, so the first CI run of `tests.yml`.
+
+**Tests**: 1502 (no change).
+
+### Phase K13 — Final check and archive (2026-10-16)
+
+- **The suite on a fresh clone with only requirements.txt installed** - item 1's last step,
+  stopped earlier because the runs drew on the user's screen, done once K12 made them quiet:
+  **1491 passed, 11 skipped, 0 failed**, and no window on the user's desktop. Nine of the skips
+  need fugashi + UniDic, which requirements.txt leaves out; one inspects a built EXE; one writes
+  the real clipboard. On CI the clipboard test runs, which leaves ten - `DEFAULT_MAX_SKIPPED`
+  exactly. `tests.yml` now names them, so the next test that needs either knows to raise
+  `--max-skipped`. CI itself has still never run: `tests.yml` reaches GitHub only with a push.
+- **AGENTS.md** (untracked, not this project's file): it was CLAUDE.md as of `d3ee844`
+  (2026-09-08), line for line, and is now regenerated from the current CLAUDE.md; the old copy is
+  kept outside the repo. Still untracked.
+- K1-K13 archived in ROADMAP_DONE.md, with the manual checks and what is still the user's call.
+
+**Tests**: 1502 (no change).
+
+### Phase K12 — Quiet tests: off the user's screen, off the network (2026-10-16)
+
+The user, after K11: the tests threw windows all over the screen and interrupted other work, and
+the translation usage was used up.
+
+**Found**
+- **Windows**: the Tk tests drew real windows on the developer's own desktop - popups, dialogs,
+  History, the dictionary windows, the 1400x850 main window - and the app raises its windows on
+  purpose (`lift()`, `focus_force()`, `-topmost`), so every one took the keyboard focus. Mutation
+  checks re-ran them dozens of times.
+- **Quota**: not the suite - every API test mocks `urlopen` and uses a fake key. It was the
+  measurement runs: `tools/eval_dictionary_prompt.py` and `tools/eval_ocr_prompt.py` made about 197
+  real calls on the user's keys over two days (2026-10-15 about 145 in J, 2026-10-16 52 in K10;
+  Google 81, Groq 86, trial 30), each started without the user seeing a count first.
+- **Clipboard**: `test_it_really_reaches_the_windows_clipboard`, and every test that copies through
+  `RubyText._on_copy()`, wrote the user's real clipboard on every run.
+- Nothing stopped a test from reaching the network, sending keystrokes (the Replace path calls
+  `keyboard.press_and_release('ctrl+v')`), registering a hotkey, opening a browser or writing the
+  registry. None did (measured below) - but nothing prevented it.
+
+**Added**
+- `tests/quiet_session.py`, installed by `conftest.py` before any test module is imported:
+  - **A private desktop** for the Tk thread (`CreateDesktopW` + `SetThreadDesktop`; never
+    `SwitchDesktop`). Windows there are mapped, laid out, measured, focused and topmost as before,
+    and none reaches the user's desktop (measured). Without it, creating Tk skips the test with the
+    reason - never the screen - except on CI or with `CROSSTRANS_TESTS_ON_SCREEN=1`.
+  - **No network but loopback**, and never the running CrossTrans's lock port: refused with
+    `SessionGuardError`, an `OSError`.
+  - **Tk's clipboard in memory** - the Tcl `clipboard` command, which Python's `clipboard_*` and
+    Tk's own text and entry bindings both write through; `pyperclip.copy` and the
+    `win32clipboard` writers refused.
+  - **Keystrokes, hotkeys, browser windows and registry writes** refused (`keyboard`,
+    `user32.SendInput` / `keybd_event` / `RegisterHotKey`, `webbrowser`, `os.startfile`, `winreg`).
+  - Every refusal is recorded, so a test whose code swallowed one still fails, naming what it
+    reached for; the terminal summary says where the run's windows went.
+- `real_clipboard` fixture: the one test whose point is the real clipboard runs on CI, or locally
+  with `CROSSTRANS_TESTS_REAL_CLIPBOARD=1` - and then the user's content is saved first and put back.
+  Not by default: saving and restoring cannot put every format back (files copied in Explorer,
+  some images), and a clipboard history records the test's text anyway.
+- `--confirm-calls N` on both eval tools: until it names the exact number of real calls the run
+  would make, the tool prints the plan (`PLAN: 20 real API call(s) on your keys (Groq 20)`) and
+  sends nothing (exit 3).
+
+**Measured** - the full suite run under a watcher on the user's desktop (a separate process that
+lists every top-level window of the test process tree every 20 ms): **0 windows on the user's
+desktop, 0 samples with one in the foreground**, in four full runs and the mutation runs. No test
+changed the clipboard (its sequence number, logged per test). No test was refused anything: the
+guards found no existing offender. A private window station, which would have isolated the
+clipboard as well, is refused for this user (Windows error 5).
+
+**Fixed during implementation**
+- A test that made a Tcl-only interpreter left the next interpreter unable to read `init.tcl`
+  under pytest's capture, in some test orders only. The Tcl-only case is now checked on the
+  arguments (`quiet_session.wants_windows`), with no interpreter made.
+
+**Tests**: 1421 -> 1501 passed + 1 skipped (the real-clipboard test, locally; it runs on
+CI). +74 `tests/test_quiet_session.py`, +7 for the eval tools' confirmation. 25
+mutations killed with `tools/mutation_check.py` - each safe to run: a broken guard is caught by a
+test that checks the guard is in place before calling anything.
+
+### Phase K11 — The EXE, built and checked (2026-10-16)
+
+**Built** - the branch at K10, version still 1.9.20 (the release number is the user's call), as
+`dist\CrossTrans_v1.9.20_branch_2026-10-16.exe` (66 022 675 bytes; 1.9.20 was 65 888 683). Not
+with `build_exe.bat`: its step 1 is `rmdir /s /q "dist"`, which would have deleted the released
+1.9.20 and 1.9.19 EXEs and a 1.9.19 test build that exists nowhere else, and its `pause` hangs
+an unattended run. Its steps were run by hand instead, into a scratch directory: the pre-flight
+check, PyInstaller with `CrossTrans.spec`, the post-build check; the EXE was then copied into
+`dist\` under a name no release uses.
+
+**Added**
+- **The post-build check now checks the glyph-evidence codecs** (`verify_furigana_bundle.py --exe`,
+  so `build_exe.bat` runs it with no change): `encodings.euc_jis_2004`, `cp932`, `gb2312` and
+  `big5hkscs` - `lang_id.GLYPH_CODECS`, which a test keeps in step. Without one, `lang_id` turns
+  glyph evidence off and the only sign is a line in the EXE's log.
+- **Found while checking the check**: the first version read only the PYZ and called the new
+  build's codecs missing. PyInstaller puts the `encodings` package in `base_library.zip`, with
+  what Python needs to start; `bundled_module_names()` reads both. It also showed the released
+  1.9.20 carries the four codecs too - PyInstaller bundles the whole package by itself, so the
+  spec's hidden imports (J8) are insurance, not the cause.
+
+**Checked** - the branch build: `kanwadict4.db` bundled (1 158 archive entries), the four codecs
+bundled, `src.core.lang_id` and the K-phase modules in the PYZ. Not checked here: running it.
+The app's glyph evidence is switched on lazily, at the first kanji-only text, so the log line
+"[LangID] glyph evidence disabled" can only be looked for after a real translation - the manual
+steps below.
+
+**Tests**: 1413 -> 1421 (+8, `tests/test_furigana_hardening.py`: the codec list is `lang_id`'s,
+the spec bundles it, all present passes, a missing one is named, codecs in base_library.zip and
+modules in the PYZ both count, a build without the codecs fails the guard, an unreadable file is
+reported not raised; the real-build test now also checks the codecs of any build that holds
+`lang_id`). 5 mutations killed, with `tools/mutation_check.py`.
+
+### Phase K10 — The measurements J left open: the trial model, phrases, screenshots (2026-10-16)
+
+Real API calls on the user's own keys and the trial proxy - 52 in all (trial 10, Groq 20, Google
+22, two of them rate-limited and re-run). `config.json`'s hash was taken before and after every
+run and never changed.
+
+**Measured**
+- **The trial model (llama-3.3-70b through the trial proxy), the ten false friends alone,
+  translate mode**: the `[[SOURCE: ...]]` line came back **10/10** and never leaked into a
+  translation; verdicts Japanese 4, Unknown 4, Chinese 2 (汽車, 床 - the words every model takes
+  for Chinese alone). The worry that a trial user would see the "Japanese / Chinese" row on every
+  kanji-only text does not hold: it is as often as on Gemini and gpt-oss (3-4 in ten).
+- **Ten kanji-only phrases of known language** (the new `--input phrases`, five Japanese headline
+  compounds, five Chinese sentences): gpt-oss-120b on Groq, each twice - marker **20/20**, right
+  language **19/20**, the miss an Unknown; gemini-2.5-flash - marker **10/10**, right **9/10**, the
+  miss an Unknown. **No phrase was ever answered with the wrong language**, and every repeat agreed
+  with the first. With context the models settle what a word alone cannot; when unsure they say so,
+  and the app asks.
+- **Screenshots** (the new `tools/eval_ocr_prompt.py`: ten texts drawn with Windows' own Japanese,
+  Simplified and Traditional fonts, sent through the app's `ocr_prompt()` and read with its
+  `parse_ocr_result()`), gemini-2.5-flash: every answer had all three sections including
+  `===SOURCE LANGUAGE===` (**10/10**), every text was read exactly (**10/10**), and the language
+  was right **10/10** - kanji-only signs and headlines (立入禁止, 首相官邸前抗議集会, 東京大学) and
+  Chinese sentences nothing in the text settles (他在大學學習中文。, 今天天氣很好。) included.
+- **Not measured**: OpenAI, Anthropic, DeepSeek, Mistral and the rest - no key for them here.
+
+**Added**
+- `tools/eval_ocr_prompt.py` (`--providers`, `--key`, `--texts`, `--delay`); output
+  `logs/eval/ocr_<label>.jsonl`, images in `logs/eval/ocr_images/`.
+
+**Tests**: 1392 -> 1413 (+21, `tests/test_eval_ocr_prompt.py`: every case's "what settles it"
+matches the app's own evidence, both languages covered, a case drawn into an image - with Arial
+where a CI image lacks the Japanese fonts, so it never skips - and the scoring of full, Unknown,
+misread and section-less answers).
+
+### Phase K9 — Tooling: the mutation runner, the CI floor, repeats and phrases (2026-10-16)
+
+**Added**
+- `tools/mutation_check.py` - the runner every phase since J1 was checked with, until now a
+  scratch file each session rewrote. A list file names `(name, path, old, new, pytest_args)`; each
+  mutation is applied, its tests run, the file restored byte for byte (also on an error or
+  Ctrl+C). It keeps the two lessons learned: **stale bytecode** - two same-size mutants written
+  within a second shared the .pyc's (mtime, size) key, so the second run executed the first; the
+  module's bytecode is deleted and none is written - and **a run where no test ran is not a kill**.
+  A pattern found 0 or 2+ times is a setup failure; lists written with `\n` match CRLF files.
+  Output: one line per mutation, `logs/mutation_<list>.jsonl`, exit 0 only when all were killed.
+- `tools/eval_dictionary_prompt.py --repeat N`: every case N times, and each provider's
+  **consistency** (the share of repeats agreeing with the case's most common answer) - one call
+  per word says what a model answered once, not what it answers.
+- `--input phrases` (translate mode): ten kanji-only phrases and sentences - five Japanese headline
+  compounds, five Chinese sentences - every one still asked about (no kana, no glyph or grammar
+  evidence; a test keeps it so as the evidence grows), scored against the known language. A word
+  alone is ambiguous by nature; a phrase is not, so this measures whether the marker is answered
+  correctly when there is context.
+
+**Changed**
+- CI's `--min-total` 500 -> **1350** (the suite is 1 392): a test file that quietly stops being
+  collected now fails the build instead of passing with fewer tests.
+
+**Tests**: 1360 -> 1392 (+32): `tests/test_mutation_check.py` (8 - killed and restored with CRLF, a
+multi-line pattern on a CRLF file, an equivalent survivor, a missing and a doubled pattern, a test
+that never ran, two same-size mutants in a row, an unusable list), `tests/test_eval_tool.py` (24 -
+every phrase still asked, balanced, not a measured word; consistency; the verdict family; the
+argument checks; a scripted run of ten phrases twice: 20 calls, repeats adjacent, 18/20 correct).
+The runner was then used on K8's real list - same five kills. 10 mutations killed.
+
+### Phase K8 — The old deferred items: D18, D12, and a desk check of D11 (2026-10-16)
+
+**Removed (D18)**
+- `TranslationService.do_translation()` - no caller since the language hotkeys moved to
+  `do_translate_or_fix()`, and it never learned the J6 source hint, so reviving it would have
+  brought the old rule back. The docstrings that described themselves against it now name the
+  method that is used.
+- `TranslatorApp._open_settings_dictionary_tab()` - no caller; and `open_dictionary_tab()` on the
+  Settings window, whose only caller it was. `_focus_settings_window()` stays: it has another.
+
+**Fixed (D12)**
+- **A model two providers list went to the first of them, whatever the key.** Thirteen IDs are
+  listed twice in `model_provider_map` (gpt-oss-120b by Cerebras and SambaNova; Llama, Gemma,
+  Mistral and Qwen IDs by HuggingFace and another), and under provider 'Auto' the loser's users
+  sent their key to the wrong API. `_identify_provider()` now lets the key decide between the
+  claimants (`_claimant_for_key()`): the provider whose prefix it carries; else one with no known
+  prefix, since a key without that prefix is not that provider's (a key that is not `csk-...` is
+  not Cerebras's, so gpt-oss-120b goes to SambaNova - whose keys are bare UUIDs and could never get
+  a prefix of their own); else the first, as before. Twelve of the thirteen now resolve; Together
+  vs SiliconFlow (`deepseek-ai/deepseek-r1`, `qwen/qwq-32b-preview`) cannot - neither has a prefix.
+  With no key, the first still wins. Decision 31.
+
+**Narrowed (D11, no code)**
+- The eight providers whose default models were never checked, against their own deprecation
+  pages: **Anthropic's three, xAI's two and DeepSeek's two are gone**; Together's are gone and
+  going (removal 2026-10-22); OpenAI's `gpt-3.5-turbo` shuts down 2026-10-23; Mistral's `-latest`
+  aliases move by policy; SiliconFlow's are not on its discontinued list; Perplexity's Sonar chat
+  completions became the Agent API in July. The table and the sources are in DEFERRED D11.
+  Nothing is replaced in code: the replacements the providers name are unverified by a call, and
+  the table users receive is the Worker's, whose deploy is the user's call.
+
+**Tests**: 1331 -> 1360 (+29): `tests/test_provider_claims.py` (28 - every shared ID with each
+claimant's key, the patternless claimant, D12's wrong rows, the unresolvable pair, no key, a model
+one provider lists) and a guard that the D18 code stays gone. 5 mutations killed.
+
+### Phase K7 — History: lines cut to the row, and the first rows at once (2026-10-16, D17)
+
+**Fixed**
+- **A long Japanese line ran off its row, and its "..." never showed.** A line was cut by
+  character count - whole up to 60, else 57 and "..." - but 57 kanji and kana in Segoe UI 10 are
+  685 px, and a row has 560: the label was clipped at the edge with the ellipsis out of sight.
+  Latin was cut too early instead (a 63-character sentence fits). Lines are now cut to the row's
+  width in pixels, ellipsis included (`ruby_text.fit_segments()`, replacing `truncate_segments()`):
+  measured with the row's own font as `RubyLine` draws it - a ruby pair takes the wider of base
+  and reading and is still never split - and, for a plain label, less the 4 px a `ttk.Label` puts
+  around its text (measured). Only the first 200 characters of a line are ever measured.
+- **D17 - the dialog took about a second to show anything.** It built all its rows before
+  appearing: ~8 native widgets a row, each through ttkbootstrap's style wrapper (0.7 s for 100
+  rows, profiled), then one layout pass over ~800 widgets (1.1 s). It now builds the first 12
+  rows - a screenful - and appears, then adds the rest in batches of 10 between events.
+  Measured under `mainloop` with the app's root, 100 entries, median of 5: the first idle moment
+  (first rows laid out and drawn) **0.54 s -> 0.21 s** without readings, **0.60 s -> 0.12 s** with
+  them; the longest the UI could not answer, **0.48 s -> 0.29 s** / **0.55 s -> 0.31 s**; the whole
+  list about the same (1.1-1.4 s). A search or a delete cancels the batches it replaces; closing
+  the window stops them - by the toplevel's own `<Destroy>` only, since a child's propagates to
+  that binding too (CLAUDE.md Known Issues); every row binds the wheel as it is built.
+
+**Tests**: 1315 -> 1331 (+16, `tests/test_history_dialog.py`): `TestFitSegments` (the four
+`truncate_segments` cases, now in pixels, plus the head of a longer line), `TestCutToTheRow` (a
+Japanese line's "..." inside the row, a Latin line that fits shown whole, a long Latin line, the
+arrow kept, a document measured only so far, the label's padding, the cut leaving room for it),
+`TestRowsInBatches` (only the first rows before showing, the rest in order, a search showing only
+its results and cancelling the old batches, a row destroyed midway not stopping the rest, closing
+quietly, the wheel on a late row, the first rows well before the last). The dialog fixture waits
+for every row. 11 mutations killed - four only after tests were added for them.
+
+### Phase K6 — A Chinese sentence is known by its function words (2026-10-16)
+
+Measured first, as the proposal asked. **The problem was bigger than one example**: of Tatoeba's
+89 179 Chinese sentences, **46 634 (52%)** carry no glyph that only Chinese writes - Traditional
+ones, and Simplified ones that use only characters Japanese shares - so the app asked the model for
+a `[[SOURCE: ...]]` line on every translation of them, and the main window's Dictionary asked the
+user "Japanese or Chinese?" about 這是我的書。. Of Tatoeba's 248 924 Japanese sentences, 100 are as
+open.
+
+**Added**
+- `lang_id.grammar_evidence(text)`: a punctuated sentence holding **two distinct Chinese function
+  words Japanese does not write** - 是 很 們 這 嗎 呢 吧 麼 你 她 它 - and no Japanese-only glyph is
+  Chinese (variant: the side more of its hanzi belong to only; a tie is Simplified). It is the
+  last step of `text_evidence()` (`'zh-grammar'`), after kana and glyphs, so it reaches the prompt
+  clause, `nlp_manager.detect_language()` (the Dictionary) and History's label. Settles **8 082 of
+  the 46 634 (17.3%)**, 這是我的書。 among them; calls **no** Japanese text Chinese - the 100
+  sentences, the 177 555 all-kanji words of pykakasi's dictionary as terms, as one-word sentences
+  and in 10 000 lists - and 4 of 20 000 nonsense compounds built to trip it.
+- `tools/measure_cjk_evidence.py` - the measurement, reproducible: `evidence` for this rule,
+  `readings` for D19 (K1). Downloads Tatoeba's exports (CC-BY 2.0 FR) once into
+  `logs/eval/tatoeba/`; no API calls.
+
+**Rejected on the numbers** (Decision 30): the proposal's own rules - "a long sentence without
+kana" (14 of the 100 Japanese sentences at 6+ hanzi with 。！？) and "a fullwidth comma" (safe on
+the sentences, 13% recall, but every academic-style Japanese list 東京，大阪 would turn Chinese) -
+and the wider function-word set with 的 了 我, which settled 49% but called **31%** of the stress
+compounds Chinese (目的完了。, 是正完了。): Japanese writes those three in compounds.
+
+**Tests**: 1279 -> 1315 (+36): `tests/test_lang_id.py` (+22: the rule, its exclusions, glyphs and
+kana first, evidence over a model, every word of pykakasi's dictionary, the codec guard, the
+prompt / Dictionary / History hearing it), `tests/test_dictionary_flow.py` (+1: 這是我的書。 opens
+the Dictionary in Chinese without asking), `tests/test_measure_cjk_evidence.py` (13, the tool's
+pure parts, no network). One J2 case, 這是我的書。 "stays unknown", now reads 這是我的書 - the
+unpunctuated form still does. 10 mutations killed.
+
+### Phase K5 — The main window's own Japanese / Chinese row (2026-10-16)
+
+**Added**
+- **The popup's row, in the main window**, beside "Original:" and before the Dictionary button.
+  When a translation of kanji-only input came back without a verdict, the Reading pane stayed
+  plain and nothing let the user say which language it was; the popup has asked since J6. Now:
+  "Kanji-only text - read it as: [Japanese] [Chinese]" once a translation of exactly this input
+  could not place it, and "Kanji-only text - read as Chinese. [Read as Japanese]" for a term a
+  model or the user placed (the popup's rule, `source_marker.source_row()`, Decision 29). An
+  answer is kept as the input's verdict (K3) and the input is translated again with it stated,
+  **skipping the cache** - the cached entry is the translation the answer is correcting.
+- **Untranslated, unplaced kanji ask nothing** - typing 汽車 is not a question, and the row would
+  flicker with every keystroke. A text handed over by Open Translator counts as translated: the
+  popup's result is of exactly that text.
+- Shown with furigana off too: the answer changes the meaning, not only the readings. It sits in
+  the existing header row and adds no height (measured: header, row and Dictionary button all
+  28 px).
+- `TranslatorApp._refresh_source_row()` (run from `_refresh_reading_pane()`, before its furigana
+  and collapse checks, so typing, translating and the Dictionary's answer all refresh it),
+  `_choose_input_source()` (ignored while a translation runs), `_do_retranslate(source_language=)`,
+  `_update_translation_with_original(..., source_text=)` and `_translated_input` (a failed
+  translation is not a translation of the input).
+
+**Tests**: 1264 -> 1279 (+15): `TestMainWindowRow` and `TestMainWindowTranslation` build the real
+main window (`show_popup`) on a `TranslatorApp` made with `__new__`, with a real verdict memory -
+the row's place and height, when it asks, when it offers a change, sentences / kana / Latin, other
+text dropping the question, furigana off, an answer kept and re-translated, no answer during a
+running translation, the answer stated with the cache skipped, a failure not counted. 11
+mutations killed.
+
+### Phase K4 — A term a model placed can be read as the other language (2026-10-16)
+
+**Added**
+- **"Kanji-only text - read as Chinese. [Read as Japanese]"** on the quick-translate popup. A
+  model asked about a word alone answers confidently and is sometimes wrong - measured in J1/J4,
+  汽車 and 工作 came back Chinese ("car", "work") - and then there was no way to say otherwise:
+  the J6 row only appeared when the model said Unknown. Now a term the model (or the user,
+  earlier) placed shows what it was read as, and one button for the other language; it
+  re-translates with that language stated, as the J6 row does (Decision 27). A sentence - any
+  whitespace or sentence punctuation - gets no such row: it carries its own context, and the
+  models read it correctly; a row under every Chinese sentence would be noise (Decision 29).
+- `source_marker.source_row(text, verdict)` -> `ROW_ASK` / `ROW_CHANGE` / None, with
+  `other_language()` and `language_label()` - pure, shared with the main window (K5).
+  `quick_translate.fill_source_row()` draws either row; `_asks_source()` became `_source_row()`.
+
+**Changed**
+- **The popup's answer is kept before the re-translation is sent**
+  (`remember_user_source`, K3), so it holds even when that request fails, and it replaces the
+  model's verdict on History's older entries of the text (Decision 28).
+
+**Tests**: 1232 -> 1264 (+32): `TestSourceRow` (16 cases, the other language, the labels),
+`TestPopupChangeRow` (both directions, the height budget, no row for a placed sentence or a
+grammar fix, the J6 row unchanged), the answer kept before the request; in
+`tests/test_popup_source_language.py` the `_asks_source` table became `_source_row`'s (+2 cases),
+and the "no row when known" case for a placed term moved to the new row. 9 mutations killed.
+
+### Phase K3 — The Dictionary keeps the user's "Japanese or Chinese?" answer (2026-10-16)
+
+**Fixed**
+- **The answer to "Kanji-only text: Japanese or Chinese?" was forgotten at once.** Opening the
+  Dictionary again on the same text asked again, and the main window's Reading pane never
+  learned it - so 東京大学 typed into the main window, placed as Japanese in that dialog, still
+  had no readings. The answer is now the text's verdict: for this session, and on History's
+  entries of exactly that text, so it survives a restart and their History rows get readings.
+  The Reading pane re-reads the input at once. Picking a pack that is neither Japanese nor
+  Chinese from the same list says nothing about the kanji and is not kept; nor is an answer to
+  the generic "Cannot detect language" dialog.
+
+**Added**
+- `TranslationService.remember_user_source(text, language)` - a verdict the user gave outside a
+  translation. It leaves `last_source_language` alone (that belongs to the last translation)
+  and logs `[LangID] user settled source=.. chars=..`, counts only.
+- `HistoryManager.set_source_verdict(original, verdict)` - writes the verdict *and* the label on
+  every entry of that exact text, replacing a model's: the user outranks it (Decision 22), and an
+  older entry left disagreeing would come back if the newer one were deleted. Decision 28.
+- `DictionaryPopup.configure_callbacks(..., on_source_chosen=)`, wired to
+  `TranslatorApp._on_source_chosen()`.
+
+**Tests**: 1202 -> 1232 (+30): 24 in the new `tests/test_source_choice.py` (History, the
+service, the app), 6 in `tests/test_dictionary_flow.py` (`TestTheAnswerIsKept`, a real service
+behind the real dialog: the answer is kept, the same text opens without asking, Chinese stays
+Chinese, another pack, Cancel and the generic dialog keep nothing). 13 mutations killed.
+
+### Phase K2 — The failed-update dialog no longer freezes the app (2026-10-16, D16)
+
+**Fixed**
+- **"Update Failed" was invisible and held every input of the app.** `UpdateFailedDialog` called
+  `grab_set()` and `transient(root)` on the app's root - withdrawn for the life of the process -
+  and then `wait_window()`. Tk withdraws a transient window whose master is withdrawn, so the
+  dialog was never shown, its grab locked the popup, the main window and the tray's windows, and
+  `wait_window()` waited for a click on a window nobody could see. It is what a user meets right
+  after a failed self-update. Found by reading the code on 2026-10-15; **reproduced** on
+  2026-10-16 before the fix (state `withdrawn`, viewable 0, the grab held by the dialog). It is now
+  raised with topmost + lift + focus_force and released after 100 ms (`_raise_without_grab()` in
+  `src/ui/dialogs.py`), and `wait_window()` stays - safe now that the window is mapped.
+- **The API-error, trial-exhausted and trial-feature notices** grabbed too: shown, but locking
+  every other window of the app while open, possibly behind another application. Same fix.
+
+**Left alone**: `PasswordDialog` (`src/core/auth.py`) and the update progress window
+(`src/ui/settings/update_manager.py`) also grab, but on the Settings window, which is visible,
+with `transient()` - they map, and keeping Settings modal under them is the intent.
+
+**Tests**: 1184 -> 1202 (+18, new `tests/test_dialogs.py`): the failed-update dialog is shown under
+the withdrawn root, holds no grab, is raised then released, and returns each choice; the three
+notices are shown without a grab, raised then released, and open the API Key tab; the module calls
+neither `grab_set` nor `transient`. Eleven mutations - each grab and the transient put back, the
+original D16 pair, the raise or its release removed, Cancel returning the option, the restart
+offered without a pending file - all killed.
+
+### Phase K1 — The suite on a clean machine (2026-10-16)
+
+The first of the follow-ups proposed after J12: run the suite the way CI will - a fresh venv
+with `requirements.txt` and nothing else - instead of on the development PC, which also has the
+Japanese NLP pack (fugashi + UniDic). `.github/workflows/tests.yml` is among the commits on
+`main` that were never pushed, so CI has **never run**; this is what its first run would have
+found.
+
+**Fixed**
+- **Five word-chip tests failed without the Japanese NLP pack** (`tests/test_word_chips_ruby.py`,
+  since F6). Dictionary mode tokenizes Japanese with the pack; without it the word area splits
+  on whitespace, so the test sentence came back as one chip and `chip(frame, "勉強")` found
+  nothing. The tests are about the chips, not the tokenizer: the pack's split of the two test
+  sentences is now recorded in the file and pinned at the `nlp_manager` boundary, and a new test
+  checks the record against the real pack wherever the pack is installed.
+- **One of them asserted fugashi's reading**: 今日 -> きょう in 今日は日本語を勉強します。. With
+  pykakasi alone the line reads 今日 as こんにち (its greeting entry 今日は -> こんにちは), though
+  今日 alone is きょう. The test is about where a chip's reading comes from - the line, not the
+  chip - so it now compares the chip with what the line reads. Which reading is right stays with
+  the engine's fugashi-only tests (`TestReadingQuality`), which already assert きょう.
+- The J12 entry below quoted the Vietnamese test data it removed; reworded without the quotes.
+
+**Found - DEFERRED D19**: pykakasi, the only reading provider a fresh install has, reads at least
+one word differently from fugashi in **898 of 3000** random Tatoeba sentences (30%) - 彼の as
+かの, 君 as くん, 人 as にん among the most frequent. Not fixed: the options trade the EXE's size
+against reading quality, which is the user's call.
+
+**Tests**: 1183 -> 1184 (+1, the record check). Clean venv (Python 3.14.0, pykakasi 2.3.0, no
+fugashi): **1169 passed / 5 failed / 9 skipped** before, **1175 passed / 0 failed / 9 skipped**
+after - the compound test that skipped there now runs, and the record check skips. The nine
+skips are the tests that need the Japanese pack, inside the CI guard's ceiling of ten.
+
+### Phase J12 — Final check, docs and archive (2026-10-15)
+
+The last phase of the Japanese language-identity work: an end-to-end check of the whole flow,
+the documentation, and the archive. The work is complete on its branch; nothing was released.
+
+**Fixed**
+- **A stray `[[SOURCE: ...]]` line could reach the popup.** An end-to-end smoke run (real
+  widgets, a scripted model) chose "Japanese" in the popup's chooser; the re-translation was
+  told the language, the model wrote a marker anyway, and nothing removed it - the answer's
+  first line was `[[SOURCE: Unknown]]`. `source_marker.strip_stray_markers()` now removes the
+  double-bracket form from every answer `_call_with_source()` returns, whether the prompt asked
+  or not; a bare `SOURCE: ...` line is left alone when nothing asked, since it could be the text.
+- **Vietnamese test data** (a greeting, a language name and a noun in four new test files) broke
+  the project's no-Vietnamese rule: replaced by French, Korean and Russian samples, the two
+  Vietnamese-only detection cases by Cyrillic ones, so the count holds.
+- **The mutation runner could test the wrong mutant**: two same-size mutants written within one
+  second shared the `.pyc`'s (mtime, size) key, so the second run executed the first. Found by a
+  result that flipped between runs. The runner now deletes the module's bytecode before each
+  mutant and writes none; **every suite was re-run** - all mutations still killed (three
+  patterns had to follow later refactors), the one equivalent mutant still equivalent.
+
+**Docs**
+- README: Furigana and Dictionary Mode describe kanji-only text, the chooser and a Dictionary
+  that knows its languages.
+- CLAUDE.md: a **Language Identity** section (the order, where verdicts come from and where they
+  are kept, the measurements, the traps) and two Common Tasks rows.
+- ROADMAP_DONE.md: the "J" entry - the user's answers, every phase with its commit and test
+  count, the decisions, the leftovers and a 14-row **manual acceptance checklist**.
+  ROADMAP.md: the branch's status. DEFERRED.md: **D18** (dead code). `TODO.md` deleted, as its
+  own bookkeeping section asked once the phases were done - its last version is
+  `git show 5cc8736:TODO.md`.
+
+**Tests**: 1173 -> 1183 (+10 in `test_source_marker.py`), 0 failed, 0 skipped. Four mutations
+on the fix - stray markers kept, the bare form stripped too, either path unstripped - killed.
+
+**Not done, by design - the user's call**: no version bump, no build, no tag, no merge into
+`main`, no push. Whether this ships in 1.9.21 or 1.9.22 is open (ROADMAP.md).
+
+### Phase J9 — History rows carry readings (2026-10-15)
+
+The History list showed Japanese in every entry and read none of it - its rows were plain
+labels, a non-goal in 2026-08 that the user brought into scope (TODO.md Q5).
+
+**Added**
+- **Readings on the rows**: the original by its own evidence, else the verdict a model gave for
+  it (J4's `source_verdict` - never the entry's `source_lang`, which has always been a guess from
+  the characters); the translation by `lang_id.output_hint`. A line is still cut at 57
+  characters plus "...", now by segments (`ruby_text.truncate_segments()`): a plain run may be
+  cut, a ruby pair is kept whole or dropped - half of 東京 under とうきょう would be a wrong reading.
+  Readings are generated for the first 120 characters, so a word that straddles the cut is read
+  in context. Furigana OFF keeps exactly the labels the rows always had.
+- **`ruby_text.RubyLine`**: one canvas per annotated line, text and readings drawn as canvas
+  items. Each ruby pair takes a slot as wide as the wider of base and reading, so とうきょう never
+  runs into its neighbour. Fonts and character widths are shared across lines.
+- Clicking anywhere on an annotated line - the reading row included - loads the entry; the wheel
+  scrolls over it (it is bound per widget, as the 2026-09 fix requires, never `bind_all`).
+- `HistoryDialog(..., furigana_enabled=)`, passed by the app from the Settings toggle.
+
+**Fixed during implementation**
+- **A frame and two labels per segment made the dialog take 4.1 s** to open with 100 Japanese
+  entries (~4,500 widgets; on Windows every Tk widget is a native window). Drawing each line on
+  one canvas brought it to 3.3 s - and **a Font object per line was 1.9 s of that**: Tk searched
+  for a CJK fallback font afresh on every measure (0.7 ms a call). Shared fonts and per-character
+  widths: **1.27-1.30 s, against 0.93-0.95 s for the same dialog without readings.** That
+  baseline is the dialog's own and is over the 300 ms the plan budgeted - recorded as
+  `DEFERRED.md` **D17**, not changed here.
+
+**Tests**: 1154 -> 1173 (+19 in `tests/test_history_dialog.py`: truncation by segments, each
+hint, the old label never trusted, click and wheel over a reading, search, a wide reading
+never overlapping, shared fonts, the app passing the setting, and 100 Japanese rows within a
+generous time bound), 0 failed, 0 skipped. Ten mutations - a pair split or a plain run dropped
+by the cut, the setting ignored, the label trusted, the translation hinted by its target only,
+the click unbound, readings overlapping, a Font per line, the app not passing the setting, long
+lines uncut - each made the suite fail and was restored.
+
+### Phase J8 — A Japanese screenshot shows what it read, with readings (2026-10-15)
+
+Win+Alt+S showed only the translation - the hotkey popup shows the selection with its readings
+above it - and History stored the literal `[Screenshot OCR]` as the original (TODO.md F7, Q6).
+
+**Changed**
+- **The vision prompt asks for the text's language** too (`ocr_prompt()`): a
+  `===SOURCE LANGUAGE===` section between `===ORIGINAL===` and `===TRANSLATION===` - neutral
+  wording, Unknown allowed (Decision 22, the J4 principle for images). `parse_ocr_result()` reads
+  the sections in any order and keeps the old fallback when the answer lost them.
+- **The OCR'd text is shown with readings** above the translation when it is Japanese: kana or a
+  Japanese-only glyph, else the section's verdict - a Chinese-only glyph beats a "Japanese"
+  verdict. Furigana off, or no sections, shows no block.
+- **The verdict is recorded** for the OCR text before the popup opens, so the popup's hint, its
+  Dictionary (J5) and its "Japanese or Chinese?" row (J6) all know it. Logged as
+  `[LangID] screenshot verdict=.. chars=..`.
+- **History keeps the OCR text** as the entry's original (Q6), with its verdict; the
+  `[Screenshot OCR]` placeholder only when the answer lost its sections. Screenshot entries keep
+  their own `source_type`, so they are still never served as a text-translation cache hit.
+
+**Tests**: 1132 -> 1154 (+22 in the new `tests/test_screenshot_ruby.py`), 0 failed, 0 skipped.
+Ten mutations - the section never asked for, the verdict not normalized, an answer without a
+translation accepted, the verdict not recorded or ignored, every OCR text read as Japanese, the
+setting ignored, History keeping the placeholder or dropping the verdict, the block never reaching
+the popup - each made the suite fail and was restored. (One run had first "killed" every mutation
+through a broken test file; the runner now reports a collection error as an error, not a kill.)
+
+### Phase J7 — The main window reads what a translation placed (2026-10-15)
+
+The Reading pane under the input box had no hint at all - its comment said so: kanji-only input
+"stays plain rather than being guessed at" - so 東京大学 typed into the main window never got a
+reading, even after a translation had settled that it is Japanese. The output box, the grammar
+result and the expanded view took only the target language.
+
+**Changed**
+- **One question for the main window**: `TranslatorApp._input_source()` asks
+  `TranslationService.source_language(text)` (new, public; J6's `_source_hint` builds on it):
+  the input's own evidence, else the verdict a model or the popup's chooser gave for exactly that
+  text - looked up stripped, as translations store it. No request while typing; the pane never
+  opens a window.
+- **Reading pane**: reads kanji-only Japanese once it is placed, and a finished translation
+  schedules a refresh, since that is when the verdict arrives. Type 東京大学 → placeholder; press
+  Translate (the model says Japanese) → とうきょうだいがく.
+- **Output box** and **expanded view**: `lang_id.output_hint(source, target)` - Japanese quoted
+  in an English translation of Japanese is read. `ExpandedTranslationWindow.show(...,
+  source_language=)`.
+- **Grammar result**: read when the input's language is settled as Japanese.
+
+**Tests**: 1118 -> 1132 (+6 in `test_reading_pane.py`, +8 in `test_main_window_ruby.py`; both
+fixtures now carry a real service and an input box - the tests that say "kanji-only stays plain"
+still pass unchanged, because nothing placed their text), 0 failed, 0 skipped. Ten mutations -
+the pane ignoring the settled language or rendering without it, the verdict looked up unstripped
+or ignored, the update, the new box, the expanded view or the grammar result back on their old
+hints, the expanded view not told the source, no refresh after a translation - each made the
+suite fail and was restored (the last only after the test was made to drain the refreshes
+already queued at construction).
+
+### Phase J6 — The popup reads kanji-only Japanese, and asks when nobody knows (2026-10-15)
+
+A kanji-only selection - 勉強, 東京大学 - never got the popup's source block: without kana there
+was no hint, and the block needs one. A grammar fix of kanji-only text stayed plain, and Japanese
+quoted inside an English translation (`The word 東京 means Tokyo.`) too.
+
+**Changed**
+- **The source block** takes its hint from the text's evidence, else the verdict the model gave
+  for exactly that text (J4): 勉強 called Japanese gets 勉強[べんきょう] above the translation;
+  called Chinese or Unknown, no block. (`TranslationService._source_hint()`, used by
+  `do_translate_or_fix()` and `redo_translation()`.)
+- **The translation box** uses `lang_id.output_hint(source, target)`: the target as before, plus
+  Japanese runs in a translation *of* Japanese into a non-Chinese language. A **grammar fix**
+  keeps its source's language: read when the original's characters or verdict say Japanese.
+  The height budget and the box use the same hint, so nothing clips.
+- `TranslatorApp.show_quick_translate(..., source_lang=)` defaults to
+  `translation_service.source_verdict(original)` - read on arrival, like the model credit, not
+  carried through the queue (Decision 11's pattern).
+
+**Added**
+- **"Kanji-only text - read it as: [Japanese] [Chinese]"** - a row above the popup's buttons,
+  shown when a translation of kanji that prove nothing came back without a verdict (Unknown, a
+  missing marker, or a cache entry from before J4). Answering **re-translates with that source
+  stated** (`redo_translation(text, target, source_language=)`) and records it as the text's
+  verdict, so the Dictionary (J5) and History see it too. Decision 27: J4 measured that an
+  unplaced translation can carry the other language's sense (先生 → "Mr."), so adding readings
+  alone would put べんきょう-style readings above a Chinese meaning. One more request, only when the
+  user asks for it. A row, not a dialog: nothing is blocked while the question stands.
+  `SOURCE_CHOOSER_PX = 36` (measured: 28 px row + 8 px gap) joins the height budget only then.
+- `source_marker.stated_clause()` and `translate_text(..., source_language=)`.
+- `tests/test_popup_source_language.py` (47 tests).
+
+**Tests**: 1071 -> 1118 (+47), 0 failed, 0 skipped. Fifteen mutations - the verdict ignored by
+the source hint, either block built without a hint, the user's source ignored, the stated clause
+naming the variant, the grammar fix or the translation box back to their old hints, the chooser
+ignoring a verdict, never built, out of the height budget or with its answers swapped, the app
+forgetting the verdict or re-translating without the answer, custom-prompt cancel and the
+replace preview dropping the verdict - each made the suite fail and was restored.
+
+### Phase J5 — The Dictionary opens in the right language; one rule for Japanese vs Chinese (2026-10-15)
+
+Three detectors gave three answers (TODO.md F5). `nlp_manager.detect_language()` called every
+kanji-only text "Chinese (Simplified)" - so 勉強 selected alone opened the Dictionary as Chinese,
+its chips without readings - and scored ordinary Japanese sentences at 0.63-0.70 against a 0.7
+threshold, so 「私は学生です。」 got "Cannot detect language" (F4). History labelled 勉強
+"Chinese". And a caller's Japanese hint could put Japanese readings on 我们.
+
+**Changed**
+- **`detect_language()`** asks `lang_id` for Japanese vs Chinese: any kana -> Japanese 1.0; a
+  kanji only one of them writes -> that language 0.9 (Traditional reported as such); kanji that
+  prove nothing -> `("Unknown", AMBIGUOUS_CJK_CONFIDENCE)` = 0.5. Re-measured F4 table: 勉強,
+  手紙, 東京大学 -> Unknown; 経済 -> Japanese; 私は学生です。, 「勉強」という言葉, Pythonで開発する,
+  友達に手紙を書きました。 -> Japanese 1.0; 我们在学习中文。 -> Chinese (Simplified); 說話 -> Chinese
+  (Traditional); 這是我的書。 -> Unknown (it was "Chinese (Simplified)", the wrong variant). The
+  Vietnamese, Latin and other-script branches are untouched.
+- **The Dictionary opens in the right language** (Q1, Decision 26). Kanji that prove nothing open
+  in the language a model reported for that exact text - the popup's translation always has one
+  (J4), the main window's input once the user pressed Translate - logged as
+  `[Dictionary] open language=.. via=model-verdict`. Without a verdict the selection dialog asks
+  **"Kanji-only text: Japanese or Chinese?"**, with Japanese and the Chinese packs listed first.
+  A Chinese verdict falls back to the other Chinese pack when only that one is installed; a
+  verdict whose pack is missing offers to install it. **No identification call**: untranslated
+  input goes straight to the user, because a word alone came back confidently wrong 2 times in
+  10 and unsure 3-4 times in J4's measurements, and one click costs nothing.
+- **What the lookup prompt is told** (`dictionary_source_language(language, trusted)`, renamed
+  from `user_chosen`): a detected Chinese is stated now too - detection says it only from a glyph
+  Japanese cannot write - as is a model's verdict or the user's pick.
+- **History's label** follows the same evidence: 勉強 is "Unknown" (shown as "→ English"), 経済
+  Japanese, 我们 Chinese (Simplified); stored entries are not migrated. A model's verdict, when
+  there is one, is the label already (J4).
+- **`furigana.should_annotate()`**: a Japanese hint no longer overrides a kanji Japanese cannot
+  write (我们, 说话 stay plain), and "・" alone no longer counts as kana - Chinese writes it between
+  the parts of a foreign name (列夫・托尔斯泰 used to be annotated).
+
+**Tests**: 1011 -> 1071 (+50 in the new `tests/test_language_detection.py`, +10 in
+`test_dictionary_flow.py`); 0 failed, 0 skipped. Nine tests updated on purpose - their premise
+was the old rule ("a detected Chinese is a guess", the `user_chosen` name). Sixteen mutations,
+fifteen killed; the sixteenth is equivalent - a model's verdict opened with `trusted=False` is
+still stated, because a verdict is always Japanese or Chinese, which are stated anyway.
+
+### Phase J4 — Translations learn the source language, and the model says what it decided (2026-10-15)
+
+The user's answers to TODO.md Q1 and Q7: the AI model decides what ambiguous kanji-only text is,
+and the ordinary translation prompts learn the source language too. This phase makes the model
+*say* what it decided; J5-J8 use the answer. Nothing visible changes yet, except that a translation
+of Japanese or Chinese text is now told which one it is when the characters prove it.
+
+**Measured first** - `tools/eval_dictionary_prompt.py --mode translate` (new), the ten kanji-only
+false friends sent alone through `translate_or_fix()` as a language hotkey would, target English,
+real API calls on the user's second key of each provider:
+
+| | gemini-2.5-flash | gpt-oss-120b (Groq) |
+|---|---|---|
+| Before - Japanese sense / Chinese sense | 6 (+ 結構 "Fine") / 3 | 5 (+ 結構 "Fine") / 4 |
+| After - wrote the `[[SOURCE: ...]]` line | **10/10** | **10/10** |
+| After - the line leaked into the translation | 0 | 0 |
+| After - said Japanese / Chinese / Unknown | 5 / 2 / 3 | 4 / 2 / 4 |
+
+Every "Japanese" came with the Japanese sense (9/9), every "Chinese" with the Chinese sense (汽車
+"car", 工作 "work" - both models, confidently wrong). The models admit doubt on 3-4 words in ten
+(床, 先生, 結構, 新聞, 愛人), which is where J6's chooser will ask the user. The sense itself is no
+better or worse from a word alone - one run each, within noise - because the word alone is all the
+model has; the gain is that the app now knows what the model assumed. A sanity run on sentences:
+kana and Chinese-glyph text are stated, not asked, and translate correctly; English text is sent
+unchanged. With a Chinese *target*, a merged prompt still sometimes leaves 勉強 as it is - with the
+old prompt too (it once even "fixed" it to 勉强, the Chinese "reluctantly"); not a J4 regression.
+
+**Added**
+- `src/core/source_marker.py` (pure): `source_clause(text)` - mostly-CJK text (kanji + kana at
+  least half of its letters, no Hangul) whose characters prove its language gets
+  `SOURCE LANGUAGE: the text above is Japanese.` (or Chinese); kanji that prove nothing make the
+  prompt ask for one first line, `[[SOURCE: Japanese]]` / `[[SOURCE: Chinese]]` /
+  `[[SOURCE: Unknown]]`; any other text gets nothing, so its prompt is byte-for-byte what it was.
+  `parse_source_marker(answer)` reads and removes the line (double brackets anywhere; a bare
+  `SOURCE: x` only as the first line), and a missing or garbled one is simply no verdict.
+- `TranslationService.last_source_language` (per call, like `last_attribution`; a cache hit
+  restores the stored one) and `source_verdict(text)` - the model's verdict for exactly that
+  text, from this session (bounded, 64 texts) or from History.
+- `HistoryManager`: entries record `source_verdict` when a model gave one, and
+  `find_source_verdict()` reads it. `source_lang` (the History label) takes the verdict too.
+- `tools/eval_dictionary_prompt.py`: `--mode translate`, and `--key N` to measure each provider's
+  N-th key (the first Google key's free quota was spent).
+- `tests/test_source_marker.py` (59 tests).
+
+**Changed**
+- `translate_or_fix()` (the language hotkeys) and `translate_text()` (the main window, Re-translate)
+  append the clause. A custom prompt is sent exactly as the user wrote it. Logged as
+  `[LangID] translation verdict=.. marker=found|missing chars=..` - never the text.
+
+**Decided** (Decision 25): the marker goes last in the prompt; the wording names no favourite
+language and its example (娘) is not one of the measured words; the cache is **not** namespaced
+by verdict - an entry from before J4 simply has no verdict, and Re-translate gets one; the
+verdict lives in its own `source_verdict` field, because `source_lang` has always held a guess
+from the characters ("Chinese" for every kanji-only text).
+
+**Tests**: 952 -> 1011 (+59), 0 failed, 0 skipped. Twenty mutations - mixed text or Hangul
+counted as CJK, evidence ignored, a "more common" tie-break added, the example swapped for an
+eval word, Unknown read as a language, the marker left in the answer, the bare form read anywhere
+or nowhere, the service not parsing or not appending, the verdict not stored, a cache hit or a
+failure leaving the wrong verdict, the memory unbounded, History ignored, the clause added to a
+custom prompt, History storing an empty verdict or the oldest one, the text in the log - each made
+the suite fail and was restored. `config.json` was hashed before and after every real-API run:
+unchanged.
+
+### Phase J3 — The dictionary result reads the language it was asked in (2026-10-15)
+
+The result window took its reading hint from one place only: the model's own **Source Language**
+field. A model that decided 勉強 was Chinese therefore switched off every reading in the entry -
+headword, synonyms, examples - even when the lookup had told it the word was Japanese (TODO.md
+F2). And an English -> Japanese entry left `learn → 学習` plain, because each line had one hint:
+the source language, English (F3).
+
+**Changed**
+- **The stated source wins.** `show_dictionary_result(..., source_lang=)` receives the language
+  the prompt was told (J1's `dictionary_source_language()`); each entry's field 2 decides only
+  when nothing was stated - today's behaviour, kept for that case. The title names the pair:
+  `Dictionary - Japanese → English`.
+- **Both languages of an entry are read** (`dictionary_render.side_hints()`). Japanese paired
+  with a language that is not Chinese makes every kanji run Japanese - the prompt keeps an entry
+  to its two languages - so synonyms, antonyms and examples are read on both sides of the arrow.
+  A Japanese/Chinese pair is cut at its arrows (`arrow_parts()`): the Japanese side is read, the
+  Chinese side is left alone. In a Japanese -> Chinese entry the Chinese half of a Japanese
+  example line used to get Japanese readings, because the whole line carried kana.
+- Field 2 is read for any language (`declared_source_language()`), not only Japanese.
+- **Word Type is a target-language field** (fields 1, 3, 4), as the J1 prompt asks for it.
+
+**Measured on the fixtures** (`tests/test_dictionary_ruby.py`): Fixture A with the source stated
+→ 勉強[べんきょう], 学習[がくしゅう], 勉学[べんがく], 勉強会[べんきょうかい]; Fixture B → 学習, 研究, 無視,
+一生懸命, 勉強, 名詞 all read; a Japanese -> Chinese entry → 学習, 勉学, 怠惰 read and 学习, 勤学,
+懒惰 plain; the mirror image likewise. `overhead_px()` already measured whatever it was given, so
+the window grows with the new readings unchanged - a test asserts it.
+
+**Tests**: 903 -> 952 (+46 in `tests/test_dictionary_ruby.py`, +3 in `test_dictionary_flow.py`;
+one flow assertion updated on purpose - the result window now also receives `source_lang`), 0
+failed, 0 skipped. Twelve mutations - the shared Japanese rule removed or extended to an unknown
+source, the stated source ignored, no arrow cut, the first separator instead of the last, the
+sides swapped, Word Type back to a source field, Traditional unrecognised, the title or the
+window or the lookup dropping the source - each made the suite fail and was restored.
+
+### Phase J2 — Language identity from evidence: `src/core/lang_id.py` (2026-10-15)
+
+The core the remaining language-identity phases build on. **No behaviour changes yet** - nothing
+calls it until J3.
+
+**Added**
+- `src/core/lang_id.py` (pure logic): `resolve(text, *, known, context, model)` answers what
+  language a CJK text is, in Decision 22's order - what the caller knows, then evidence in the
+  text, then evidence in its context, then the language a model call reported - and returns
+  `Verdict(language, evidence)` saying which step answered. Evidence beats the model: kana in the
+  text wins over a model that said Chinese. Also `normalize_language()` (every spelling the app
+  meets - the hotkey list's "Chinese Simplified", nlp_manager's "Chinese (Simplified)", codes,
+  native names, what a model writes, "Unknown" -> None), `han_evidence()`, `has_kana()`,
+  `has_chinese_glyph()`, and the ruby hints `ruby_hint()` / `output_hint()` (TODO.md §5.1).
+- `tests/test_lang_id.py` (123 tests): 311 kanji-only Japanese words, 149 Simplified and 164
+  Traditional Chinese words, Chinese sentences, Japanese sentences with Chinese names.
+- `CrossTrans.spec`: the four codecs the glyph sets come from as hidden imports - they are looked
+  up by name at run time, where PyInstaller cannot see them. If one is still missing, glyph
+  evidence switches itself off with a `[LangID]` warning instead of misreading every kanji.
+
+**Evidence rules, measured on the fixtures**
+- Kana is Japanese - but not U+30FB "・", which Chinese writes between the parts of a foreign
+  name (列夫・托尔斯泰).
+- A kanji only Japanese writes is Japanese; one Japanese cannot write (outside JIS X 0213) is
+  Chinese, Simplified when GB2312 has it. Both kinds together prove nothing.
+- Result: **0** Japanese words called Chinese, **0** Chinese strings called Japanese. Settled by
+  glyph alone: Japanese 55/311 (23 of the 54 F9 words), Simplified 80/149, Traditional 3/164 -
+  the rest is ambiguous by nature and waits for context, a model's verdict or the user.
+- `han_evidence()` on 3,000 kanji: about 0.6 ms warm (budget 5 ms).
+
+**Fixed during implementation**
+- **Plain Big5 was the wrong Traditional set** - a third character-set trap, next to TODO.md
+  F9's CP932 and GBK. Hong Kong's standard forms 衆 裏 綫 衞 啓 峯 are outside Big5 but inside
+  CP932, so the first version called 12 of 13 Hong Kong strings (這裏, 公衆, 路綫, 衞生 ...)
+  Japanese - Japanese readings on Chinese text. "Japanese-only" now excludes Big5-HKSCS too
+  (Decision 24). The cost, measured: Japanese-only glyphs 959 -> 571, because HKSCS also carries
+  Japanese forms (駅 発 円 県 込); 22 of the 311 Japanese words lose their glyph evidence and
+  become ambiguous - unknown, never Chinese.
+
+**Tests**: 780 -> 903 (+123 in `tests/test_lang_id.py`), 0 failed, 0 skipped. Sixteen mutations -
+the middle dot counted as kana, plain Big5, CP932 for "can be Japanese", a conflict counted as
+Japanese, the Chinese variant flipped, the model or the context put before the text's own
+evidence, the context ignored, `known` ignored, each hint rule, "Unknown" read as a language, a
+missing codec undetected, the log line dropped - each made the suite fail and was restored.
+Coverage is written to `logs/lang_id_coverage.json` on every run.
+
+### Phase D13-D15 — One Dictionary mode, and the two bugs its copies shared (2026-10-15)
+
+Dictionary mode was written twice: once for the main window's Dictionary button
+(`dictionary_popup.py`) and once more inside the quick-translate popup (`quick_translate.py`,
+~400 lines). Every change had to be made twice, and the copies had already drifted. The user asked
+for the duplication and its two bugs to be fixed before the remaining language-identity phases,
+all three of which (J3, J5, J6) would otherwise have been written twice again.
+
+**Changed**
+- **One implementation** (`DictionaryPopup`, Decision 23). The popup's Dictionary button now
+  hands its text, its target language and itself to `DictionaryPopup.open_from_text(text,
+  target_language=..., anchor=...)` through one new callback, `on_open_dictionary`. Removed from
+  `QuickTranslateManager`: `_show_nlp_required_message`, `_show_language_selection_dialog`,
+  `_open_dictionary_with_language`, `_try_open_dictionary_tab`, the `on_dictionary_lookup` and
+  `on_open_settings_dictionary_tab` callbacks and the popup's own `ToastManager`, which only that
+  code used. Removed from `app.py`: `_on_quick_translate_dictionary_lookup` and
+  `_show_quick_translate_dictionary_result` (the popup's copy of the lookup) and
+  `_show_settings_dictionary_tab` (identical to `_show_settings_tab("Dictionary")`).
+- **Where the windows go** is now two pure functions: `word_window_geometry()` - beside the popup
+  when opened from it (below, else above, else pinned to the bottom of the work area), centred on
+  the work area under the mouse otherwise - and `dialog_geometry()` - a dialog centred on the
+  pointer, inside the work area. The word window is 700x350 (1000x700 expanded) from both buttons;
+  the popup's copy used 650x350 (900x600). The main window's dialogs now open next to the pointer
+  instead of in the middle of the screen, as the popup's always did.
+- The word window's title reads the trial quota live from the service, from both buttons (the
+  popup's copy showed the count from when the translation arrived).
+- An NLP pack is checked live when the button is pressed. The main window used to trust the
+  button's state from when it was drawn, so a pack installed since then still got "No Language
+  Pack Installed".
+
+**Fixed**
+- **D14 - a failed lookup showed nothing.** Both copies ended in
+  `after(0, lambda: toast.show_error(f"Lookup failed: {e}"))`; Python unbinds `e` when the
+  `except` block ends, so Tk ran a lambda that raised `NameError` and the user saw no message. The
+  message is now bound before the callback, logged as `[Dictionary] Lookup failed: ...`, and the
+  Lookup button's "Looking up..." animation is stopped (the main window's copy never stopped it on
+  a failure; neither copy stopped it when every selected word filtered out as punctuation).
+- **D15 - the main window's two Dictionary dialogs used `transient()` + `grab_set()`**, the
+  pattern CLAUDE.md forbids. Both now use topmost + `lift()` + `focus_force()` +
+  `after(100, topmost off)`, built once in `_new_dialog()`.
+- **`DESIGN_DECISIONS.md`**: Decision 3 quoted the developer's choice in Vietnamese; it is now
+  English ("One row, widened"), per the project rule.
+
+**Found, not fixed** - recorded as `DEFERRED.md` **D16**: `UpdateFailedDialog` (shown at startup
+after a failed update) makes a `grab_set()` + `transient(root)` + `wait_window()` dialog on the
+*withdrawn* root - the exact trap in CLAUDE.md's Known Issues, which leaves an invisible modal
+window and a frozen app. Three more dialogs call `grab_set()` without `transient()`.
+`app.py` `_open_settings_dictionary_tab()` has no caller (pre-existing; left alone).
+
+**Tests**: 755 -> 780. The eleven wiring tests moved from `test_dictionary_prompt.py` to the new
+`tests/test_dictionary_flow.py` (36 tests): both buttons down to `dictionary_lookup()` - the popup
+path now through the real `TranslatorApp` callback and the shared flow - plus placement, the
+lookup's result and failure paths, and the dialogs. Fifteen mutations - the D14 lambda put back,
+`grab_set()` put back, topmost never released, the popup's target, anchor or text dropped, the
+dialog forgetting either, each geometry rule, the settings link - each made the suite fail and was
+restored. The real flow was also opened from both buttons with the real word chips and NLP
+(window 700x350 centred from the main window; directly under a 180 px popup from the popup).
+
+### Phase J0-J1 — The dictionary knows which language it looks up (2026-10-15)
+
+First two phases of the Japanese language-identity work (`TODO.md`): furigana wherever Japanese
+appears, and a Dictionary that no longer takes a Japanese word written only in kanji for Chinese.
+The user's answers to the plan's ten questions are recorded in `TODO.md` §3; Q1 (the AI model
+decides what ambiguous kanji-only text is, the user settles what it cannot) is Decision 22.
+
+**Measured before changing anything** - `tools/eval_dictionary_prompt.py`, real API calls, ten
+kanji-only words whose Japanese and Chinese senses differ (手紙 letter / toilet paper, 汽車 steam
+train / car, 床 floor / bed ...), target English. "Japanese" = field 2 said Japanese and field 1
+gave the Japanese sense:
+
+| | gemini-2.5-flash | gpt-oss-120b (Groq) | llama-3.3-70b (trial) |
+|---|---|---|---|
+| Old prompt - the headword alone | 7/10 | 7/10 | 7/10 |
+| New prompt - Japanese sentence sent, source stated | **10/10** | **10/10** | **10/10** |
+
+The old prompt failed on the same three words for all three models: 汽車 "car", 工作 "work",
+床 "bed". With the new prompt all thirty answers give the Japanese sense and a hiragana reading.
+
+**What it does not fix yet - a headword alone**, with no source stated and no context (the user
+selected 結構 by itself, and detection called it Chinese): gpt-oss-120b gave the Japanese sense
+6/10 with the new prompt against 7/10 with the old one - one run each, within noise, and no
+better, as expected: there is nothing new for the model to decide from. Gemini's numbers for this
+case are missing (its free quota on the first key ran out). That case belongs to J4/J5.
+
+**Added**
+- `src/core/dictionary_prompt.py` (pure logic): `build_dictionary_prompt()`,
+  `extract_context()`, `dictionary_source_language()`, `DICTIONARY_CONTEXT_MAX_CHARS = 600`.
+- `tools/eval_dictionary_prompt.py` - manual measurement of real models (never run in CI). Uses
+  the real `dictionary_lookup()`, one key per provider, no health manager and no rotation, so the
+  provider measured is the one that answers; never writes `config.json` (verified by hash
+  before/after every run). `trial` is opt-in because it spends the daily trial quota. Each row
+  carries a `prompt_version` hash so different wordings are never pooled.
+- `tests/test_dictionary_prompt.py`.
+
+**Changed**
+- **The dictionary prompt states the source and target language** and, for a Japanese source,
+  that a kanji-only headword is still Japanese (手紙 is "letter", not the Chinese "toilet
+  paper"). Field 2 is fixed to the stated source.
+- **It sends the context**: the sentences of the analysed text that contain a headword,
+  de-duplicated, capped at 600 characters. A phrase typed into a custom box gets none, and a
+  context that is only the headword is dropped. The text was already sent for translation, so
+  this is not new exposure - but the dictionary call now carries it too.
+- **Pronunciation follows the source**: Japanese = the reading in hiragana only, no romaji, no
+  IPA (the user's choice); Chinese = pinyin with tone marks; Korean = Revised Romanization;
+  others keep /IPA/ + a target-language phonetic.
+- **Source = target gives a monolingual entry** (国語辞典-style): definition and examples in the
+  same language, field 1 a simpler equivalent. Word Type is now written in the target language.
+- **Which language is stated** - `dictionary_source_language()`: a language the user picked in
+  the selection dialog, or an auto-detected Japanese (detection needs kana to say it). Any other
+  detection is a guess - every kanji-only text comes back "Chinese (Simplified)", every Latin
+  text the first installed European pack - so the prompt says "not given" and the model decides
+  and names its decision in field 2.
+- Both Dictionary windows pass the language and the text: `dictionary_popup.py`
+  (`_open_with_language(..., user_chosen)`, `_do_lookup(..., source_language, context_text)`),
+  the popup's copy in `quick_translate.py` (`_open_dictionary_with_language(..., user_chosen)`,
+  the lookup callback's new keywords) and `app.py` (`_on_quick_translate_dictionary_lookup`).
+- Log line `[Dictionary] lookup n=.. source=.. target=.. context_chars=..` - counts, never text.
+
+**Fixed during implementation**
+- **A tie-break that leaned Chinese.** The first wording of the "source not given" rule told the
+  model, without context, to "choose the language in which it is more commonly written exactly
+  as given". gpt-oss-120b then turned 先生 alone from Japanese "teacher" (old prompt) into
+  Chinese "Mr."; with the sentence removed it answered "teacher" again. One run each, so weak
+  evidence - but the bias is built in: Chinese text is more abundant, so "more common" means
+  Chinese for every shared spelling. The model now decides from the headword itself, and a test
+  keeps the tie-break out (Decision 21).
+
+**Repository**: `h1-health-review` was merged into `main` (`f28a276`, `--no-ff`, not pushed) and
+this work branches from it as `feature/japanese-language-identity`.
+
+**Known limits until later phases**
+- A kanji-only selection (勉強 alone) still opens the Dictionary window as "Chinese (Simplified)"
+  and its chips stay plain - J5. The lookup itself is left to the model, which without context
+  still reads 汽車, 工作 and 床 (and on the last run 結構) as Chinese.
+- The result window still takes its reading hint from the model's field 2 - J3.
+
+**Tests**: 676 -> 755 (+79 in `test_dictionary_prompt.py`), 0 failed, 0 skipped. Seventeen
+mutations - each call site's language or text dropped, the dialogs forgetting the choice was the
+user's, the trust rule trusting every detection, the context filter, the kanji rule, the
+hiragana rule, the monolingual check, the tie-break put back - each made the suite fail and was
+restored.
+
 ### Cerebras and SambaNova, and a correction (2026-09-08)
 
 Keys were supplied for Cerebras, Groq and SambaNova, so three more rows of D11 could be checked

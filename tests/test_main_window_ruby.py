@@ -11,12 +11,14 @@ without starting the application.
 Skipped automatically when no display is available (see the `tk_root` fixture).
 """
 import tkinter as tk
+from unittest.mock import MagicMock
 
 import pytest
 
 import src.core  # noqa: F401  (must precede `config`: see project CLAUDE.md)
 from src.app import TranslatorApp
 from src.core import furigana as F
+from src.core.translation import TranslationService
 from src.ui.expanded_window import ExpandedTranslationWindow
 from src.ui.ruby_text import RubyText
 
@@ -75,6 +77,21 @@ def frame(tk_root):
     holder.destroy()
 
 
+def make_service(verdicts=None):
+    """A real TranslationService with nothing but its verdict memory (J7).
+
+    The main window reads the input's settled language through
+    `source_language()`; real code, so the tests cover it, with `verdicts` as
+    the texts a model has placed this session.
+    """
+    service = TranslationService.__new__(TranslationService)
+    service.history_manager = MagicMock()
+    service.history_manager.find_source_verdict.return_value = None
+    for text, verdict in (verdicts or {}).items():
+        service._remember_source_verdict(text, verdict)
+    return service
+
+
 @pytest.fixture
 def app(tk_root, frame):
     """A TranslatorApp with just enough state for the output-box methods."""
@@ -87,6 +104,8 @@ def app(tk_root, frame):
     instance.translate_btn = FakeButton()
     instance.copy_btn = FakeButton()
     instance._test_frame = frame
+    instance.original_text = tk.Text(frame, height=2)     # the input box: empty
+    instance.translation_service = make_service()
     # Real methods that would need the full app; harmless no-ops here.
     instance._stop_translate_animation = lambda: None
     instance._update_popup_title_with_trial = lambda: None
@@ -190,13 +209,13 @@ class TestReadback:
         received = []
 
         class Recorder:
-            def show(self, translated, target_language):
-                received.append((translated, target_language))
+            def show(self, translated, target_language, source_language=None):
+                received.append((translated, target_language, source_language))
 
         app.expanded_window = Recorder()
         app._create_translation_box(app._test_frame, JP_SENTENCE, "Japanese")
         app._open_expanded_translation()
-        assert received == [(JP_SENTENCE, "Japanese")]
+        assert received == [(JP_SENTENCE, "Japanese", None)]
 
     def test_copy_warns_when_empty(self, app, monkeypatch):
         copied = []
@@ -324,3 +343,98 @@ class TestExpandedWindow:
         ExpandedTranslationWindow(tk_root, toast, FakeConfig()).show("", "English")
         assert toast.messages == [('warning', "No translation to expand")]
         assert len(tk_root.winfo_children()) == before
+
+
+# --------------------------------------------------------------------------- #
+# J7 - the input's settled language reaches every output surface
+# --------------------------------------------------------------------------- #
+QUOTED = "The word 東京 means Tokyo."
+
+
+def type_input(app, text, verdict=None):
+    app.original_text.delete('1.0', tk.END)
+    app.original_text.insert('1.0', text)
+    if verdict:
+        app.translation_service._remember_source_verdict(text, verdict)
+
+
+class TestSettledSource:
+    @HAS_PROVIDER
+    def test_japanese_quoted_in_an_english_translation_is_read(self, app):
+        type_input(app, "東京", "Japanese")
+        box = app._create_translation_box(app._test_frame, QUOTED, "English")
+        assert box.has_ruby is True
+        assert box.get_plain() == QUOTED
+
+    def test_without_a_verdict_it_stays_plain(self, app):
+        type_input(app, "東京")
+        box = app._create_translation_box(app._test_frame, QUOTED, "English")
+        assert box.has_ruby is False
+
+    @HAS_PROVIDER
+    def test_a_translation_update_uses_the_settled_source(self, app):
+        type_input(app, "東京", "Japanese")
+        app.selected_language = "English"
+        app._create_translation_box(app._test_frame, "", "English")
+        app._update_translation_with_original(QUOTED)
+        assert app.trans_text.has_ruby is True
+
+    @HAS_PROVIDER
+    def test_a_grammar_fix_of_placed_kanji_is_read(self, app):
+        type_input(app, JP_KANJI_ONLY, "Japanese")
+        app._create_translation_box(app._test_frame, "", "Japanese")
+        app._update_grammar_result(JP_KANJI_ONLY)
+        assert app.trans_text.has_ruby is True
+
+    def test_a_grammar_fix_of_unplaced_kanji_stays_plain(self, app):
+        type_input(app, JP_KANJI_ONLY)
+        app._create_translation_box(app._test_frame, "", "Japanese")
+        app._update_grammar_result(JP_KANJI_ONLY)
+        assert app.trans_text.has_ruby is False
+
+    def test_the_expanded_view_gets_the_settled_source(self, app):
+        received = []
+
+        class Recorder:
+            def show(self, translated, target_language, source_language=None):
+                received.append(source_language)
+
+        type_input(app, "東京", "Japanese")
+        app.selected_language = "English"
+        app.expanded_window = Recorder()
+        app._create_translation_box(app._test_frame, QUOTED, "English")
+        app._open_expanded_translation()
+        assert received == ["Japanese"]
+
+
+class TestExpandedSource:
+    @HAS_PROVIDER
+    def test_a_japanese_source_reads_quoted_kanji(self, tk_root):
+        window = ExpandedTranslationWindow(tk_root, FakeToast(), FakeConfig(True))
+        before = set(tk_root.winfo_children())
+        window.show(QUOTED, "English", source_language="Japanese")
+        opened = [w for w in tk_root.winfo_children() if w not in before]
+        try:
+            boxes = [c for w in opened for c in _descendants(w) if isinstance(c, RubyText)]
+            assert boxes and boxes[0].has_ruby is True
+        finally:
+            for w in opened:
+                w.destroy()
+
+    def test_no_source_no_readings_in_english(self, tk_root):
+        window = ExpandedTranslationWindow(tk_root, FakeToast(), FakeConfig(True))
+        before = set(tk_root.winfo_children())
+        window.show(QUOTED, "English")
+        opened = [w for w in tk_root.winfo_children() if w not in before]
+        try:
+            boxes = [c for w in opened for c in _descendants(w) if isinstance(c, RubyText)]
+            assert boxes and boxes[0].has_ruby is False
+        finally:
+            for w in opened:
+                w.destroy()
+
+
+def _descendants(widget):
+    for child in widget.winfo_children():
+        yield child
+        yield from _descendants(child)
