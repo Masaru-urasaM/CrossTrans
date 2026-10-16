@@ -5,6 +5,37 @@ approaches. Newest first.
 
 ---
 
+### Decision 28 - The user's answer is a verdict, and it replaces a model's in History
+
+**Date**: 2026-10-16
+**Status**: RESOLVED (decided while doing the post-J12 follow-ups the user asked for in full -
+revisit if they object)
+
+**Problem**: The Dictionary's "Kanji-only text: Japanese or Chinese?" answer was used for one
+lookup and forgotten. Keeping it raises two questions: where, and what happens to a model's
+verdict for the same text already stored in History.
+
+**Options considered**:
+1. **Session memory only** - Pros: no stored data changes. Cons: lost on restart; History's rows
+   for that text stay unread.
+2. **Memory, plus History's entries of that text - only those without a verdict** - Pros: never
+   overwrites a model. Cons: when the model said Chinese and the user says Japanese, the
+   model's answer keeps coming back from History after a restart.
+3. **Memory, plus every History entry of that text, replacing a model's verdict and the label**
+   - Pros: Decision 22 puts what the user knows ahead of everything else; one answer per text,
+   whichever entry is read. Cons: History no longer records what that model said.
+
+**Resolution**: **Option 3** (`remember_user_source()` -> `set_source_verdict()`). The label is
+rewritten with the verdict so the History list says what the readings now assume. A pick of a
+pack that is neither Japanese nor Chinese is not a verdict and is not kept. History records
+what the app believes about the text, not an audit of the models - the log keeps that
+(`[LangID] translation verdict=..`).
+
+**References**: `src/core/translation.py`, `src/core/history.py`, `src/ui/dictionary_popup.py`,
+CHANGELOG "Phase K3", Decisions 22 and 26.
+
+---
+
 ### Decision 27 - The popup's answer to "Japanese or Chinese?" re-translates; it does not just add readings
 
 **Date**: 2026-10-15

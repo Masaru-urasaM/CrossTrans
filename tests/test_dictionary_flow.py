@@ -603,6 +603,96 @@ class TestAmbiguousKanji:
         assert "🈶 Kanji-only text: Japanese or Chinese?" not in _texts(tk_root)
 
 
+# --------------------------------------------------------------------------- #
+# K3 - the user's answer is the text's verdict from then on
+# --------------------------------------------------------------------------- #
+class _HistoryConfig:
+    def __init__(self):
+        self._store = {'history': [], 'history_enabled': True}
+
+    def get(self, key, default=None):
+        return self._store.get(key, default)
+
+    def set(self, key, value):
+        self._store[key] = value
+
+
+def _select_combobox(root, value):
+    def walk(widget):
+        for child in widget.winfo_children():
+            if child.winfo_class() == 'TCombobox':
+                return child
+            found = walk(child)
+            if found is not None:
+                return found
+        return None
+    box = walk(root)
+    assert box is not None and value in box.cget('values'), value
+    box.set(value)
+
+
+class TestTheAnswerIsKept:
+    """Item 5 of the post-J12 list: answering "Kanji-only text: Japanese or
+    Chinese?" used to be forgotten at once - the same text asked again, and the
+    main window's Reading pane never learned it."""
+
+    @pytest.fixture
+    def kept(self, tk_root, fake_ui, nlp):
+        from src.core.history import HistoryManager
+        from src.core.translation import TranslationService
+        nlp.detected = ("Unknown", 0.5)
+        service = TranslationService.__new__(TranslationService)
+        service.history_manager = HistoryManager(_HistoryConfig())
+        service.get_trial_info = lambda: None
+        config = MagicMock()
+        config.get_furigana_enabled.return_value = True
+        flow = DictionaryPopup(tk_root, config, service, MagicMock(), MagicMock())
+        flow.chosen = []
+        flow.configure_callbacks(on_show_settings_tab=lambda tab: None,
+                                 get_selected_language=lambda: "English",
+                                 on_source_chosen=flow.chosen.append)
+        return flow
+
+    def answer(self, root, flow, text, choice=None, button="Confirm"):
+        flow.open_from_text(text)
+        if choice:
+            _select_combobox(root, choice)
+        _invoke_button(root, button)
+        _pump(root)
+
+    def test_the_answer_becomes_the_texts_verdict(self, tk_root, kept):
+        self.answer(tk_root, kept, "勉強")                    # Japanese: listed first
+        assert kept.translation_service.source_verdict("勉強") == "Japanese"
+        assert kept.chosen == ["勉強"]
+
+    def test_the_same_text_opens_without_asking_again(self, tk_root, kept):
+        self.answer(tk_root, kept, "勉強")
+        _FakeWordFrame.created.clear()
+        kept.open_from_text("勉強")
+        assert not _toplevels(tk_root, "Select Source Language")
+        assert _FakeWordFrame.created[-1].kwargs['language'] == "Japanese"
+
+    def test_chinese_is_kept_as_chinese(self, tk_root, kept):
+        self.answer(tk_root, kept, "工作", "Chinese (Simplified)")
+        assert kept.translation_service.source_verdict("工作") == "Chinese (Simplified)"
+
+    def test_another_pack_says_nothing_about_the_kanji(self, tk_root, kept):
+        self.answer(tk_root, kept, "勉強", "English")
+        assert kept.translation_service.source_verdict("勉強") is None
+        assert kept.chosen == []
+
+    def test_cancel_keeps_nothing(self, tk_root, kept):
+        self.answer(tk_root, kept, "勉強", button="Cancel")
+        assert kept.translation_service.source_verdict("勉強") is None
+        assert kept.chosen == []
+
+    def test_a_dialog_that_is_not_about_kanji_keeps_nothing(self, tk_root, kept, nlp):
+        nlp.detected = ("Unknown", 0.0)                   # "Cannot detect language"
+        self.answer(tk_root, kept, "!!!")                 # Japanese is listed first
+        assert kept.translation_service.source_verdict("!!!") is None
+        assert kept.chosen == []
+
+
 class TestRealDetectionOpensDirectly:
     """DoD4 with the real detector: Japanese with kana never asks."""
 

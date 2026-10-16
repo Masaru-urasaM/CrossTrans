@@ -478,12 +478,40 @@ STRICT RULES (DO NOT include these rules in your response):
         self.last_source_language = verdict
         if not verdict or not text:
             return
+        self._store_source_verdict(text, verdict)
+
+    def _store_source_verdict(self, text: str, verdict: str) -> None:
         store = self._source_verdict_store()
         with self._source_verdicts_lock:
             store[text] = verdict
             store.move_to_end(text)
             while len(store) > self.SOURCE_VERDICTS_MAX:
                 store.popitem(last=False)
+
+    def remember_user_source(self, text: str, language: str) -> Optional[str]:
+        """Record the language the user settled for `text` outside a translation -
+        the Dictionary's "Kanji-only text: Japanese or Chinese?" dialog, or before
+        a re-translation the user asked for (K3).
+
+        Kept like a model's verdict: for this session, and on History's entries
+        of exactly this text so it survives a restart - where it replaces a
+        model's, since the user's pick outranks it (Decision 22). It leaves
+        `last_source_language` alone: that belongs to the last translation.
+
+        Returns:
+            The verdict recorded, or None when `language` is neither Japanese nor
+            Chinese (a pick of another pack says nothing about the kanji).
+        """
+        verdict = lang_id.normalize_language(language)
+        if not text or not (verdict == lang_id.JAPANESE or verdict in lang_id.CHINESE):
+            return None
+        self._store_source_verdict(text, verdict)
+        setter = getattr(getattr(self, 'history_manager', None), 'set_source_verdict', None)
+        if setter:
+            setter(text, verdict)
+        # Counts and language names only - never the user's text.
+        logging.info(f"[LangID] user settled source={verdict} chars={len(text)}")
+        return verdict
 
     def source_language(self, text: str) -> Optional[str]:
         """The language of a source text as far as it is settled: its characters

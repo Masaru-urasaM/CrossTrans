@@ -4,6 +4,33 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase K3 — The Dictionary keeps the user's "Japanese or Chinese?" answer (2026-10-16)
+
+**Fixed**
+- **The answer to "Kanji-only text: Japanese or Chinese?" was forgotten at once.** Opening the
+  Dictionary again on the same text asked again, and the main window's Reading pane never
+  learned it - so 東京大学 typed into the main window, placed as Japanese in that dialog, still
+  had no readings. The answer is now the text's verdict: for this session, and on History's
+  entries of exactly that text, so it survives a restart and their History rows get readings.
+  The Reading pane re-reads the input at once. Picking a pack that is neither Japanese nor
+  Chinese from the same list says nothing about the kanji and is not kept; nor is an answer to
+  the generic "Cannot detect language" dialog.
+
+**Added**
+- `TranslationService.remember_user_source(text, language)` - a verdict the user gave outside a
+  translation. It leaves `last_source_language` alone (that belongs to the last translation)
+  and logs `[LangID] user settled source=.. chars=..`, counts only.
+- `HistoryManager.set_source_verdict(original, verdict)` - writes the verdict *and* the label on
+  every entry of that exact text, replacing a model's: the user outranks it (Decision 22), and an
+  older entry left disagreeing would come back if the newer one were deleted. Decision 28.
+- `DictionaryPopup.configure_callbacks(..., on_source_chosen=)`, wired to
+  `TranslatorApp._on_source_chosen()`.
+
+**Tests**: 1202 -> 1232 (+30): 24 in the new `tests/test_source_choice.py` (History, the
+service, the app), 6 in `tests/test_dictionary_flow.py` (`TestTheAnswerIsKept`, a real service
+behind the real dialog: the answer is kept, the same text opens without asking, Chinese stays
+Chinese, another pack, Cancel and the generic dialog keep nothing). 13 mutations killed.
+
 ### Phase K2 — The failed-update dialog no longer freezes the app (2026-10-16, D16)
 
 **Fixed**

@@ -114,6 +114,32 @@ class HistoryManager:
                 return entry['source_verdict']
         return None
 
+    def set_source_verdict(self, original: str, verdict: str) -> int:
+        """Record the language the user settled for `original` on every entry of
+        exactly that text, as its verdict and its label.
+
+        The user's pick outranks a model's (Decision 22), so it replaces theirs
+        too: find_source_verdict() reads the newest entry, and an older one left
+        disagreeing would come back if the newer were deleted.
+
+        Returns:
+            How many entries changed.
+        """
+        if not original or not verdict:
+            return 0
+        history = self.config.get('history', [])
+        changed = 0
+        for entry in history:
+            if entry.get('original') == original and (
+                    entry.get('source_verdict') != verdict
+                    or entry.get('source_lang') != verdict):
+                entry['source_verdict'] = verdict
+                entry['source_lang'] = verdict
+                changed += 1
+        if changed:
+            self.config.set('history', history)
+        return changed
+
     def find_cached(self, original: str, target_lang: str,
                     source_type: str = 'text') -> Optional[str]:
         """The cached translation text for an exact match, or None.

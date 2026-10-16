@@ -546,7 +546,9 @@ read 汽車, 工作, 床 as Chinese (3/10 each).
   the word window opens in the language a model reported for that exact text
   (`TranslationService.source_verdict()` - the popup's text always has one, the main window's
   input once translated), else the selection dialog asks "Kanji-only text: Japanese or
-  Chinese?" with those listed first. **No identification call** (Decision 26).
+  Chinese?" with those listed first. **No identification call** (Decision 26). The answer is
+  kept as the text's verdict (K3, `TranslationService.remember_user_source()`), so the same
+  text never asks twice.
 - **Context**: `extract_context()` sends only the sentences containing a headword, de-duplicated,
   capped at `DICTIONARY_CONTEXT_MAX_CHARS` (600); a context that is just the headword is dropped.
 - **Pronunciation by source**: Japanese = hiragana reading only, no romaji, no IPA (user's choice);
@@ -707,7 +709,10 @@ unknown; a surface that needs a language asks.
 | The user | the popup's "Kanji-only text - read it as: [Japanese] [Chinese]" row (re-translates, Decision 27); the Dictionary's "Kanji-only text: Japanese or Chinese?" dialog (Decision 26) | `QuickTranslateManager._build_source_chooser()`, `DictionaryPopup._open_ambiguous_kanji()` |
 
 **Where it is kept**: `TranslationService.last_source_language` (per call) and
-`source_verdict(text)` (this session, bounded, then History's `source_verdict` field).
+`source_verdict(text)` (this session, bounded, then History's `source_verdict` field). An
+answer the user gives outside a translation goes through `remember_user_source()`, which also
+writes it on History's entries of that text (`HistoryManager.set_source_verdict()`), replacing a
+model's (Decision 28).
 `TranslationService.source_language(text)` = evidence, else that verdict - the one call every
 main-window surface uses. **History's `source_lang` is a label, often a guess from the
 characters - never read it as a verdict.** The cache is not namespaced by verdict (Decision 25).

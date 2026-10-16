@@ -191,7 +191,8 @@ class TranslatorApp:
         )
         self.dictionary_popup.configure_callbacks(
             on_show_settings_tab=self._show_settings_tab,
-            get_selected_language=lambda: self.selected_language
+            get_selected_language=lambda: self.selected_language,
+            on_source_chosen=self._on_source_chosen
         )
 
         # Tray manager
@@ -1514,6 +1515,12 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         """Open dictionary popup window with word buttons for original text."""
         original = self.original_text.get('1.0', tk.END).strip()
         self.dictionary_popup.open_from_text(original)
+
+    def _on_source_chosen(self, text: str):
+        """The user said which language a text's kanji are (the Dictionary's
+        dialog, K3): the Reading pane reads the input again if it is that text."""
+        if self._reading_pane_alive():
+            self._schedule_reading_refresh(delay_ms=1)
 
     def _show_settings_hotkeys_tab(self):
         """Open settings window at Hotkeys tab.

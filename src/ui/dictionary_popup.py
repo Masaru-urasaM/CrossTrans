@@ -123,6 +123,7 @@ class DictionaryPopup:
         # Callbacks
         self._on_show_settings_tab: Optional[Callable] = None
         self._get_selected_language: Optional[Callable] = None
+        self._on_source_chosen: Optional[Callable[[str], None]] = None
 
     def _furigana_enabled(self) -> bool:
         """Whether word chips should carry readings (Settings toggle)."""
@@ -130,16 +131,20 @@ class DictionaryPopup:
 
     def configure_callbacks(self,
                            on_show_settings_tab: Optional[Callable] = None,
-                           get_selected_language: Optional[Callable] = None):
+                           get_selected_language: Optional[Callable] = None,
+                           on_source_chosen: Optional[Callable[[str], None]] = None):
         """Configure callback functions.
 
         Args:
             on_show_settings_tab: Callback to open settings and navigate to a tab
             get_selected_language: Callback to get the main window's target
                 language - the target when the caller names none
+            on_source_chosen: Called with the text once the user has said which
+                language its kanji are, so the main window can read it (K3)
         """
         self._on_show_settings_tab = on_show_settings_tab
         self._get_selected_language = get_selected_language
+        self._on_source_chosen = on_source_chosen
 
     def check_nlp_availability(self) -> bool:
         """Check if NLP is available for dictionary mode.
@@ -258,8 +263,18 @@ class DictionaryPopup:
         self._show_language_selection_dialog(text, None, kanji_only=True,
                                              target_language=target_language, anchor=anchor)
 
+    def _remember_choice(self, text: str, language: str) -> None:
+        """The answer to "Kanji-only text: Japanese or Chinese?" is the text's
+        verdict from now on (K3): the next Dictionary opens without asking, and
+        the main window's Reading pane can read it. Another pack picked from
+        the list says nothing about the kanji and is not kept."""
+        remember = getattr(self.translation_service, 'remember_user_source', None)
+        if remember and remember(text, language) and self._on_source_chosen:
+            self._on_source_chosen(text)
+
     def _model_verdict(self, text: str) -> Optional[str]:
-        """The Japanese / Chinese verdict a model reported for exactly this text."""
+        """The Japanese / Chinese verdict a model reported - or the user gave, in
+        this dialog or a row (K3) - for exactly this text."""
         finder = getattr(self.translation_service, 'source_verdict', None)
         verdict = lang_id.normalize_language(finder(text)) if finder else None
         return verdict if verdict == lang_id.JAPANESE or verdict in lang_id.CHINESE else None
@@ -482,6 +497,8 @@ class DictionaryPopup:
             selected = lang_var.get()
             if selected:
                 dialog.destroy()
+                if kanji_only:
+                    self._remember_choice(original_text, selected)
                 # Delay for focus settle before opening dictionary popup
                 self.root.after(50, lambda: self._open_with_language(
                     original_text, selected, trusted=True,
