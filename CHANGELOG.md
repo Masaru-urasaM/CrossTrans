@@ -5,7 +5,16 @@ All notable changes to CrossTrans are documented here.
 ## [Unreleased]
 
 Everything below `[1.9.20]` ships as **1.9.21**: the user chose the number on 2026-10-16, and
-`VERSION` says so. Not tagged and not built as a release yet.
+`VERSION` says so. Not tagged and not published.
+
+**The 1.9.21 build** (2026-10-16, from `39419c5`): `dist\CrossTrans_v1.9.21.exe`, 66 026 238 bytes,
+built by hand into a scratch directory (`build_exe.bat` deletes `dist\`) and copied in. The
+post-build checks pass: `kanwadict4.db` bundled (1158 archive entries) and the four glyph-evidence
+codecs bundled. And, run rather than inspected: an interpreter whose only standard library is the
+EXE's own `base_library.zip` looks up and encodes with all four codecs - the exact condition
+under which `lang_id` would log "[LangID] glyph evidence disabled" - so the EXE cannot log it.
+Not done here: starting the EXE, which would take the user's hotkeys, ask their running
+CrossTrans to show itself, and spend a real API call - the manual checks are the user's.
 
 ### K14 follow-up — the furigana refresh can never stall an install (2026-10-16)
 
