@@ -113,3 +113,32 @@ def test_an_unknown_model_on_a_known_key_still_finds_its_provider(offline_manage
         assert identified == provider, (
             f'a {provider} key ({prefix}...) with an unlisted model identified as {identified}'
         )
+
+
+# Retired or going, by their own providers' documentation (desk check 2026-10-16,
+# DEFERRED D11, K15). No key was at hand, so the replacements are listed by each
+# provider today rather than answered - but these are known dead, and a default
+# must never be one of them again.
+RETIRED = {
+    'OpenAI': {'gpt-3.5-turbo'},                                    # shuts down 2026-10-23
+    'Anthropic': {'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022',
+                  'claude-3-haiku-20240307'},                       # retired 2025-10 .. 2026-04
+    'DeepSeek': {'deepseek-chat', 'deepseek-coder'},                # gone from the API docs
+    'xAI': {'grok-2', 'grok-beta'},                                 # not on xAI's model list
+    'Together': {'meta-llama/Llama-3.3-70B-Instruct-Turbo',         # removed 2026-10-22
+                 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo'},   # removed 2026-02-25
+}
+
+
+@pytest.mark.parametrize('provider', sorted(RETIRED))
+def test_no_default_is_a_model_its_provider_has_retired(provider):
+    stale = set(DEFAULT_MODELS_BY_PROVIDER[provider]) & RETIRED[provider]
+    assert not stale, (f"{provider}'s defaults {sorted(stale)} are retired by {provider} "
+                       f"itself - every auto-pick would fail (DEFERRED D11)")
+
+
+def test_every_provider_has_a_second_default_to_rotate_to():
+    """_try_model_rotation() moves to the next default when the first fails; a
+    provider left with one has nowhere to go (D11 removed gpt-3.5-turbo)."""
+    for provider, models in DEFAULT_MODELS_BY_PROVIDER.items():
+        assert len(models) >= 2, f"{provider} has {models}"

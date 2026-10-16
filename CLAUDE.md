@@ -173,7 +173,8 @@ the static list and report `groq_source` / `gemini_source` in `cache_meta`. The 
 (`STATIC_DEFAULT_MODELS_BY_PROVIDER`). It is what auto-detection and `_try_model_rotation()`
 read when the model field is blank, so a stale entry costs a real user a silent failed attempt
 per model - which is exactly what happened to Groq, Google and OpenRouter, all three of which
-had **entirely** dead lists. Verify an entry with a real API call before trusting it:
+had **entirely** dead lists (so were five more on 2026-10-16, replaced from the providers' own
+docs in K15 - listed, not yet called: see D11). Verify an entry with a real API call before trusting it:
 **presence in a provider's `/models` listing is not enough** (`gemini-2.5-pro` is listed and
 404s on use). An intermediary's listing is weaker still - OpenRouter names Groq as an upstream
 for `llama-3.3-70b-instruct`, which Groq's own catalogue does not carry at all.
@@ -801,6 +802,13 @@ display rather than receiving pre-annotated strings through the queue.
   maps a whole-token reading onto interleaved kanji/kana runs and returns `None` on any
   mismatch. **Blank beats a wrong reading** — an absent reading is visibly absent, a wrong one
   is not.
+- **fugashi + UniDic is a download, not bundled** (D19, Decision 33 - the user's choice): it is
+  the Japanese language pack in Settings → Dictionary (~250 MB), and pykakasi, the reader every
+  install has, misreads common words (彼 か, 君 くん, 人 にん, 今日 こんにち - 30% of real
+  sentences differ). Installing or removing the pack calls `furigana.refresh_providers()`
+  (`dictionary_tab._apply_to_furigana`, all four install/uninstall paths): without it a provider
+  that failed to load is never tried again before a restart, and the annotation cache keeps the
+  old readings. The tab's top line (`furigana_reader_note`) says which reader is in use.
 - Two measured suppression rules: digit + counter pairs (`2日` would read as a bare fragment)
   and all-kanji compound refinement (`日本語` would read にっぽんご because UniDic tags 日本 as a
   proper noun).

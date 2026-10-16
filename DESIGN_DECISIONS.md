@@ -5,6 +5,39 @@ approaches. Newest first.
 
 ---
 
+### Decision 33 - UniDic is a download in Settings -> Dictionary, not part of the EXE
+
+**Date**: 2026-10-16
+**Status**: RESOLVED (the user's choice, DEFERRED D19)
+
+**Problem**: pykakasi, the one reading provider every install has, reads a word differently from
+fugashi + UniDic in 30% of real sentences (898 of 3000 Tatoeba sentences, K1), with plain
+mistakes among the most frequent (彼 か, 君 くん, 人 にん, 今日 こんにち). UniDic (unidic-lite)
+installs to 249 MB; the EXE is 66 MB.
+
+**Options considered** (D19):
+1. **Bundle fugashi + unidic-lite in the EXE** - every user reads right. Cons: the EXE grows about
+   fourfold for a feature only Japanese readers use.
+2. **Offer it where language packs already are** - the Japanese pack in Settings -> Dictionary
+   installs fugashi + unidic-lite, and furigana uses it the moment it is there. Cons: a user who
+   never opens the tab keeps pykakasi's readings.
+3. **Correct pykakasi's worst entries by hand** - every correction is itself a guess about
+   context, which "blank beats a wrong reading" forbids.
+4. **Leave it.**
+
+**Resolution**: **Option 2**, chosen by the user ("put it in Settings, in the Dictionary language
+section; the user downloads it and applies it"). `furigana.refresh_providers()` runs after every
+install and uninstall of the pack, so it applies without a restart; the Dictionary tab says which
+reader is in use and what the pack costs. In the EXE the pack is pip-installed by the system
+Python into `~/.crosstrans/nlp_packages`, so fugashi loads only when that Python is the app's
+version; otherwise the tab says the reader could not be loaded, and pykakasi stays.
+
+**References**: `src/core/furigana.py` (`refresh_providers`), `src/ui/settings/dictionary_tab.py`
+(`_apply_to_furigana`, `furigana_reader_note`), `tests/test_furigana_reader_choice.py`, CHANGELOG
+"Phase K14"
+
+---
+
 ### Decision 32 - Tests run on a private desktop and cannot leave the test session
 
 **Date**: 2026-10-16

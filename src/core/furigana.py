@@ -18,6 +18,7 @@ Invariant I1: ''.join(seg.base for seg in annotate(text)) == text
 This makes the old {kanji|reading} injection class structurally impossible.
 """
 import re
+import importlib
 import logging
 import threading
 from functools import lru_cache
@@ -481,6 +482,27 @@ def active_provider_name() -> Optional[str]:
 def is_available() -> bool:
     """Check whether any reading provider can run."""
     return active_provider_name() is not None
+
+
+def refresh_providers() -> Optional[str]:
+    """Look for the reading providers again, and return the one now in use.
+
+    For the Japanese language pack (Settings -> Dictionary, D19): it brings
+    fugashi + UniDic, which reads far better than pykakasi - the two differ on
+    30% of real sentences (K1) - and is too big to bundle (~250 MB), so it is a
+    download, and installing it must take effect at once. Without this, a
+    provider that failed to load once is never tried again before a restart,
+    and the annotation cache keeps the old readings. Removing the pack takes
+    full effect at the next start: a module, once imported, stays loaded.
+    """
+    importlib.invalidate_caches()           # a package installed since start-up
+    with _lock:
+        _FUGASHI._tagger = None
+        _FUGASHI._unavailable = False
+    clear_cache()
+    name = active_provider_name()
+    logging.info(f"Furigana: providers looked up again - reading with {name or 'nothing'}")
+    return name
 
 
 def prewarm() -> None:

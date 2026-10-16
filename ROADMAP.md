@@ -62,7 +62,8 @@ self-maintaining (Decision 19); OpenRouter's two were dead *and* mis-routed to T
 (Decision 20); then keys arrived for Cerebras and SambaNova, whose lists were 6/6 and 11/12 dead.
 Five providers checked, not one table clean - eight remain, each needing its own key (desk-checked
 against the providers' own deprecation pages on 2026-10-16, K8: Anthropic, xAI and DeepSeek are
-entirely gone, Together and OpenAI going this month). **D12** is the cross-provider model-name clash
+entirely gone, Together and OpenAI going this month; **replaced the same day from the providers'
+docs**, K15 - listed, not yet called). **D12** is the cross-provider model-name clash
 that surfaced from the same work (**closed 2026-10-16**, K8: the key decides). **D13–D15** came out of the
 language-identity work on 2026-10-15 (Dictionary mode implemented twice, a failed lookup's toast
 that raised `NameError`, the main-window dialogs' `grab_set()`) and were **closed the same day**.
@@ -71,4 +72,6 @@ Closing D15 surfaced **D16**: `UpdateFailedDialog` is a `grab_set()` + `transien
 path (**closed 2026-10-16**, K2). The language-identity work then added **D17** (the History dialog takes ~1 s to open with
 100 entries, before any readings; **closed 2026-10-16**, K7) and **D18** (two pieces of dead code; **removed 2026-10-16**, K8). None is scheduled; each
 carries its own trigger condition. **D19** (2026-10-16, K1): pykakasi - the one reading provider
-every install has - reads a word differently from fugashi in 30% of real sentences.
+every install has - reads a word differently from fugashi in 30% of real sentences (**closed
+2026-10-16**, K14: the user chose a download over bundling - the Japanese pack in Settings ->
+Dictionary now applies to furigana at once, and the tab says which reader is in use).

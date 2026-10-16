@@ -27,13 +27,13 @@ were entirely dead. The other eight have not:
 | Cerebras | `gpt-oss-120b`, `qwen-3.8-27b` | yes - real call; dead ones 404, live ones 402 (no credit) |
 | SambaNova | `Meta-Llama-3.3-70B-Instruct`, `gemma-4-31B-it` | **listing only** - 402 precedes model validation |
 | OpenRouter | `google/gemma-4-31b-it:free`, `nvidia/nemotron-3.5-lightning:free` | partly - routable, but no completion call |
-| OpenAI | `gpt-4o-mini`, `gpt-4o`, `gpt-3.5-turbo` | no |
-| Anthropic | `claude-3-5-sonnet-20241022`, `-haiku-20241022`, `claude-3-haiku-20240307` | no |
-| DeepSeek | `deepseek-chat`, `deepseek-coder` | no |
-| xAI | `grok-2`, `grok-beta` | no |
+| OpenAI | `gpt-4o-mini`, `gpt-4o` (`gpt-3.5-turbo` dropped) | replaced 2026-10-16 (K15) from the docs - listed, not called |
+| Anthropic | `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-haiku-4-5` | replaced 2026-10-16 (K15) from the docs - listed, not called |
+| DeepSeek | `deepseek-flash`, `deepseek-v4-pro` | replaced 2026-10-16 (K15) from the docs - listed, not called |
+| xAI | `grok-4.20-0309-non-reasoning`, `grok-4.3` | replaced 2026-10-16 (K15) from the docs - listed, not called |
 | Mistral | `mistral-large-latest`, `mistral-small-latest` | no |
 | Perplexity | `sonar`, `sonar-pro` | no |
-| Together | `meta-llama/Llama-3.3-70B-Instruct-Turbo`, `-3.1-70B-...` | no |
+| Together | `meta-models/Muse-Glimmer-30B`, `zai-org/GLM-5.3-Flash` | replaced 2026-10-16 (K15) from the docs - listed, not called |
 | SiliconFlow | `deepseek-ai/DeepSeek-V3`, `Qwen/Qwen2.5-72B-Instruct` | no |
 
 **Five checked, five entirely or half dead.** Google 3/3 dead, Groq 3/3 dead, Cerebras 2/2 dead,
@@ -101,6 +101,19 @@ more lists are:
 | SiliconFlow | `deepseek-ai/DeepSeek-V3`, `Qwen/Qwen2.5-72B-Instruct` | Not among the discontinued models in the release notes ([release notes](https://api-docs.siliconflow.cn/docs/release-notes/overview)) - unconfirmed either way |
 | Perplexity | `sonar`, `sonar-pro` | Still priced, but the July 2026 changelog says "Sonar Chat Completions is now Agent API" ([changelog](https://docs.perplexity.ai/changelog)); third parties date the end of `/chat/completions` for Sonar to 2026-09-27. **The risk may be the endpoint the app calls, not just the model** |
 
+**Replaced, 2026-10-16** (K15, the user: "do it now"). The five lists their own providers document
+as dead or going now hold the providers' current models - in `api_manager`'s tier 3 and in the
+Worker's `STATIC_DEFAULT_MODELS_BY_PROVIDER` alike, every new ID also listed under its provider in
+`MODEL_PROVIDER_MAP` / `STATIC_PROVIDER_MODELS` (no prefix rule knows `meta-models/` or
+`zai-org/`), and `tests/test_default_model_routing.py` now also fails on a default its provider
+has retired. Fast, non-reasoning models first. Checked: a local `wrangler dev` run of the cron
+served all thirteen lists, and each default routed to its own provider through that config.
+**What is still open**, and why this entry stays: no key, so not one replacement has answered a
+real call; OpenAI's two remaining defaults expire on 2027-01-14 (replacement named:
+`gpt-6-luna`); Perplexity's endpoint question; SiliconFlow unconfirmed; the key patterns above;
+and the dropdown lists still offer the dead IDs (`grok-2`, `deepseek-chat`, ...) - only the
+defaults were replaced.
+
 Not changed in code, on purpose: the replacements are what the providers name, not what a call
 proved (the rule above), and the table users actually receive is the Worker's, whose deploy is
 the user's to approve. **Next step**: with a key per provider, call the named replacement, then
@@ -112,46 +125,3 @@ DeepSeek first (entirely dead), Together and OpenAI before 2026-10-22/23.
 means Together and `meta-llama/` means Together. A slash-prefixed default that is missing from the
 map gets sent to the wrong endpoint entirely - which is what both dead OpenRouter defaults were
 doing on top of being retired. `tests/test_default_model_routing.py` guards this for all thirteen.
-
----
-
-### D19 - pykakasi, the one reading provider every install has, misreads common words
-
-**Found**: 2026-10-16, running the suite on a clean venv (Phase K1). **Effort**: Small to Large,
-by option.
-
-A fresh install has one reading provider, pykakasi. fugashi + UniDic arrives only with the
-Japanese NLP pack (Settings -> Dictionary), so a user who never opens that tab - most users -
-reads every Japanese surface through pykakasi. Measured on 3000 random Tatoeba sentences that
-contain kanji (CC-BY 2.0 FR, `random.seed(20261016)` over the 244 364 such sentences; reproduce
-with `tools/measure_cjk_evidence.py readings`): **898
-(30%)** have at least one word the two providers read differently; 165 distinct differences.
-Not every difference is a pykakasi error - 私 わたし / わたくし and 明日 あした / あす are both
-valid, and in お母さん it is fugashi's はは that is wrong - but the most frequent include plain
-mistakes:
-
-| Word | pykakasi | fugashi | Sentences (of 3000) | Example |
-|---|---|---|---|---|
-| 人 | にん | ひと | 85 | 私が頼れる人を |
-| 彼 | か | かれ | 66 | 彼の自尊心 (pykakasi reads 彼の as かの) |
-| 君 | くん | きみ | 54 | 君の計画 |
-| 金 | きん | かね | 27 | その金を渡した |
-| 入 | い | はい | 12 | 本題に入る |
-| 今日 | こんにち | きょう | 10 | 今日は気分が悪い (the greeting entry 今日は) |
-| 怒 | いか | おこ | 10 | 怒って電話を切った |
-
-That is "blank beats a wrong reading" (Decision 8) failing in the default configuration, not in
-an edge case. It predates the language-identity work: the provider chain is F1's, and its
-docstring already names 今日 -> こんにち as the reason fugashi is preferred.
-
-**Options**:
-1. **Ship fugashi + unidic-lite in the EXE** - every user gets the provider the tests are written
-   against. unidic-lite is 249 MB installed (a 47 MB download); the EXE is 66 MB today.
-2. **Point Japanese readers at the pack** - a one-time hint the first time pykakasi draws a
-   reading, linking to Settings -> Dictionary.
-3. **Correct pykakasi's worst entries by hand** (彼の, 今日は, 人...) - whack-a-mole, and every
-   correction is itself a guess about context, which is what the principle forbids.
-4. **Leave it**, and say so in the README.
-
-**Dependency**: the user's choice - it trades download size against reading quality. **Trigger**:
-that decision, or a user reporting a wrong reading.
