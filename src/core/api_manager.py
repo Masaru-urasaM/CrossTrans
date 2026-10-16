@@ -29,9 +29,18 @@ DEFAULT_MODELS_BY_PROVIDER = {
     # when the first is busy (2.5-flash really did answer 503 mid-check), and an
     # alias last that will survive the next deprecation.
     'Google': ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest'],
-    'OpenAI': ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo'],
-    'Anthropic': ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022', 'claude-3-haiku-20240307'],
-    'DeepSeek': ['deepseek-chat', 'deepseek-coder'],
+    # D11 (K15, 2026-10-16): the four lists below replace models their own providers
+    # document as retired or going (desk check, no key - so no real call: listed by
+    # the provider today, not answered). Anthropic's three 3.x pins are retired;
+    # xAI lists only grok-4.x; DeepSeek's API docs name deepseek-flash and
+    # deepseek-v4-pro; Together removes Llama-3.3-70B-Turbo on 2026-10-22 and names
+    # Muse-Glimmer-30B its replacement (the 3.1 entry went in February). OpenAI's
+    # gpt-3.5-turbo shuts down 2026-10-23; gpt-4o and gpt-4o-mini follow on
+    # 2027-01-14 (DEFERRED D11 keeps that date). Fast, non-reasoning models first:
+    # auto-pick wants a translation, and the OpenAI-style path times out at 10 s.
+    'OpenAI': ['gpt-4o-mini', 'gpt-4o'],
+    'Anthropic': ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-haiku-4-5'],
+    'DeepSeek': ['deepseek-flash', 'deepseek-v4-pro'],
     # All three previous entries were decommissioned by Groq (checked 2026-09-07).
     # This list drives auto-pick and _try_model_rotation(), so it holds only models
     # measured to answer a translation directly. Re-measured 2026-09-08 with a real
@@ -44,7 +53,7 @@ DEFAULT_MODELS_BY_PROVIDER = {
     # _call_generic_openai_style) - the hard limit there is its timeout=10, not a
     # token budget. Only _call_anthropic caps output, at 1024.
     'Groq': ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
-    'xAI': ['grok-2', 'grok-beta'],
+    'xAI': ['grok-4.20-0309-non-reasoning', 'grok-4.3'],
     'Mistral': ['mistral-large-latest', 'mistral-small-latest'],
     'Perplexity': ['sonar', 'sonar-pro'],
     # Both previous entries answered 404 "Model does not exist" (2026-09-08, real
@@ -60,7 +69,7 @@ DEFAULT_MODELS_BY_PROVIDER = {
     # DeepSeek reasoning models, since auto-pick wants boring and fast. Unverified by
     # a real call: SambaNova returns 402 before it validates the model.
     'SambaNova': ['Meta-Llama-3.3-70B-Instruct', 'gemma-4-31B-it'],
-    'Together': ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo'],
+    'Together': ['meta-models/Muse-Glimmer-30B', 'zai-org/GLM-5.3-Flash'],
     'SiliconFlow': ['deepseek-ai/DeepSeek-V3', 'Qwen/Qwen2.5-72B-Instruct'],
     # Both previous entries are gone: google/gemini-2.0-flash-exp:free and
     # meta-llama/llama-3.3-70b-instruct:free are absent from OpenRouter's live

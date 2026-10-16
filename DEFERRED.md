@@ -27,13 +27,13 @@ were entirely dead. The other eight have not:
 | Cerebras | `gpt-oss-120b`, `qwen-3.8-27b` | yes - real call; dead ones 404, live ones 402 (no credit) |
 | SambaNova | `Meta-Llama-3.3-70B-Instruct`, `gemma-4-31B-it` | **listing only** - 402 precedes model validation |
 | OpenRouter | `google/gemma-4-31b-it:free`, `nvidia/nemotron-3.5-lightning:free` | partly - routable, but no completion call |
-| OpenAI | `gpt-4o-mini`, `gpt-4o`, `gpt-3.5-turbo` | no |
-| Anthropic | `claude-3-5-sonnet-20241022`, `-haiku-20241022`, `claude-3-haiku-20240307` | no |
-| DeepSeek | `deepseek-chat`, `deepseek-coder` | no |
-| xAI | `grok-2`, `grok-beta` | no |
+| OpenAI | `gpt-4o-mini`, `gpt-4o` (`gpt-3.5-turbo` dropped) | replaced 2026-10-16 (K15) from the docs - listed, not called |
+| Anthropic | `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-haiku-4-5` | replaced 2026-10-16 (K15) from the docs - listed, not called |
+| DeepSeek | `deepseek-flash`, `deepseek-v4-pro` | replaced 2026-10-16 (K15) from the docs - listed, not called |
+| xAI | `grok-4.20-0309-non-reasoning`, `grok-4.3` | replaced 2026-10-16 (K15) from the docs - listed, not called |
 | Mistral | `mistral-large-latest`, `mistral-small-latest` | no |
 | Perplexity | `sonar`, `sonar-pro` | no |
-| Together | `meta-llama/Llama-3.3-70B-Instruct-Turbo`, `-3.1-70B-...` | no |
+| Together | `meta-models/Muse-Glimmer-30B`, `zai-org/GLM-5.3-Flash` | replaced 2026-10-16 (K15) from the docs - listed, not called |
 | SiliconFlow | `deepseek-ai/DeepSeek-V3`, `Qwen/Qwen2.5-72B-Instruct` | no |
 
 **Five checked, five entirely or half dead.** Google 3/3 dead, Groq 3/3 dead, Cerebras 2/2 dead,
@@ -100,6 +100,19 @@ more lists are:
 | Mistral | `mistral-large-latest`, `mistral-small-latest` | Expected alive: by policy a `-latest` alias moves to the newer model by itself ([model lifecycle](https://docs.mistral.ai/inference/model-lifecycle)) |
 | SiliconFlow | `deepseek-ai/DeepSeek-V3`, `Qwen/Qwen2.5-72B-Instruct` | Not among the discontinued models in the release notes ([release notes](https://api-docs.siliconflow.cn/docs/release-notes/overview)) - unconfirmed either way |
 | Perplexity | `sonar`, `sonar-pro` | Still priced, but the July 2026 changelog says "Sonar Chat Completions is now Agent API" ([changelog](https://docs.perplexity.ai/changelog)); third parties date the end of `/chat/completions` for Sonar to 2026-09-27. **The risk may be the endpoint the app calls, not just the model** |
+
+**Replaced, 2026-10-16** (K15, the user: "do it now"). The five lists their own providers document
+as dead or going now hold the providers' current models - in `api_manager`'s tier 3 and in the
+Worker's `STATIC_DEFAULT_MODELS_BY_PROVIDER` alike, every new ID also listed under its provider in
+`MODEL_PROVIDER_MAP` / `STATIC_PROVIDER_MODELS` (no prefix rule knows `meta-models/` or
+`zai-org/`), and `tests/test_default_model_routing.py` now also fails on a default its provider
+has retired. Fast, non-reasoning models first. Checked: a local `wrangler dev` run of the cron
+served all thirteen lists, and each default routed to its own provider through that config.
+**What is still open**, and why this entry stays: no key, so not one replacement has answered a
+real call; OpenAI's two remaining defaults expire on 2027-01-14 (replacement named:
+`gpt-6-luna`); Perplexity's endpoint question; SiliconFlow unconfirmed; the key patterns above;
+and the dropdown lists still offer the dead IDs (`grok-2`, `deepseek-chat`, ...) - only the
+defaults were replaced.
 
 Not changed in code, on purpose: the replacements are what the providers name, not what a call
 proved (the rule above), and the table users actually receive is the Worker's, whose deploy is

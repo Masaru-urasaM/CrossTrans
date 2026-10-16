@@ -220,7 +220,10 @@ MODEL_PROVIDER_MAP = {
     ],
     # === ANTHROPIC (Claude) ===
     'Anthropic': [
-        # Claude 4.5 Series (Latest)
+        # Claude 5.5 / Fable 5.1 - current, and the D11 defaults (K15, 2026-10-16)
+        'claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-1',
+        'claude-haiku-4-5',
+        # Claude 4.5 Series
         'claude-opus-4-5-20251101', 'claude-sonnet-4-5-20251101', 'claude-haiku-4-5-20251101',
         # Claude 4 Series
         'claude-4-opus', 'claude-4-sonnet', 'claude-4-haiku',
@@ -232,6 +235,8 @@ MODEL_PROVIDER_MAP = {
     ],
     # === DEEPSEEK ===
     'DeepSeek': [
+        # Current names in DeepSeek's API docs, and the D11 defaults (K15)
+        'deepseek-flash', 'deepseek-v4-pro',
         'deepseek-chat', 'deepseek-coder', 'deepseek-reasoner',
         'deepseek-r1', 'deepseek-r1-lite',
         'deepseek-v3', 'deepseek-v2.5',
@@ -255,6 +260,9 @@ MODEL_PROVIDER_MAP = {
     ],
     # === XAI (Grok) ===
     'xAI': [
+        # The grok-4.x line - all xAI lists now; the first two are the D11 defaults (K15)
+        'grok-4.20-0309-non-reasoning', 'grok-4.3', 'grok-4.7', 'grok-4.6', 'grok-4.5',
+        'grok-4.20-0309-reasoning',
         'grok-3', 'grok-3-fast',
         'grok-2', 'grok-2-vision', 'grok-2-1212',
         'grok-beta', 'grok-vision-beta',
@@ -308,6 +316,9 @@ MODEL_PROVIDER_MAP = {
     ],
     # === TOGETHER ===
     'Together': [
+        # The D11 defaults (K15): Together's named replacements. No prefix rule knows
+        # meta-models/ or zai-org/, so without these entries they would route elsewhere.
+        'meta-models/Muse-Glimmer-30B', 'zai-org/GLM-5.3-Flash',
         # Llama 3.3
         'meta-llama/Llama-3.3-70B-Instruct-Turbo',
         # Llama 3.2

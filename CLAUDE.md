@@ -173,7 +173,8 @@ the static list and report `groq_source` / `gemini_source` in `cache_meta`. The 
 (`STATIC_DEFAULT_MODELS_BY_PROVIDER`). It is what auto-detection and `_try_model_rotation()`
 read when the model field is blank, so a stale entry costs a real user a silent failed attempt
 per model - which is exactly what happened to Groq, Google and OpenRouter, all three of which
-had **entirely** dead lists. Verify an entry with a real API call before trusting it:
+had **entirely** dead lists (so were five more on 2026-10-16, replaced from the providers' own
+docs in K15 - listed, not yet called: see D11). Verify an entry with a real API call before trusting it:
 **presence in a provider's `/models` listing is not enough** (`gemini-2.5-pro` is listed and
 404s on use). An intermediary's listing is weaker still - OpenRouter names Groq as an upstream
 for `llama-3.3-70b-instruct`, which Groq's own catalogue does not carry at all.

@@ -7,6 +7,37 @@ All notable changes to CrossTrans are documented here.
 Everything below `[1.9.20]` ships as **1.9.21**: the user chose the number on 2026-10-16, and
 `VERSION` says so. Not tagged and not built as a release yet.
 
+### Phase K15 — D11: five providers' dead default models replaced (2026-10-16)
+
+The user, on D11: "do it now". No key for any of the eight providers was at hand, so the
+replacements come from each provider's own documentation, fetched today - listed, not called.
+
+**Changed** - `DEFAULT_MODELS_BY_PROVIDER` (tier 3, `src/core/api_manager.py`) and the Worker's
+`STATIC_DEFAULT_MODELS_BY_PROVIDER` (tier 1; `cloudflare_worker.js`, which is not tracked):
+- Anthropic: all three 3.x pins are retired -> `claude-haiku-5-5`, `claude-sonnet-5-5`,
+  `claude-haiku-4-5`.
+- xAI: `grok-2` and `grok-beta` are off xAI's list -> `grok-4.20-0309-non-reasoning`, `grok-4.3`.
+- DeepSeek: `deepseek-chat` and `deepseek-coder` are gone from the API docs -> `deepseek-flash`,
+  `deepseek-v4-pro`.
+- Together: Llama-3.1-70B-Turbo was removed in February and Llama-3.3-70B-Turbo goes on
+  2026-10-22 -> `meta-models/Muse-Glimmer-30B` (Together's named replacement),
+  `zai-org/GLM-5.3-Flash`.
+- OpenAI: `gpt-3.5-turbo` shuts down 2026-10-23 -> dropped; `gpt-4o-mini` and `gpt-4o` stay until
+  2027-01-14.
+- Every new ID is also listed under its provider in `MODEL_PROVIDER_MAP` and the Worker's
+  `STATIC_PROVIDER_MODELS`: the app matches the map before its prefix rules, and no rule knows
+  `meta-models/` or `zai-org/` - unlisted, Together's defaults would have gone to another API.
+
+**Checked**: `wrangler dev` with a local KV ran the cron and served all thirteen default lists, each
+ID present in the map under its provider; each default, put through `_identify_provider()` with
+that config, came back to its own provider. **Deploy**: needs the user's Cloudflare login - the
+stored wrangler token had expired.
+
+**Tests**: 1519 -> 1524 (+6 in `tests/test_default_model_routing.py`: no default is a model its
+provider has retired - OpenAI, Anthropic, DeepSeek, xAI, Together - and every provider keeps a
+second default to rotate to; the round-trip sweep covers the new IDs, and has one case fewer -
+`gpt-3.5-turbo`, no longer a default). 4 mutations killed.
+
 ### Phase K14 — Accurate furigana as a download in Settings -> Dictionary (2026-10-16, D19)
 
 The user chose how D19 ends: not bundled - "put it in Settings, in the Dictionary language
