@@ -5,6 +5,43 @@ approaches. Newest first.
 
 ---
 
+### Decision 30 - Chinese by its function words: two of 是很們這嗎呢吧麼你她它, in a sentence
+
+**Date**: 2026-10-16
+**Status**: RESOLVED (measured, as the proposal asked; decided while doing the post-J12 follow-ups
+the user asked for in full - revisit if they object)
+
+**Problem**: Half of all Chinese sentences (46 634 of Tatoeba's 89 179) hold no glyph that only
+Chinese writes, so the app treats them like kanji-only Japanese: a marker clause on every
+translation, and "Japanese or Chinese?" in the main window's Dictionary for 這是我的書。. Which
+text-level rule could settle them without ever calling Japanese text Chinese - which costs more
+than the question: evidence is stated to the model, readings vanish, and no row offers to undo it?
+
+**Options considered** (Chinese = share of the 46 634 settled; Japanese = called Chinese among the
+100 open Tatoeba sentences, the 177 555 all-kanji dictionary words as terms / one-word sentences /
+10 000 lists, and 20 000 stress compounds of two words each holding a listed character):
+1. **A long kanji-only sentence** (6+ hanzi ending 。！？) - 81% Chinese; 14 of the 100 Japanese
+   sentences. Rejected.
+2. **A fullwidth comma ，** - 13% Chinese; 0 sentences, but every academic-style list 東京，大阪
+   turns Chinese by construction. Rejected.
+3. **Two distinct of 是很們這嗎呢吧麼你她它 + 的了我**, punctuated - 49% Chinese; 1 one-word
+   sentence (我們。) and **31%** of the stress compounds (目的完了。, 是正完了。). Rejected: Japanese
+   writes 的, 了 and 我 in compounds.
+4. **Two distinct of 是很們這嗎呢吧麼你她它**, punctuated - **17.3%** Chinese; **0** on every
+   Japanese set, 4 of 20 000 stress compounds (all nonsense: 腹這是川。).
+5. **No rule** - Pros: nothing to get wrong. Cons: the question and the marker stay on half of
+   all Chinese sentences.
+
+**Resolution**: **Option 4** (`lang_id.grammar_evidence()`, evidence `'zh-grammar'`, after kana and
+glyphs and never against a Japanese-only glyph). The modest share is the price of a rule that
+measured clean; the sentences it leaves go to the model, which reads a sentence correctly. A text
+without punctuation is a term, and terms stay the model's and the user's (Decision 29).
+
+**References**: `src/core/lang_id.py`, `tools/measure_cjk_evidence.py`, CHANGELOG "Phase K6",
+Decisions 21, 22, 24.
+
+---
+
 ### Decision 29 - A placed term can be changed; a placed sentence cannot
 
 **Date**: 2026-10-16

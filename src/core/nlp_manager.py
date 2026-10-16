@@ -1414,9 +1414,10 @@ class NLPManager:
             if lang_id.has_kana(text):
                 max_lang, confidence = "Japanese", 1.0
             else:
-                evidence = lang_id.han_evidence(text)
+                # A glyph, or two Chinese function words in a sentence (K6)
+                evidence = lang_id.text_evidence(text)
                 if evidence:
-                    max_lang, confidence = evidence, 0.9
+                    max_lang, confidence = evidence.language, 0.9
                 else:
                     max_lang, confidence = "Unknown", AMBIGUOUS_CJK_CONFIDENCE
 

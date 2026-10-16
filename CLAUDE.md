@@ -238,8 +238,11 @@ the first match, so one of the two always loses (DEFERRED D12). It only matters 
 - `dictionary_prompt.py` - The dictionary lookup prompt: source/target, context, pronunciation by
   source language (pure logic; see "Dictionary Prompt" below)
 - `lang_id.py` - Which language CJK text is, from evidence only: `resolve(text, known=, context=,
-  model=)` (known -> kana/glyph evidence -> context -> a model's verdict -> unknown, Decision 22),
-  `normalize_language()`, `ruby_hint()` / `output_hint()`. Pure; must not import `furigana`.
+  model=)` (known -> kana/glyph/grammar evidence -> context -> a model's verdict -> unknown,
+  Decision 22), `normalize_language()`, `ruby_hint()` / `output_hint()`. Pure; must not import
+  `furigana`. **Grammar evidence** (K6, Decision 30): two distinct of 是很們這嗎呢吧麼你她它 in a
+  punctuated sentence = Chinese - never add 的 了 我 (Japanese compounds: 目的, 終了, 我慢);
+  re-measure with `tools/measure_cjk_evidence.py evidence` before touching the set.
   **Glyph sets are traps** (Decision 24): "Japanese-only" = CP932 minus GB2312 minus
   **Big5-HKSCS** (plain Big5 calls Hong Kong's 衆 裏 綫 Japanese); "cannot be Japanese" = outside
   **JIS X 0213** (CP932 lacks the 2010 Jōyō 剝 頰 塡); never GBK (it holds everything)
@@ -733,7 +736,9 @@ decisions and the manual checklist are in ROADMAP_DONE.md ("J").
 **Traps** (Decision 24, `lang_id` docstring): "can be Japanese" = JIS X 0213, not CP932 (剝 頰 塡);
 "Japanese-only" excludes **Big5-HKSCS**, not just Big5 (Hong Kong's 衆 裏 綫 are outside Big5);
 never GBK; U+30FB "・" is not kana (Chinese names use it). A stray `[[SOURCE: ...]]` from a model
-that was not asked is still removed (`strip_stray_markers`).
+that was not asked is still removed (`strip_stray_markers`). Function words prove Chinese only in
+a punctuated sentence and only from the listed set (K6, Decision 30) - "long and kana-free" and "has
+a fullwidth comma" were measured and rejected.
 
 ## Furigana System (Japanese Reading Guides)
 

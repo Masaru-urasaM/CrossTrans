@@ -705,6 +705,15 @@ class TestRealDetectionOpensDirectly:
         assert _FakeWordFrame.created[-1].kwargs['language'] == "Japanese"
         assert not _toplevels(tk_root, "Select Source Language")
 
+    def test_a_chinese_sentence_opens_chinese_without_asking(self, tk_root, dictionary,
+                                                            monkeypatch):
+        # K6: its glyphs prove nothing, but 這 and 是 in a sentence do.
+        monkeypatch.setattr(nlp_manager, 'is_any_installed', lambda: True)
+        monkeypatch.setattr(nlp_manager, 'is_installed', lambda lang: True)
+        dictionary.open_from_text("這是我的書。")
+        assert _FakeWordFrame.created[-1].kwargs['language'] == "Chinese (Traditional)"
+        assert not _toplevels(tk_root, "Select Source Language")
+
     def test_kanji_only_with_a_japanese_glyph_opens_japanese(self, tk_root, dictionary,
                                                               monkeypatch):
         monkeypatch.setattr(nlp_manager, 'is_any_installed', lambda: True)

@@ -10,7 +10,8 @@ in a fixed order (Decision 22) and says where its answer came from:
 2. evidence in the text - kana proves Japanese; a kanji only Japanese writes
               (a shinjitai such as 経, 気, 読) proves Japanese; a
               hanzi Japanese cannot write (a simplified form such as 们, 这)
-              proves Chinese;
+              proves Chinese; so do two Chinese function words in one
+              punctuated sentence (這是我的書。, K6 - see grammar_evidence);
 3. evidence in the context - the larger text the fragment came from, same rules;
 4. model    - the language an AI model call reported for this exact text;
 5. none     - unknown. A surface that needs a language asks the user; a passive
@@ -239,6 +240,54 @@ def han_evidence(text: Optional[str]) -> Optional[str]:
     return None
 
 
+# Chinese function words Japanese does not write: two distinct ones in a
+# punctuated sentence prove Chinese where the glyphs prove nothing - 這是我的書。
+# holds no simplified form and no Japanese-only one. Measured 2026-10-16 on
+# Tatoeba's Japanese and Chinese sentences, and on the 177 555 all-kanji words of
+# pykakasi's dictionary as terms, as one-word sentences and as lists: no Japanese
+# text called Chinese; 17% of the Chinese sentences the glyphs leave open settled.
+# 的, 了 and 我 stay out on purpose: Japanese writes them in compounds (目的, 終了,
+# 我慢), and with them two such compounds in one sentence came back Chinese 31% of
+# the time.
+CHINESE_FUNCTION_CHARS = frozenset('是很們這嗎呢吧麼你她它')
+SENTENCE_PUNCTUATION_RE = re.compile(r'[。！？，；：.!?,;:]')
+
+
+@lru_cache(maxsize=None)
+def _chinese_script(ch: str) -> Optional[str]:
+    """'zh-t' for a hanzi only Traditional sets hold (Big5-HKSCS, not GB2312),
+    'zh-s' for one only GB2312 holds, else None."""
+    big5, gb = _encodes(ch, 'big5hkscs'), _encodes(ch, 'gb2312')
+    if big5 and not gb:
+        return 'zh-t'
+    if gb and not big5:
+        return 'zh-s'
+    return None
+
+
+def grammar_evidence(text: Optional[str]) -> Optional[str]:
+    """A Chinese variant when `text` is a punctuated sentence holding two distinct
+    CHINESE_FUNCTION_CHARS and no kanji only Japanese writes; else None.
+
+    The variant is the side more of its hanzi belong to (Big5-HKSCS without
+    GB2312 is Traditional); a tie is Simplified, as in han_evidence(). Needs the
+    same codecs as the glyph evidence, and is off without them.
+    """
+    if not text or not SENTENCE_PUNCTUATION_RE.search(text):
+        return None
+    if len(set(text) & CHINESE_FUNCTION_CHARS) < 2:
+        return None
+    if not glyph_evidence_available():
+        return None
+    han = set(HAN_RE.findall(text))
+    if any(glyph_class(ch) == 'jp' for ch in han):
+        return None
+    scripts = [_chinese_script(ch) for ch in han]
+    if scripts.count('zh-t') > scripts.count('zh-s'):
+        return CHINESE_TRADITIONAL
+    return CHINESE_SIMPLIFIED
+
+
 def text_evidence(text: Optional[str]) -> Optional[Verdict]:
     """A verdict from the text itself, or None when it proves nothing."""
     if has_kana(text):
@@ -248,6 +297,9 @@ def text_evidence(text: Optional[str]) -> Optional[Verdict]:
         return Verdict(JAPANESE, 'jp-glyph')
     if language:
         return Verdict(language, 'zh-glyph')
+    language = grammar_evidence(text)
+    if language:
+        return Verdict(language, 'zh-grammar')
     return None
 
 

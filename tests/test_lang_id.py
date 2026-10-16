@@ -169,7 +169,9 @@ def test_hong_kong_forms_are_never_japanese(text):
     assert han_evidence(text) != JAPANESE
 
 
-@pytest.mark.parametrize("text", ["勉強", "手紙", "東京大学", "先生", "這是我的書。", "學生", ""])
+# 這是我的書 without its full stop: the punctuated sentence is Chinese by its
+# function words since K6 (test_function_words_in_a_sentence_are_chinese).
+@pytest.mark.parametrize("text", ["勉強", "手紙", "東京大学", "先生", "這是我的書", "學生", ""])
 def test_shared_spellings_stay_unknown(text):
     assert text_evidence(text) is None
 
@@ -360,3 +362,83 @@ def test_the_module_stays_pure():
     for forbidden in ("import tkinter", "from tkinter", "import config", "from config",
                       "furigana import", "import furigana"):
         assert forbidden not in source, forbidden
+
+
+# --------------------------------------------------------------------------- #
+# K6 - two Chinese function words in a sentence
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("text, language", [
+    ("這是我的書。", CHINESE_TRADITIONAL),      # the case that asked "Japanese or Chinese?"
+    ("你是學生嗎？", CHINESE_TRADITIONAL),
+    ("她是我的朋友。", CHINESE_SIMPLIFIED),      # no script-only hanzi: a tie is Simplified
+    ("它很好。", CHINESE_SIMPLIFIED),
+    ("你好嗎?", CHINESE_TRADITIONAL),            # ASCII punctuation counts too
+    ("這本書很好，你呢？", CHINESE_TRADITIONAL),
+])
+def test_function_words_in_a_sentence_are_chinese(text, language):
+    assert lang_id.grammar_evidence(text) == language
+    assert text_evidence(text) == Verdict(language, 'zh-grammar')
+
+
+@pytest.mark.parametrize("text", [
+    "這是我的書",            # no punctuation: a term, the model's to place
+    "我是學生。",            # one listed word (我 is not listed)
+    "是正完了。",            # Japanese: 是正 + 完了 - 了 is not listed
+    "目的完了。",
+    "我慢終了。",
+    "了解。",
+    "社是、是非。",          # the same listed word twice
+    "国是。",
+    "東京大学。",
+])
+def test_one_function_word_or_none_proves_nothing(text):
+    assert lang_id.grammar_evidence(text) is None
+    assert text_evidence(text) is None
+
+
+def test_a_japanese_only_glyph_wins_over_function_words():
+    # 気 is a shinjitai Chinese never writes: the glyph rule, unchanged.
+    assert lang_id.grammar_evidence("這是気嗎？") is None
+    assert text_evidence("這是気嗎？") == Verdict(JAPANESE, 'jp-glyph')
+
+
+def test_kana_wins_over_function_words():
+    assert text_evidence("這是本です。") == Verdict(JAPANESE, 'kana')
+
+
+def test_grammar_evidence_beats_a_models_verdict():
+    assert resolve("這是我的書。", model=JAPANESE) == Verdict(CHINESE_TRADITIONAL, 'zh-grammar')
+
+
+def test_the_excluded_words_are_ones_japanese_writes():
+    # 的, 了 and 我 are left out on purpose (目的, 終了, 我慢): a stress test of two
+    # Japanese compounds in one sentence came back Chinese 31% of the time with them.
+    assert not {'的', '了', '我'} & lang_id.CHINESE_FUNCTION_CHARS
+
+
+def test_no_word_of_a_japanese_dictionary_is_called_chinese():
+    """Every all-kanji word of pykakasi's dictionary (SKK-JISYO, ~200 000), as a
+    term and as a one-word sentence - measured at 0 when the rule was chosen."""
+    kanji = pytest.importorskip("pykakasi.kanji")
+    words = [w for table in kanji.Kanwa()._jisyo_table.values() for w in table
+             if len(w) >= 2 and all(lang_id.HAN_RE.match(ch) for ch in w)]
+    assert len(words) > 100000
+    called = [w for w in words
+              if lang_id.grammar_evidence(w) or lang_id.grammar_evidence(w + '。')]
+    assert called == []
+
+
+def test_without_the_codecs_grammar_evidence_is_off(monkeypatch):
+    monkeypatch.setattr(lang_id, 'glyph_evidence_available', lambda: False)
+    assert lang_id.grammar_evidence("這是我的書。") is None
+
+
+def test_the_rest_of_the_app_hears_it():
+    from src.core.history import HistoryManager
+    from src.core.nlp_manager import nlp_manager
+    from src.core.source_marker import source_clause
+    clause = source_clause("這是我的書。")
+    assert clause.asks is False and clause.stated == CHINESE_TRADITIONAL
+    assert "the text above is Chinese" in clause.text
+    assert nlp_manager.detect_language("這是我的書。") == (CHINESE_TRADITIONAL, 0.9)
+    assert HistoryManager(None)._detect_language("這是我的書。") == CHINESE_TRADITIONAL

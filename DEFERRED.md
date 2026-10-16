@@ -181,7 +181,8 @@ by option.
 A fresh install has one reading provider, pykakasi. fugashi + UniDic arrives only with the
 Japanese NLP pack (Settings -> Dictionary), so a user who never opens that tab - most users -
 reads every Japanese surface through pykakasi. Measured on 3000 random Tatoeba sentences that
-contain kanji (CC-BY 2.0 FR, `random.seed(20261016)` over the 244 364 such sentences): **898
+contain kanji (CC-BY 2.0 FR, `random.seed(20261016)` over the 244 364 such sentences; reproduce
+with `tools/measure_cjk_evidence.py readings`): **898
 (30%)** have at least one word the two providers read differently; 165 distinct differences.
 Not every difference is a pykakasi error - 私 わたし / わたくし and 明日 あした / あす are both
 valid, and in お母さん it is fugashi's はは that is wrong - but the most frequent include plain

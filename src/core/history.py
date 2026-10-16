@@ -202,10 +202,12 @@ class HistoryManager:
         if korean > total * 0.3:
             return "Korean"
         if cjk > total * 0.3:
-            # Kanji alone: what the glyphs prove, else unknown - 勉強 used to be
-            # labelled "Chinese" (TODO.md F5). The model's verdict, when there is
-            # one, is passed in by the caller instead (source_lang).
-            return lang_id.han_evidence(text) or "Unknown"
+            # Kanji alone: what the glyphs (or, K6, the function words) prove,
+            # else unknown - 勉強 used to be labelled "Chinese" (TODO.md F5). The
+            # model's verdict, when there is one, is passed in by the caller
+            # instead (source_lang).
+            evidence = lang_id.text_evidence(text)
+            return evidence.language if evidence else "Unknown"
         if vietnamese > 0:
             return "Vietnamese"
         if cyrillic > total * 0.3:

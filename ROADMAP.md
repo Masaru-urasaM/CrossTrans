@@ -42,7 +42,7 @@ below until archived.
 
 | Item | Status | Notes |
 |------|--------|-------|
-| K: follow-ups to the language-identity work | 🔨 In progress | K1 done (2026-10-16): the suite on a clean venv - 5 failures fixed, D19 found. K2 done: D16. K3 done: the Dictionary keeps the user's answer. K4 done: a placed term can change language on the popup. K5 done: the main window's row |
+| K: follow-ups to the language-identity work | 🔨 In progress | K1 done (2026-10-16): the suite on a clean venv - 5 failures fixed, D19 found. K2 done: D16. K3 done: the Dictionary keeps the user's answer. K4 done: a placed term can change language on the popup. K5 done: the main window's row. K6 done: Chinese sentences by their function words |
 | Cut 1.9.21 | 📋 Planned | Bump `VERSION`, run `build_exe.bat`, tag, write release notes. The H1 work is on `main` and tested; the language-identity work is on its branch - merge it first if it ships in 1.9.21 rather than 1.9.22 (the user's call) |
 
 ---

@@ -4,6 +4,41 @@ All notable changes to CrossTrans are documented here.
 
 ## [Unreleased]
 
+### Phase K6 — A Chinese sentence is known by its function words (2026-10-16)
+
+Measured first, as the proposal asked. **The problem was bigger than one example**: of Tatoeba's
+89 179 Chinese sentences, **46 634 (52%)** carry no glyph that only Chinese writes - Traditional
+ones, and Simplified ones that use only characters Japanese shares - so the app asked the model for
+a `[[SOURCE: ...]]` line on every translation of them, and the main window's Dictionary asked the
+user "Japanese or Chinese?" about 這是我的書。. Of Tatoeba's 248 924 Japanese sentences, 100 are as
+open.
+
+**Added**
+- `lang_id.grammar_evidence(text)`: a punctuated sentence holding **two distinct Chinese function
+  words Japanese does not write** - 是 很 們 這 嗎 呢 吧 麼 你 她 它 - and no Japanese-only glyph is
+  Chinese (variant: the side more of its hanzi belong to only; a tie is Simplified). It is the
+  last step of `text_evidence()` (`'zh-grammar'`), after kana and glyphs, so it reaches the prompt
+  clause, `nlp_manager.detect_language()` (the Dictionary) and History's label. Settles **8 082 of
+  the 46 634 (17.3%)**, 這是我的書。 among them; calls **no** Japanese text Chinese - the 100
+  sentences, the 177 555 all-kanji words of pykakasi's dictionary as terms, as one-word sentences
+  and in 10 000 lists - and 4 of 20 000 nonsense compounds built to trip it.
+- `tools/measure_cjk_evidence.py` - the measurement, reproducible: `evidence` for this rule,
+  `readings` for D19 (K1). Downloads Tatoeba's exports (CC-BY 2.0 FR) once into
+  `logs/eval/tatoeba/`; no API calls.
+
+**Rejected on the numbers** (Decision 30): the proposal's own rules - "a long sentence without
+kana" (14 of the 100 Japanese sentences at 6+ hanzi with 。！？) and "a fullwidth comma" (safe on
+the sentences, 13% recall, but every academic-style Japanese list 東京，大阪 would turn Chinese) -
+and the wider function-word set with 的 了 我, which settled 49% but called **31%** of the stress
+compounds Chinese (目的完了。, 是正完了。): Japanese writes those three in compounds.
+
+**Tests**: 1279 -> 1315 (+36): `tests/test_lang_id.py` (+22: the rule, its exclusions, glyphs and
+kana first, evidence over a model, every word of pykakasi's dictionary, the codec guard, the
+prompt / Dictionary / History hearing it), `tests/test_dictionary_flow.py` (+1: 這是我的書。 opens
+the Dictionary in Chinese without asking), `tests/test_measure_cjk_evidence.py` (13, the tool's
+pure parts, no network). One J2 case, 這是我的書。 "stays unknown", now reads 這是我的書 - the
+unpunctuated form still does. 10 mutations killed.
+
 ### Phase K5 — The main window's own Japanese / Chinese row (2026-10-16)
 
 **Added**
