@@ -14,7 +14,7 @@ glyph-evidence codecs - and its PYZ carries the last popup code (`_bind_edges`, 
 `popup_layout.edge_at` / `resize`, `POPUP_FRONT_MS`). The user tested the popup work on it:
 "a complete success" (2026-10-19).
 
-Earlier 1.9.21 builds, each superseded by the next and named apart because the user was running
+Earlier 1.9.21 builds, since deleted from `dist\` (2026-10-19), each superseded by the next and named apart because the user was running
 the one before: `CrossTrans_v1.9.21.exe` (2026-10-16, `39419c5`), `_popup_2026-10-19` (`51435a3`),
 `_grip_2026-10-19` (`4f926b4`). The first was also run rather than inspected: an interpreter whose
 only standard library is the EXE's own `base_library.zip` looks up and encodes with all four
