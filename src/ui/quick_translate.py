@@ -19,9 +19,10 @@ except ImportError:
     from tkinter import ttk
     HAS_TTKBOOTSTRAP = False
 
-from src.constants import (POPUP_COLLAPSED_ORIGINAL_ROWS, POPUP_LAYOUT_WATCHDOG_MS,
-                           POPUP_MIN_BOX_ROWS, POPUP_REVEAL_DELAY_MS,
-                           POPUP_SCREEN_MARGIN, POPUP_TOOLTIP_DELAY_MS)
+from src.constants import (POPUP_COLLAPSED_ORIGINAL_ROWS, POPUP_GRIP_PREVIEW_MS,
+                           POPUP_LAYOUT_WATCHDOG_MS, POPUP_MIN_BOX_ROWS,
+                           POPUP_REVEAL_DELAY_MS, POPUP_SCREEN_MARGIN,
+                           POPUP_TOOLTIP_DELAY_MS)
 from src.core import lang_id
 from src.core.furigana import RubySegment
 from src.core.nlp_manager import nlp_manager
@@ -69,6 +70,13 @@ ICON_GLYPHS = {
 ICON_BG = '#3a3f44'               # neutral; an icon takes its action's colour on hover
 TOOLTIP_FONT = ('Segoe UI', 9)
 TOOLTIP_BG = '#111111'
+
+# The frame a grip drag moves instead of the popup: laying the popup out costs up to
+# ~190 ms a step on a long text, moving this ~1.5 ms (measured 2026-10-19). Its inside
+# is GRIP_OUTLINE_KEY, made transparent, so the popup shows through.
+GRIP_OUTLINE_COLOR = '#3498db'
+GRIP_OUTLINE_PX = 2
+GRIP_OUTLINE_KEY = '#000001'
 
 # The small header that names the original block, and its "Show all" toggle.
 ORIGINAL_HEADER_FONT = ('Segoe UI', 8)
@@ -468,7 +476,8 @@ class QuickTranslateManager:
         self._icon_family_cache = None     # (family or None,), looked up once
         self._grip: Optional[tk.Label] = None
         self._grip_start = None
-        self._grip_pending = None
+        self._grip_outline: Optional[tk.Toplevel] = None
+        self._grip_preview_after = None
         self._user_size: Optional[Tuple[int, int]] = None
 
     def configure_callbacks(self,
@@ -1007,7 +1016,8 @@ class QuickTranslateManager:
     def _build_grip(self) -> None:
         """A resize grip in the bottom-right corner (Decision 34, TODO.md P4). The size
         the user drags the popup to is remembered and becomes the next popup's reading
-        width and height cap; a double-click returns to automatic sizing."""
+        width and height cap; a double-click returns to automatic sizing. A drag moves
+        an outline, not the popup (Decision 35)."""
         grip = tk.Label(self.popup, text=GRIP_GLYPH, font=('Segoe UI', 8), fg='#6c757d',
                         bg=self._frame_bg(), cursor='size_nw_se', padx=0, pady=0,
                         autostyle=False)
@@ -1313,6 +1323,10 @@ class QuickTranslateManager:
         return 'break'
 
     def _grip_drag(self, event) -> str:
+        """Move the outline to the size being dragged to. The popup itself is laid out
+        only when the drag pauses (POPUP_GRIP_PREVIEW_MS) and on release: laying it out
+        on every motion cost 14-190 ms a step, so a long text followed the mouse at a
+        few frames a second (Decision 35)."""
         if self.popup is None or self._grip_start is None or self._layout is None:
             return 'break'
         start_x, start_y, start_width, start_height = self._grip_start
@@ -1325,33 +1339,83 @@ class QuickTranslateManager:
         height = max(least, min(start_height + event.y_root - start_y,
                                 work.bottom - POPUP_SCREEN_MARGIN - y))
         self._user_size = (int(width), int(height))
-        if self._grip_pending is None:
-            self._grip_pending = self.popup.after_idle(self._apply_user_size)
+        try:
+            self._show_grip_outline(x, y, *self._user_size)
+        except tk.TclError:
+            pass
+        self._cancel_grip_preview()
+        self._grip_preview_after = self.root.after(POPUP_GRIP_PREVIEW_MS, self._grip_preview)
         return 'break'
 
-    def _apply_user_size(self) -> None:
-        self._grip_pending = None
-        if self.popup is not None and self._layout is not None and self._user_size:
+    def _show_grip_outline(self, x: int, y: int, width: int, height: int) -> None:
+        """The size being dragged to, as a frame over the popup: transparent inside,
+        topmost, and `WS_EX_NOACTIVATE` once mapped, like a tooltip. A child of the
+        popup, so closing the popup takes it too."""
+        outline = self._grip_outline
+        if outline is None:
+            outline = tk.Toplevel(self.popup)
+            outline.overrideredirect(True)
+            outline.attributes('-topmost', True)
+            # Coloured after construction: ttkbootstrap re-themes it while it is built.
+            outline.configure(bg=GRIP_OUTLINE_KEY, highlightthickness=GRIP_OUTLINE_PX,
+                              highlightbackground=GRIP_OUTLINE_COLOR,
+                              highlightcolor=GRIP_OUTLINE_COLOR)
             try:
-                self._fit_boxes(reposition=False, size=self._user_size)
+                outline.attributes('-transparentcolor', GRIP_OUTLINE_KEY)
+            except tk.TclError:
+                outline.attributes('-alpha', 0.35)  # no colour key: see the popup through
+            outline.bind('<Map>', lambda _event: set_noactivate(outline), add='+')
+            self._grip_outline = outline
+        outline.geometry(f"{width}x{height}+{x}+{y}")
+
+    def _hide_grip_outline(self) -> None:
+        if self._grip_outline is not None:
+            try:
+                self._grip_outline.destroy()
             except tk.TclError:
                 pass
+            self._grip_outline = None
+
+    def _cancel_grip_preview(self) -> None:
+        if self._grip_preview_after is not None:
+            try:
+                self.root.after_cancel(self._grip_preview_after)
+            except tk.TclError:
+                pass
+            self._grip_preview_after = None
+
+    def _grip_preview(self) -> None:
+        """The drag has paused: the popup takes the outline's size while the button is
+        still held, so the user sees the text re-wrapped before letting go."""
+        self._grip_preview_after = None
+        if self._grip_start is not None:
+            self._apply_user_size()
+
+    def _apply_user_size(self) -> None:
+        """Lay the popup out at the size the user dragged it to - unless it already is
+        (a pause laid it out, and the release came at the same size)."""
+        if (self.popup is None or self._layout is None or not self._user_size
+                or self._layout.get('size') == self._user_size):
+            return
+        try:
+            self._fit_boxes(reposition=False, size=self._user_size)
+        except tk.TclError:
+            pass
 
     def _grip_release(self, _event=None) -> str:
+        self._cancel_grip_preview()
         if self._grip_start is not None and self._user_size:
-            if self._grip_pending is not None:
-                try:
-                    self.popup.after_cancel(self._grip_pending)
-                except tk.TclError:
-                    pass
-                self._grip_pending = None
+            # Laid out before the outline goes, so the popup is never seen at neither.
             self._apply_user_size()
             self._remember_size(*self._user_size)
+        self._hide_grip_outline()
         self._grip_start = None
         return 'break'
 
     def _grip_reset(self, _event=None) -> str:
         """Double-click on the grip: forget the dragged size, back to automatic."""
+        self._cancel_grip_preview()
+        self._hide_grip_outline()
         self._user_size = None
         self._grip_start = None
         self._remember_size(None, None)
@@ -1813,6 +1877,8 @@ class QuickTranslateManager:
         for tip in self._tooltips:
             tip.hide()
         self._tooltips = []
+        self._cancel_grip_preview()
+        self._hide_grip_outline()
 
         if self.popup:
             try:
@@ -1845,7 +1911,6 @@ class QuickTranslateManager:
             self._grip = None
         self._layout = None
         self._grip_start = None
-        self._grip_pending = None
         self._user_size = None
 
     @property

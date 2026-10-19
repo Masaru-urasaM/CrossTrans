@@ -9,6 +9,7 @@ image in the gallery and an assertion here are the same measurement.
 import ctypes
 import dataclasses
 import os
+import statistics
 import sys
 import time
 import tkinter as tk
@@ -392,6 +393,7 @@ class TestGrip:
         tk_root.update()
         assert (mgr.popup.winfo_width(), mgr.popup.winfo_height()) == (width + 80, height + 60)
         assert config.saved == (width + 80, height + 60)
+        assert mgr._grip_outline is None
 
     def test_the_next_popup_reads_at_the_remembered_width(self, sized, tk_root):
         mgr, config = sized
@@ -414,6 +416,180 @@ class TestGrip:
         tk_root.update()
         assert config.saved == (None, None)
         assert mgr._layout['cap'] == popup_layout.height_cap(mgr._layout['work'])
+
+
+def grip_drag(mgr, dx, dy):
+    """One motion of a drag that started at (100, 100)."""
+    mgr._grip_drag(SimpleNamespace(x_root=100 + dx, y_root=100 + dy))
+
+
+def run_until(tk_root, done, timeout=2.0):
+    deadline = time.perf_counter() + timeout
+    while not done() and time.perf_counter() < deadline:
+        time.sleep(0.005)
+        tk_root.update()
+
+
+class TestGripDragsAnOutline:
+    """A drag moves an outline; the popup is laid out when the drag pauses and on
+    release (Decision 35). Laid out on every motion it cost 14-190 ms a step, and a
+    long text followed the mouse at a few frames a second."""
+
+    @pytest.fixture
+    def no_pause(self, monkeypatch):
+        # No pause preview inside these tests, however slow the runner.
+        monkeypatch.setattr(quick_translate, 'POPUP_GRIP_PREVIEW_MS', 60_000)
+
+    @pytest.fixture
+    def layouts(self, sized, monkeypatch):
+        """Every time the popup is laid out at the user's size."""
+        mgr, _ = sized
+        calls = []
+        fit = mgr._fit_boxes
+
+        def counted(*args, **kwargs):
+            calls.append(kwargs.get('size'))
+            return fit(*args, **kwargs)
+
+        monkeypatch.setattr(mgr, '_fit_boxes', counted)
+        return calls
+
+    def test_while_dragging_only_the_outline_moves(self, sized, tk_root, no_pause):
+        mgr, config = sized
+        put_up(mgr, tk_root, cases.case('C'))
+        width, height = mgr.popup.winfo_width(), mgr.popup.winfo_height()
+        mgr._grip_press(SimpleNamespace(x_root=100, y_root=100))
+        grip_drag(mgr, 80, 60)
+        tk_root.update()
+        outline = mgr._grip_outline
+        assert (mgr.popup.winfo_width(), mgr.popup.winfo_height()) == (width, height)
+        assert outline is not None and outline.winfo_ismapped()
+        assert (outline.winfo_x(), outline.winfo_y()) == (mgr.popup.winfo_x(),
+                                                          mgr.popup.winfo_y())
+        assert (outline.winfo_width(), outline.winfo_height()) == (width + 80, height + 60)
+        assert config.saved == (None, None)
+        mgr._grip_release()
+
+    def test_no_motion_lays_the_popup_out_the_release_does(self, sized, tk_root, no_pause,
+                                                           layouts):
+        mgr, _ = sized
+        put_up(mgr, tk_root, cases.case('G'))
+        layouts.clear()
+        mgr._grip_press(SimpleNamespace(x_root=100, y_root=100))
+        for step in range(1, 21):
+            grip_drag(mgr, 4 * step, 3 * step)
+            tk_root.update()
+        assert layouts == []
+        mgr._grip_release()
+        assert layouts == [mgr._user_size]
+
+    def test_a_pause_shows_the_popup_at_the_outlines_size(self, sized, tk_root, monkeypatch,
+                                                          layouts):
+        monkeypatch.setattr(quick_translate, 'POPUP_GRIP_PREVIEW_MS', 20)
+        mgr, config = sized
+        put_up(mgr, tk_root, cases.case('C'))
+        target = (mgr.popup.winfo_width() + 80, mgr.popup.winfo_height() + 60)
+        mgr._grip_press(SimpleNamespace(x_root=100, y_root=100))
+        grip_drag(mgr, 80, 60)
+        run_until(tk_root, lambda: (mgr.popup.winfo_width(), mgr.popup.winfo_height()) == target)
+        assert (mgr.popup.winfo_width(), mgr.popup.winfo_height()) == target
+        assert mgr._grip_outline is not None        # the button is still held
+        assert config.saved == (None, None)         # remembered on release only
+        layouts.clear()
+        mgr._grip_release()
+        assert layouts == []                        # already laid out at that size
+        assert config.saved == target
+        assert mgr._grip_outline is None
+
+    def test_the_preview_waits_for_the_motion_to_stop(self, sized, tk_root, monkeypatch,
+                                                      layouts):
+        monkeypatch.setattr(quick_translate, 'POPUP_GRIP_PREVIEW_MS', 100)
+        mgr, _ = sized
+        put_up(mgr, tk_root, cases.case('C'))
+        layouts.clear()
+        mgr._grip_press(SimpleNamespace(x_root=100, y_root=100))
+        end, step = time.perf_counter() + 0.4, 0
+        while time.perf_counter() < end:        # moving all along, for four pauses' time
+            step += 1
+            grip_drag(mgr, step, step)
+            tk_root.update()
+            time.sleep(0.005)
+        assert layouts == []
+        run_until(tk_root, lambda: layouts)     # then still: one preview
+        assert layouts == [mgr._user_size]
+        mgr._grip_release()
+
+    def test_the_outline_is_a_frame_the_popup_shows_through(self, sized, tk_root, no_pause):
+        mgr, _ = sized
+        put_up(mgr, tk_root, cases.case('C'))
+        mgr._grip_press(SimpleNamespace(x_root=100, y_root=100))
+        grip_drag(mgr, 40, 30)
+        tk_root.update()
+        outline = mgr._grip_outline
+        assert str(outline.attributes('-transparentcolor')) == str(outline.cget('bg'))
+        assert int(outline.cget('highlightthickness')) == quick_translate.GRIP_OUTLINE_PX
+        assert int(outline.attributes('-topmost')) == 1
+        mgr._grip_release()
+
+    def test_the_outline_never_takes_the_focus(self, sized, tk_root, no_pause):
+        mgr, _ = sized
+        put_up(mgr, tk_root, cases.case('C'))
+        mgr.popup.focus_force()
+        tk_root.update()
+        user32 = ctypes.windll.user32
+        active = user32.GetActiveWindow()
+        mgr._grip_press(SimpleNamespace(x_root=100, y_root=100))
+        grip_drag(mgr, 40, 30)
+        tk_root.update()
+        outline = mgr._grip_outline
+        hwnd = user32.GetParent(outline.winfo_id()) or outline.winfo_id()
+        assert user32.GetWindowLongW(hwnd, quick_translate.GWL_EXSTYLE) & \
+            quick_translate.WS_EX_NOACTIVATE
+        assert user32.GetActiveWindow() == active
+        mgr._grip_release()
+
+    def test_a_drag_step_costs_next_to_nothing(self, sized, tk_root, no_pause):
+        mgr, _ = sized
+        put_up(mgr, tk_root, cases.case('G'))
+        mgr._grip_press(SimpleNamespace(x_root=100, y_root=100))
+        times = []
+        for step in range(1, 31):
+            start = time.perf_counter()
+            grip_drag(mgr, 4 * step, 3 * step)
+            tk_root.update()
+            times.append((time.perf_counter() - start) * 1000)
+        mgr._grip_release()
+        # Measured 1.5-2.1 ms a step on the private desktop (2026-10-19), against 181 ms
+        # when every motion laid this case out. The bound leaves room for a slow runner.
+        median = statistics.median(times)
+        assert median < 25, f"median {median:.1f} ms a step: {[round(t, 1) for t in times]}"
+
+    def test_a_double_click_takes_the_outline_away(self, sized, tk_root, no_pause):
+        mgr, _ = sized
+        put_up(mgr, tk_root, cases.case('C'))
+        mgr._grip_press(SimpleNamespace(x_root=100, y_root=100))
+        grip_drag(mgr, 40, 30)
+        tk_root.update()
+        outline = mgr._grip_outline
+        mgr._grip_reset()
+        tk_root.update()
+        assert mgr._grip_outline is None and not outline.winfo_exists()
+        assert mgr._grip_preview_after is None
+
+    def test_closing_mid_drag_leaves_nothing_behind(self, sized, tk_root, monkeypatch):
+        monkeypatch.setattr(quick_translate, 'POPUP_GRIP_PREVIEW_MS', 20)
+        mgr, _ = sized
+        put_up(mgr, tk_root, cases.case('C'))
+        mgr._grip_press(SimpleNamespace(x_root=100, y_root=100))
+        grip_drag(mgr, 40, 30)
+        tk_root.update()
+        outline = mgr._grip_outline
+        mgr.close()
+        assert mgr._grip_preview_after is None
+        time.sleep(0.05)
+        tk_root.update()
+        assert not outline.winfo_exists()
+        assert mgr._grip_outline is None and mgr.popup is None
 
 
 class TestLoadingIndicator:

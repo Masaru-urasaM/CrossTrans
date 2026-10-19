@@ -31,6 +31,34 @@ user was running `CrossTrans_v1.9.21.exe` to test it. Both post-build checks pas
 1158 archive entries; the four glyph codecs) and `src.ui.popup_layout` is in its PYZ. Not started
 here, for the same reasons.
 
+### Fix — The popup's grip drags an outline: smooth at any length (2026-10-19)
+
+The user, testing the rebuilt 1.9.21: dragging the grip "feels very laggy". Every motion laid the
+popup out exactly - 14-20 ms a step for one word, 46-49 ms for a paragraph, 181-191 ms for a long
+Japanese source with readings (about 5 frames a second). Measured three ways out, the user chose C
+(Decision 35).
+
+**Changed**
+- `src/ui/quick_translate.py`: a drag moves an outline - a topmost frame over the popup, transparent
+  inside, `WS_EX_NOACTIVATE` once mapped (`_show_grip_outline`) - and the popup is laid out when
+  the drag pauses for `POPUP_GRIP_PREVIEW_MS` (`_grip_preview`) and on release. A release at the
+  size a pause already laid out costs nothing (`_apply_user_size`). The outline goes with a
+  release, a double-click and `close()`; the pending preview is cancelled with it.
+  `_grip_pending` (the per-motion `after_idle`) is gone.
+- `src/constants.py`: `POPUP_GRIP_PREVIEW_MS = 150`.
+
+**Measured** (private desktop, the real handlers, each step followed by the redraw): 1.5-2.1 ms a
+step, against 14-191 ms; the active window unchanged by the outline. Rejected after measuring:
+resizing only the window during the drag (the redraw alone is 13-121 ms) and clearing the popup's
+`WS_EX_LAYERED` (no difference).
+
+**Tests**: 1714 -> 1723 (+9 in `tests/test_popup_geometry.py::TestGripDragsAnOutline`: only the
+outline moves while dragging, no motion lays the popup out, a pause shows the popup at the
+outline's size and is not repeated on release, the preview waits until the motion stops, the outline is a see-through topmost frame that
+never takes the focus, a step's cost (median under 25 ms on the long Japanese case - 2 ms
+measured), the double-click and `close()` take it away). The existing drag test also checks that
+the outline is gone after release. 12 mutations (`tools/mutation_check.py`), all killed.
+
 ### Fix — "Show all" changed nothing on a small screen (2026-10-19)
 
 CI (1024×768) failed `test_show_all_opens_it_within_the_cap`: opened, the original was given 40% of

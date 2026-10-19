@@ -531,6 +531,10 @@ before reading the geometry: `update_idletasks()` alone does not lay out a newly
 - **Grip** (bottom right): dragging resizes; the size is remembered
   (`config.get/set_quick_popup_size()`) and becomes the next popup's reading width and height cap -
   a short result still gets a small popup. A double-click returns to automatic sizing.
+  **A drag moves an outline, never the popup** (Decision 35): laying the popup out costs 14-190 ms,
+  so doing it per motion made a long text follow the mouse at ~5 frames a second; the outline
+  costs ~2 ms. The popup is laid out when the drag pauses (`POPUP_GRIP_PREVIEW_MS`) and on
+  release. Do not lay it out from `_grip_drag`.
 - **Glyphs are `chr()` code points** (`CLOSE_GLYPH`, `GEAR_GLYPH`, `ICON_GLYPHS`): Edit cannot match
   backslash-u escapes, and Write turns them into the characters.
 - **Never** size the popup from constants - `MIN_WIDTH = 670` drifted to a hidden close button when

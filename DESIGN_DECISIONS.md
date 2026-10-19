@@ -5,6 +5,46 @@ approaches. Newest first.
 
 ---
 
+### Decision 35 - The popup's grip drags an outline; the popup follows when the drag pauses
+
+**Date**: 2026-10-19
+**Status**: RESOLVED - option C, the user's choice on 2026-10-19 ("do C"); ships in 1.9.21
+
+**Problem**: The user, testing the 1.9.21 popup: dragging the resize grip "feels very laggy".
+Decision 34's grip laid the popup out exactly on every coalesced motion - two geometry changes, the
+text re-wrapped at the new width, every line measured (`count -update`), scrollbars repacked. Cost
+per motion, measured on the private desktop (median of 40 steps, each followed by the redraw):
+one word 14-20 ms, a paragraph 46-49 ms, four paragraphs 130-138 ms, a long Japanese source with
+readings 181-191 ms - about 5 frames a second. Not a wrong result (the size after release was
+right), but P4 had tested only the state after a drag, never its cost.
+
+**Options considered** (each measured the same way):
+1. **A - only resize the window during the drag, lay it out on release** - Pros: the text still
+   re-wraps live. Cons: the redraw alone is most of the cost - 13 / 18 / 61 / 121 ms - so a long
+   text stays laggy; scrollbars are stale until release.
+2. **B - drag an outline, lay the popup out on release** - Pros: 1.2-1.6 ms a step whatever the
+   text (the Windows behaviour with "Show window contents while dragging" off). Cons: the
+   re-wrapped text is seen only after letting go.
+3. **C - B, and the popup takes the outline's size whenever the drag pauses
+   (`POPUP_GRIP_PREVIEW_MS`, 150 ms)** - Pros: smooth motion, and a preview without letting go.
+   Cons: moving again right after a pause waits once for that layout (20-190 ms by length).
+4. **Clear `WS_EX_LAYERED`** (the popup keeps it after `-alpha` returns to 1.0) - measured no
+   difference. **Native OS resizing** - Tk would redraw on every `WM_SIZE` just the same.
+
+**Resolution**: **C**. The outline is a topmost, overrideredirect child Toplevel of the popup: a
+`GRIP_OUTLINE_PX` border in `GRIP_OUTLINE_COLOR`, its inside `GRIP_OUTLINE_KEY` made transparent
+(`-transparentcolor`), so the popup shows through; `WS_EX_NOACTIVATE` once mapped, like the
+tooltips, and measured not to change the active window. Laid out before the outline goes on
+release, so the popup is never seen at neither size; a release at the size a pause already laid
+out does not lay it out again. Measured with the real handlers: 1.5-2.1 ms a step, against
+14-191 ms. Rejected: A (still 121 ms on a long text), the layered-style change (no effect).
+
+**References**: `src/ui/quick_translate.py` (`_grip_drag`, `_show_grip_outline`,
+`_grip_preview`, `_apply_user_size`); `tests/test_popup_geometry.py::TestGripDragsAnOutline`;
+Decision 34.
+
+---
+
 ### Decision 34 - The quick-translate popup is sized by measuring its real layout, and laid out for reading
 
 **Date**: 2026-10-19
