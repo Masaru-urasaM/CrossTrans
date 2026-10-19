@@ -45,7 +45,7 @@ the measurements used up the translation quota. Archived in `ROADMAP_DONE.md` ("
 
 | Item | Status | Notes |
 |------|--------|-------|
-| Cut 1.9.21 | 🔨 In progress | Chosen by the user on 2026-10-16: `VERSION` bumped, the branch merged into `main` and pushed (CI green), and built by hand as `dist\CrossTrans_v1.9.21.exe` (`build_exe.bat` deletes `dist\` first, released EXEs included). Still to do: the user's manual checks on that EXE, then tag, write release notes. The H1 work is on `main` and tested; the language-identity work is on its branch - merge it first if it ships in 1.9.21 rather than 1.9.22 (the user's call) |
+| Cut 1.9.21 | 🔨 In progress | Chosen by the user on 2026-10-16: `VERSION` bumped, the branch merged into `main` and pushed (CI green), and built by hand as `dist\CrossTrans_v1.9.21.exe` (`build_exe.bat` deletes `dist\` first, released EXEs included). Still to do: the user's manual checks on that EXE (the user, 2026-10-19: test first, then release), then tag, write release notes. The H1 work is on `main` and tested; the language-identity work is on its branch - merge it first if it ships in 1.9.21 rather than 1.9.22 (the user's call) |
 
 ---
 

@@ -112,7 +112,8 @@ served all thirteen lists, and each default routed to its own provider through t
 real call; OpenAI's two remaining defaults expire on 2027-01-14 (replacement named:
 `gpt-6-luna`); Perplexity's endpoint question; SiliconFlow unconfirmed; the key patterns above;
 and the dropdown lists still offer the dead IDs (`grok-2`, `deepseek-chat`, ...) - only the
-defaults were replaced.
+defaults were replaced. **The user, 2026-10-19: no keys for these providers - skip the real calls
+for now.** The trigger stands: a key at hand, or a user's auto-pick failing.
 
 Not changed in code, on purpose: the replacements are what the providers name, not what a call
 proved (the rule above), and the table users actually receive is the Worker's, whose deploy is

@@ -137,6 +137,14 @@ glyphs and never against a Japanese-only glyph). The modest share is the price o
 measured clean; the sentences it leaves go to the model, which reads a sentence correctly. A text
 without punctuation is a term, and terms stay the model's and the user's (Decision 29).
 
+**Re-measured and confirmed by the user, 2026-10-19.** The proposal's two rules, measured again on
+the same data: "a long sentence without kana" calls real Japanese sentences Chinese at every
+length tried (14 of the 100 at 6+ hanzi, 10 at 8+, 5 at 10+, 3 at 12+ and 15+, 2 at 20+). "A
+fullwidth comma, in a sentence ending 。！？" calls no real Japanese sentence Chinese and settles
+4 782 more Chinese ones (17.3% -> 27.6% together with option 4), but every list written
+`東京，大阪。` by construction. Offered with those numbers, the user declined it: option 4 alone
+stays.
+
 **References**: `src/core/lang_id.py`, `tools/measure_cjk_evidence.py`, CHANGELOG "Phase K6",
 Decisions 21, 22, 24.
 
