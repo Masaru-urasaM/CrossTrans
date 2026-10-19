@@ -174,7 +174,7 @@ the static list and report `groq_source` / `gemini_source` in `cache_meta`. The 
 read when the model field is blank, so a stale entry costs a real user a silent failed attempt
 per model - which is exactly what happened to Groq, Google and OpenRouter, all three of which
 had **entirely** dead lists (so were five more on 2026-10-16, replaced from the providers' own
-docs in K15 - listed, not yet called: see D11). Verify an entry with a real API call before trusting it:
+docs in K15 - listed, not yet called, deployed to the Worker 2026-10-19: see D11). Verify an entry with a real API call before trusting it:
 **presence in a provider's `/models` listing is not enough** (`gemini-2.5-pro` is listed and
 404s on use). An intermediary's listing is weaker still - OpenRouter names Groq as an upstream
 for `llama-3.3-70b-instruct`, which Groq's own catalogue does not carry at all.
@@ -187,6 +187,12 @@ top of being retired, and the replacement `google/gemma-4-31b-it:free` did the s
 listed in the map. So: **every entry in `default_models_by_provider` must also appear in
 `MODEL_PROVIDER_MAP` under the same provider.** `tests/test_default_model_routing.py` asserts the
 round-trip for all thirteen providers at tier 3, where `constants.py` is the only list there is.
+**Tier 1 can break what tier 3 passes**: there Google's list is Gemini's own catalogue, the map
+match ignores case, and Google - the key fallback - has no prefix to rule it out, so SambaNova's
+`gemma-4-31B-it` routes to Google (D11, found 2026-10-19; no user path reaches it). `wrangler dev`
+cannot show this - it has none of the Worker's secrets, so both live fetches fall back to static -
+so check a deploy on the served config. And before deploying, compare `wrangler deployments list`
+with the file: the 2026-09-08 Cerebras, SambaNova and OpenRouter fixes sat undeployed for six weeks.
 
 **A provider missing from `API_KEY_PATTERNS` is read as Google.** `_detect_provider_from_key()`
 ends in `return 'Google'`, so a key it cannot place picks up Google's default model and sends it

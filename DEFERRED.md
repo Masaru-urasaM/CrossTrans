@@ -115,7 +115,16 @@ and the dropdown lists still offer the dead IDs (`grok-2`, `deepseek-chat`, ...)
 defaults were replaced. **The user, 2026-10-19: no keys for these providers - skip the real calls
 for now.** The trigger stands: a key at hand, or a user's auto-pick failing.
 
-Not changed in code, on purpose: the replacements are what the providers name, not what a call
+**Deployed, 2026-10-19** (the user: "do it now"; version `fd9a6b08`, KV rebuilt at once). Users
+receive the new lists now, whatever their version. **Eight providers, not five**: the Cerebras,
+SambaNova and OpenRouter rows above and `csk-` were changed in the file on 2026-09-08 *after* that
+day's last deploy (12:13 JST; saved 14:03), so the served config still held the dead lists those
+rows replaced - found by downloading the deployed code and diffing it before deploying. Details
+and checks in CHANGELOG "Worker deploy". Still served, from OpenRouter's catalogue rather than the
+static tables: Cerebras's `llama-3.3-70b`, `llama3.1-70b`, `llama3.1-8b`, `qwen-3-32b` and
+SambaNova's four 3.1/3.2 Llamas, `DeepSeek-R1` and both Qwen2.5 - the dropdown item above.
+
+**K8's reasoning, superseded by the two paragraphs above:** not changed in code, on purpose: the replacements are what the providers name, not what a call
 proved (the rule above), and the table users actually receive is the Worker's, whose deploy is
 the user's to approve. **Next step**: with a key per provider, call the named replacement, then
 change `STATIC_DEFAULT_MODELS_BY_PROVIDER` and the tier-3 copy together - Anthropic, xAI and
@@ -126,3 +135,21 @@ DeepSeek first (entirely dead), Together and OpenAI before 2026-10-22/23.
 means Together and `meta-llama/` means Together. A slash-prefixed default that is missing from the
 map gets sent to the wrong endpoint entirely - which is what both dead OpenRouter defaults were
 doing on top of being retired. `tests/test_default_model_routing.py` guards this for all thirteen.
+
+**At tier 1 that test cannot see everything** (found on the served config, 2026-10-19). Put through
+the app's own `_identify_provider()` with a key shaped like its provider's, 27 of the 28 served
+defaults came back to their provider; SambaNova's `gemma-4-31B-it` went to **Google**. Google's
+tier-1 list is Gemini's own catalogue (`fetchGeminiModels()`), which carries `gemma-4-31b-it`; the
+map match ignores case, so both providers claim it, and `_claimant_for_key()` cannot rule Google
+out - Google, the key fallback, has no prefix in `API_KEY_PATTERNS` - so with a SambaNova key,
+which has none either, the first claimant wins. **No user path reaches it**: defaults are read only
+by auto-detection and rotation, which call the provider they were given; re-identification happens
+only under Provider='Auto', where a SambaNova key is read as Google anyway; and a typed
+`gemma-4-31B-it` under Auto went to Google before the deploy too. The tier-3 test could not see it
+(`constants.py`'s Google list has no Gemma), nor could K15's `wrangler dev` run (no Gemini key
+locally, so `gemini_source` was static). 15 IDs in the served map are shared only when case is
+ignored (`deepseek-r1` and `deepseek-v3.2` between DeepSeek and SambaNova, ...). **A possible fix,
+not made**: `'AIza': 'Google'` in both key-pattern tables (Google API keys have begun `AIza` so far
+- check first), so a key without it stops counting as Google's; it changes Decision 31's
+tie-break, so it is the user's call. **Trigger**: a SambaNova user on Auto, or the next change to
+`_claimant_for_key()`.

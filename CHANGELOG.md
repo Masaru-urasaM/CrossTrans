@@ -24,6 +24,43 @@ real EXE the bootloader's pywin32 hook sets up those DLLs first.) Not done here:
 itself, and a real run takes the user's hotkeys and spends an API call. The manual checks are the
 user's (the user, 2026-10-19: test first, then release).
 
+### Worker deploy — D11's defaults reach users (2026-10-19)
+
+The user, on the Worker deploy: "do it now". Deployed with the user's own `wrangler login`
+(version `fd9a6b08`, `npx wrangler deploy --keep-vars`), then the KV config rebuilt at once with
+`POST /v1/debug/refresh` - `groq_source` and `gemini_source` both `live` - instead of waiting up to
+12 hours for the cron. Nothing in this repository changed: `cloudflare_worker.js` is not tracked.
+
+**Changed (what every user receives, whatever their version)**
+- The default models of **eight** providers, not five: K15's OpenAI, Anthropic, DeepSeek, xAI and
+  Together, and the Cerebras, SambaNova and OpenRouter replacements of 2026-09-08, which had never
+  been deployed. That day's last deploy was at 12:13 JST and the file was saved again at 14:03, so
+  users were still being handed Cerebras's `llama-3.3-70b` pair (both 404), SambaNova's vanished
+  3.1 and OpenRouter's two retired free models. Found by downloading the deployed code first.
+- `csk-` -> Cerebras in `api_key_patterns` (same history), and the model lists of six providers:
+  the new IDs in, Cerebras's Llama-4 pair and four of SambaNova's vanished models out. The rest of
+  those two lists comes from OpenRouter's catalogue and still offers dead IDs (D11).
+
+**Checked**
+- Before deploying: the deployed code (Cloudflare API, read-only) against a local
+  `wrangler deploy --dry-run` bundle of the file as it stood before K15 - the only differences were
+  those September tables, no logic. Nine of the ten variables the code reads are bound as secrets,
+  which a deploy never touches; the tenth (`DISCORD_WEBHOOK_URL`, optional) is not, and
+  `--keep-vars` keeps it should it be set on the dashboard.
+- After: the served config differs from the one taken before in exactly those default lists, those
+  model lists and `csk-`; all thirteen default lists equal the file's; the code Cloudflare serves
+  is identical to the local bundle; 9/9 secrets bound; the cron (`0 0,12 * * *`) kept.
+- The served config through the app's own code, offline (`APPDATA` pointed at a scratch folder):
+  `_validate_config()` accepts it, and 27 of the 28 defaults, put through `_identify_provider()`
+  with a key shaped like their provider's, come back to their provider. The 28th, SambaNova's
+  `gemma-4-31B-it`, goes to Google: Gemini's live catalogue lists `gemma-4-31b-it`, the map match
+  ignores case, and Google has no key prefix to rule it out. No user path reaches it - a default is
+  only read by auto-detection and rotation, which call the provider they were given - and neither
+  the tier-3 test nor K15's `wrangler dev` run (no Gemini key locally) could see it. Recorded in
+  D11 with a possible fix.
+
+**Tests**: 1525, unchanged - nothing in the repository changed.
+
 ### K14 follow-up — the furigana refresh can never stall an install (2026-10-16)
 
 **Fixed**: `_apply_to_furigana()` runs on the install thread just before the completion callback;

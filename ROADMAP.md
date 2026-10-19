@@ -63,7 +63,8 @@ self-maintaining (Decision 19); OpenRouter's two were dead *and* mis-routed to T
 Five providers checked, not one table clean - eight remain, each needing its own key (desk-checked
 against the providers' own deprecation pages on 2026-10-16, K8: Anthropic, xAI and DeepSeek are
 entirely gone, Together and OpenAI going this month; **replaced the same day from the providers'
-docs**, K15 - listed, not yet called). **D12** is the cross-provider model-name clash
+docs**, K15 - listed, not yet called; **deployed to the Worker on 2026-10-19**, together with the
+September Cerebras, SambaNova and OpenRouter fixes that had never reached it). **D12** is the cross-provider model-name clash
 that surfaced from the same work (**closed 2026-10-16**, K8: the key decides). **D13–D15** came out of the
 language-identity work on 2026-10-15 (Dictionary mode implemented twice, a failed lookup's toast
 that raised `NameError`, the main-window dialogs' `grab_set()`) and were **closed the same day**.
