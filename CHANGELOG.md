@@ -13,8 +13,16 @@ post-build checks pass: `kanwadict4.db` bundled (1158 archive entries) and the f
 codecs bundled. And, run rather than inspected: an interpreter whose only standard library is the
 EXE's own `base_library.zip` looks up and encodes with all four codecs - the exact condition
 under which `lang_id` would log "[LangID] glyph evidence disabled" - so the EXE cannot log it.
-Not done here: starting the EXE, which would take the user's hotkeys, ask their running
-CrossTrans to show itself, and spend a real API call - the manual checks are the user's.
+Then the EXE's own code, run: every module of its PYZ (954), its bootstrap modules, binaries and
+data extracted, and `lang_id` and `furigana` executed from them in an interpreter whose only
+standard library is the EXE's - glyph evidence on, no "disabled" line in the captured log,
+営業時間 Japanese by its glyph, 我们明天去北京。 and 這是我的書。 Chinese (by glyph, by grammar),
+東京大学 left to the model as designed, and 東京大学 read とうきょうだいがく by the bundled
+pykakasi dictionary. (One warning, `win32crypt not available`, belongs to that harness: in the
+real EXE the bootloader's pywin32 hook sets up those DLLs first.) Not done here: starting the EXE
+- the user's CrossTrans holds the single-instance lock, so a second one would ask it to show
+itself, and a real run takes the user's hotkeys and spends an API call. The manual checks are the
+user's (the user, 2026-10-19: test first, then release).
 
 ### K14 follow-up — the furigana refresh can never stall an install (2026-10-16)
 
