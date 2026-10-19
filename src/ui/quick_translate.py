@@ -8,7 +8,7 @@ import math
 import re
 import time
 import tkinter as tk
-from tkinter import BOTH, X, LEFT, RIGHT, TOP, BOTTOM
+from tkinter import BOTH, X, Y, LEFT, RIGHT, TOP, BOTTOM
 from tkinter import font
 from typing import Tuple, Optional, Callable
 
@@ -19,30 +19,64 @@ except ImportError:
     from tkinter import ttk
     HAS_TTKBOOTSTRAP = False
 
+from src.constants import (POPUP_COLLAPSED_ORIGINAL_ROWS, POPUP_LAYOUT_WATCHDOG_MS,
+                           POPUP_MIN_BOX_ROWS, POPUP_REVEAL_DELAY_MS,
+                           POPUP_SCREEN_MARGIN, POPUP_TOOLTIP_DELAY_MS)
 from src.core import lang_id
 from src.core.furigana import RubySegment
 from src.core.nlp_manager import nlp_manager
 from src.core.source_marker import (ROW_CHANGE, language_label, other_language,
                                     source_row)
+from src.ui import popup_layout
 from src.ui.dictionary_render import overhead_px, split_dictionary_text
-from src.ui.ruby_text import (RubyText, estimate_notation_px,
-                              estimate_ruby_overhead_px, insert_output)
+from src.ui.ruby_text import RubyText, insert_output
 
-# Popup padding - SINGLE SOURCE OF TRUTH, shared by calculate_size() and the
-# furigana height estimate (both need the same wrap width).
+# The dictionary result window's padding, which calculate_size() still sizes it with.
+# The quick-translate popup measures itself instead (Decision 34).
 HORIZONTAL_PADDING = 50  # frame(30) + scrollbar(20)
 
-# Height taken by the rule drawn between the furigana block and the
-# translation: 1px line plus its 8px padding above and below.
-FURIGANA_SEPARATOR_PX = 17
+# The quick-translate popup's frame padding, each side.
+POPUP_FRAME_PADDING = 15
 
 # The "Translated with ..." credit at the top of the popup. A footnote, so it is
 # deliberately small and dim: it must be readable when looked for and invisible
-# when not. 13px of line at 8pt italic, 6px of gap under it, 2px for the label's
-# own border - measured, and added to the popup height only when the line shows.
+# when not. It shares the header row with the close button and is cut with an
+# ellipsis rather than ever crowding that button out.
 ATTRIBUTION_FONT = ('Segoe UI', 8, 'italic')
 ATTRIBUTION_FG = '#8a8a8a'
-ATTRIBUTION_PX = 21
+HEADER_CREDIT_MIN_PX = 120    # what the credit keeps, at least, before it is cut
+
+# Glyphs by code point: the tooling mangles both the escapes and the characters.
+CLOSE_GLYPH = chr(0x2715)     # the close button - top right, in every popup state
+GEAR_GLYPH = chr(0x2699)      # Replace's settings menu
+GRIP_GLYPH = chr(0x25E2)      # the resize grip - bottom right
+CHECK_GLYPH = chr(0x2713)
+CROSS_GLYPH = chr(0x2717)
+
+CLOSE_FG = '#9a9a9a'
+CLOSE_ACTIVE_BG = '#c42b1c'   # the Windows close-button red, on hover
+
+# The action bar's secondary actions are icons with a tooltip (Decision 34, TODO.md
+# Q1): Windows 11's icon font, else Windows 10's; with neither, the words come back.
+ICON_FONTS = ('Segoe Fluent Icons', 'Segoe MDL2 Assets')
+ICON_SIZE = 12
+ICON_GLYPHS = {
+    'retranslate': chr(0xE72C),   # Refresh
+    'dictionary': chr(0xE82D),    # Dictionary
+    'open': chr(0xE8A7),          # OpenInNewWindow
+    'prompt': chr(0xE70F),        # Edit
+}
+ICON_BG = '#3a3f44'               # neutral; an icon takes its action's colour on hover
+TOOLTIP_FONT = ('Segoe UI', 9)
+TOOLTIP_BG = '#111111'
+
+# The small header that names the original block, and its "Show all" toggle.
+ORIGINAL_HEADER_FONT = ('Segoe UI', 8)
+ORIGINAL_TOGGLE_FG = '#80b8ff'
+
+GWL_EXSTYLE = -20
+WS_EX_NOACTIVATE = 0x08000000
+
 
 def is_error_text(translated: str) -> str:
     """Whether a result string is a failure notice rather than a translation.
@@ -55,11 +89,120 @@ def is_error_text(translated: str) -> str:
                                  or translated.startswith("No text"))
 
 
+def icon_font_family(families) -> Optional[str]:
+    """The first of ICON_FONTS this system has, or None (the words come back)."""
+    available = set(families)
+    return next((family for family in ICON_FONTS if family in available), None)
+
+
+def set_noactivate(window, on: bool = True) -> None:
+    """Give `window` WS_EX_NOACTIVATE, or take it away. With it, clicking the window
+    never takes the focus from the user's app - which Replace relies on."""
+    try:
+        hwnd = ctypes.windll.user32.GetParent(window.winfo_id()) or window.winfo_id()
+        style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        style = (style | WS_EX_NOACTIVATE) if on else (style & ~WS_EX_NOACTIVATE)
+        ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+    except Exception:
+        pass  # Non-critical: the window still works, it may just take the focus
+
+
+def _pad_pair(widget, value) -> Tuple[int, int]:
+    """A pack padding as (before, after): 4 -> (4, 4), (0, 4) -> (0, 4)."""
+    if isinstance(value, (tuple, list)):
+        parts = [int(float(part)) for part in value]
+    elif isinstance(value, (int, float)):
+        parts = [int(value)]
+    else:
+        parts = [int(float(part)) for part in widget.tk.splitlist(value)]
+    return (parts[0], parts[-1]) if parts else (0, 0)
+
+
+def packed_row_width(frame) -> int:
+    """The width a row of side-by-side packed widgets asks for, read off the widgets.
+
+    Each child's requested width, its internal padding and its pack padding on both
+    sides - the sum the packer makes. Known as soon as the widgets are configured,
+    before the popup is shown (Tk lays out only the children of a mapped window, but
+    requested sizes are there from the start), so the popup can be made wide enough
+    for its rows. A constant did this before - MIN_WIDTH 670 - and drifted as buttons
+    were added; the close button, packed last, was the one squeezed out (TODO.md S1).
+    """
+    total = 0
+    for child in frame.pack_slaves():
+        info = child.pack_info()
+        total += (child.winfo_reqwidth()
+                  + sum(_pad_pair(frame, info.get('ipadx', 0)))
+                  + sum(_pad_pair(frame, info.get('padx', 0))))
+    return total
+
+
+class Tooltip:
+    """The name of an icon button, shown over it after a pause.
+
+    A Toplevel of its own, `WS_EX_NOACTIVATE` once mapped, so it can never take the
+    keyboard from the user's app. Hidden on leave and on click.
+    """
+
+    def __init__(self, widget, text: str, delay_ms: int = POPUP_TOOLTIP_DELAY_MS):
+        self.widget = widget
+        self.text = text
+        self.delay_ms = delay_ms
+        self.window: Optional[tk.Toplevel] = None
+        self._pending = None
+        widget.bind('<Enter>', self._schedule, add='+')
+        widget.bind('<Leave>', self.hide, add='+')
+        widget.bind('<ButtonPress>', self.hide, add='+')
+
+    def _schedule(self, _event=None):
+        self._cancel()
+        try:
+            self._pending = self.widget.after(self.delay_ms, self.show)
+        except tk.TclError:
+            self._pending = None
+
+    def _cancel(self):
+        if self._pending is not None:
+            try:
+                self.widget.after_cancel(self._pending)
+            except tk.TclError:
+                pass
+            self._pending = None
+
+    def show(self):
+        self._pending = None
+        try:
+            if self.window is not None or not self.widget.winfo_exists():
+                return
+            window = tk.Toplevel(self.widget)
+            window.overrideredirect(True)
+            window.attributes('-topmost', True)
+            label = tk.Label(window, text=self.text, font=TOOLTIP_FONT, bg=TOOLTIP_BG,
+                             fg='#ffffff', padx=6, pady=2, autostyle=False)
+            label.pack()
+            x = self.widget.winfo_rootx()
+            y = self.widget.winfo_rooty() - label.winfo_reqheight() - 4
+            window.geometry(f"+{x}+{y}")
+            # Tk creates the window that carries the style only when it maps it: set
+            # before, the bit lands on the inner window and is lost (measured).
+            window.bind('<Map>', lambda _event: set_noactivate(window), add='+')
+            self.window = window
+        except tk.TclError:
+            self.window = None
+
+    def hide(self, _event=None):
+        self._cancel()
+        if self.window is not None:
+            try:
+                self.window.destroy()
+            except tk.TclError:
+                pass
+            self.window = None
+
+
 # The "Kanji-only text - read it as: [Japanese] [Chinese]" row (J6), shown when a
-# translation of kanji-only text came back without a source language. Added to the
-# popup's height budget only when the row is shown, like ATTRIBUTION_PX.
+# translation of kanji-only text came back without a source language.
 SOURCE_CHOOSER_FONT = ('Segoe UI', 9)
-SOURCE_CHOOSER_PX = 36
 
 
 def fill_source_row(row, mode: str, verdict: Optional[str],
@@ -307,6 +450,27 @@ class QuickTranslateManager:
         self._btn_frame: Optional[ttk.Frame] = None
         self._on_open_settings_hotkeys_tab: Optional[Callable[[], None]] = None
 
+        # Layout (Decision 34): built at alpha 0, measured, then shown
+        self._generation = 0               # bumped per popup; a stale step 2 sees it
+        self._layout: Optional[dict] = None
+        self.popup_close_btn: Optional[tk.Button] = None
+        self.popup_open_btn: Optional[tk.Button] = None
+        self.popup_original_toggle: Optional[tk.Label] = None
+        self._original_header: Optional[ttk.Frame] = None
+        self._original_holder: Optional[tk.Frame] = None
+        self._original_scrollbar = None
+        self._original_collapsed = True
+        self._text_holder: Optional[tk.Frame] = None
+        self._text_scrollbar = None
+        self._trial_frame: Optional[ttk.Frame] = None
+        self._attribution_text: Optional[str] = None
+        self._tooltips = []
+        self._icon_family_cache = None     # (family or None,), looked up once
+        self._grip: Optional[tk.Label] = None
+        self._grip_start = None
+        self._grip_pending = None
+        self._user_size: Optional[Tuple[int, int]] = None
+
     def configure_callbacks(self,
                             on_copy: Optional[Callable[[], None]] = None,
                             on_copy_and_replace: Optional[Callable[[], None]] = None,
@@ -345,18 +509,8 @@ class QuickTranslateManager:
 
     def _apply_noactivate(self):
         """Apply WS_EX_NOACTIVATE to popup window so it doesn't steal focus from source app."""
-        if not self.popup:
-            return
-        try:
-            hwnd = ctypes.windll.user32.GetParent(self.popup.winfo_id())
-            if not hwnd:
-                hwnd = self.popup.winfo_id()
-            GWL_EXSTYLE = -20
-            WS_EX_NOACTIVATE = 0x08000000
-            ex_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_NOACTIVATE)
-        except Exception:
-            pass  # Non-critical - popup still works, just may steal focus
+        if self.popup:
+            set_noactivate(self.popup)
 
     def capture_mouse_position(self):
         """Capture current mouse position for popup positioning."""
@@ -397,7 +551,13 @@ class QuickTranslateManager:
         )
         self._loading_label.pack()
 
-        self.popup.geometry(f"+{self._last_mouse_x + 15}+{self._last_mouse_y + 20}")
+        # Placed by the result's rules (Decision 34): beside the cursor and on the
+        # screen, so the result then opens at the same corner.
+        width = self._loading_label.winfo_reqwidth() + 2 * 12
+        height = self._loading_label.winfo_reqheight() + 2 * 12
+        x, y, _ = popup_layout.place(self._anchor(), width, height, self._work_area(),
+                                     min_height=height)
+        self.popup.geometry(f"+{x}+{y}")
 
         # Start loading animation
         self._loading_animation_running = True
@@ -545,70 +705,21 @@ class QuickTranslateManager:
             source_lang: The language a model (or the user) settled for `original`,
                 or None. Decides the readings on kanji-only text (J6), and whether
                 the Japanese / Chinese chooser is offered.
+
+        Sized in two steps (Decision 34). Here everything is built at alpha 0 and given
+        its width - the rows that must fit whole are measured, the text is wrapped for
+        reading. Once Tk has laid the popup out at that width, `_finish_layout()` reads
+        what each box really needs, gives it exactly that up to the cap, places the
+        popup beside the cursor and makes it visible.
         """
         self.close()
 
         # Check if this is an error message
         is_error = is_error_text(translated)
 
-        # One hint for the height budget and the box alike, or the box clips.
+        # One hint for the box and its measurement alike
         ruby_hint = self._ruby_hint(target_lang, is_grammar, original, source_lang)
         source_mode = self._source_row(original, source_lang, is_grammar, is_error)
-
-        # Calculate size (MIN_HEIGHT already handled in calculate_size)
-        width, height = self.calculate_size(translated)
-
-        # The credit note is one small line above everything else.
-        show_attribution = bool(model_info) and not is_error
-        if show_attribution:
-            height += ATTRIBUTION_PX
-
-        # Add extra height for trial mode header
-        if trial_info and trial_info.get('is_trial') and not is_error:
-            height += 35  # Extra space for trial header row
-
-        if source_mode:
-            height += SOURCE_CHOOSER_PX
-
-        # Add extra height for the furigana section. Measured from real font
-        # metrics at the wrap width the block will actually get: an annotated
-        # display row is far taller than a plain one (47px vs 28px on Tk 8.6),
-        # so a per-paragraph guess clips multi-line Japanese.
-        if furigana_text and not is_error:
-            height += estimate_notation_px(furigana_text, width - HORIZONTAL_PADDING)
-            height += FURIGANA_SEPARATOR_PX
-
-        # Same for the translation box, which now carries readings too.
-        if not is_error and self._ruby_enabled():
-            height += estimate_ruby_overhead_px(
-                translated, width - HORIZONTAL_PADDING,
-                lang_hint=ruby_hint,
-                base_font=('Segoe UI', 11), line_spacing=0)
-
-        # Create popup window
-        self.popup = tk.Toplevel(self.root)
-        self.popup.overrideredirect(True)
-        self._apply_noactivate()
-
-        def on_popup_close():
-            self.close()
-
-        self.popup.protocol("WM_DELETE_WINDOW", on_popup_close)
-
-        # Color based on error status
-        if is_error:
-            self.popup.configure(bg='#3d1f1f')
-        else:
-            self.popup.configure(bg='#2b2b2b')
-
-        # Set topmost initially, then remove so it can go behind other windows
-        self.popup.attributes('-topmost', True)
-        self.popup.after(100, lambda: self.popup.attributes('-topmost', False) if self.popup else None)
-
-        # Main frame
-        main_frame = ttk.Frame(self.popup, padding=15)
-        main_frame.pack(fill=BOTH, expand=True)
-        self._main_frame = main_frame
 
         # Store original and translation for dictionary mode
         self._current_original = original
@@ -618,277 +729,632 @@ class QuickTranslateManager:
         self._current_furigana = furigana_text  # Store for restoring after custom-prompt cancel
         self._current_source_lang = source_lang
         self._is_grammar = is_grammar  # Grammar-fix result: hide translation-only buttons
+        self._original_collapsed = True
+        self._generation += 1
 
-        # Bind dragging events
-        main_frame.bind("<Button-1>", self._start_move)
-        main_frame.bind("<B1-Motion>", self._on_drag)
+        # Create popup window - invisible until it has been measured and placed
+        self.popup = tk.Toplevel(self.root)
+        self.popup.overrideredirect(True)
+        self.popup.configure(bg='#3d1f1f' if is_error else '#2b2b2b')
+        try:
+            self.popup.attributes('-alpha', 0.0)
+        except tk.TclError:
+            pass
+        self.popup.protocol("WM_DELETE_WINDOW", self.close)
 
-        # "Translated with <model> (<Provider>)" - packed first, so it is the top
-        # line of the popup even when the trial header is also present. Dragging
-        # works on it like the rest of the frame; it is not a control.
-        if show_attribution:
-            verb = "Fixed" if is_grammar else "Translated"
-            attribution = ttk.Label(main_frame, text=f"{verb} with {model_info}",
-                                    font=ATTRIBUTION_FONT, foreground=ATTRIBUTION_FG)
-            attribution.pack(side=TOP, fill=X, pady=(0, 6))
-            attribution.bind("<Button-1>", self._start_move)
-            attribution.bind("<B1-Motion>", self._on_drag)
-            self.popup_attribution = attribution
+        # Set topmost initially, then remove so it can go behind other windows
+        self.popup.attributes('-topmost', True)
+        self.popup.after(100, lambda: self.popup.attributes('-topmost', False) if self.popup else None)
+        self._apply_noactivate()
+
+        # Main frame
+        main_frame = ttk.Frame(self.popup, padding=POPUP_FRAME_PADDING)
+        main_frame.pack(fill=BOTH, expand=True)
+        self._main_frame = main_frame
+        self._bind_drag(main_frame)
+
+        # The header: the credit, and the close button - shown at every width
+        self._build_header(main_frame, None if is_error else model_info, is_grammar)
 
         # Trial mode warning header (if applicable)
         if trial_info and trial_info.get('is_trial') and not is_error:
-            trial_frame = ttk.Frame(main_frame)
-            trial_frame.pack(side=TOP, fill=X, pady=(0, 8))
-
-            # Trial mode indicator
-            remaining = trial_info.get('remaining', 0)
-            daily_limit = trial_info.get('daily_limit', 50)
-
-            if remaining <= 0:
-                trial_text = "Trial quota exhausted - Add your API key"
-                trial_color = '#ff6b6b'  # Red
-            elif remaining <= 10:
-                trial_text = f"Trial Mode ({remaining}/{daily_limit} left) - Low quota!"
-                trial_color = '#ffaa00'  # Orange
-            else:
-                trial_text = f"Trial Mode ({remaining}/{daily_limit} left)"
-                trial_color = '#88aaff'  # Light blue
-
-            ttk.Label(trial_frame, text=trial_text,
-                     font=('Segoe UI', 9, 'italic'),
-                     foreground=trial_color).pack(side=LEFT)
-
-            # "Get API Key" link button
-            def open_guide():
-                self.close()
-                if self._on_open_settings:
-                    self._on_open_settings()
-
-            guide_btn_kwargs = {"text": "Get Free API Key", "command": open_guide, "width": 14}
-            if HAS_TTKBOOTSTRAP:
-                guide_btn_kwargs["bootstyle"] = "link"
-            ttk.Button(trial_frame, **guide_btn_kwargs).pack(side=RIGHT)
+            self._build_trial_line(main_frame, trial_info)
 
         # Button frame (Create FIRST to ensure it stays at BOTTOM)
         self._btn_frame = ttk.Frame(main_frame)
         self._btn_frame.pack(side=BOTTOM, fill=X, pady=(12, 0))
-
-        self._btn_frame.bind("<Button-1>", self._start_move)
-        self._btn_frame.bind("<B1-Motion>", self._on_drag)
-
-        if not is_error:
-            # Copy button
-            self.popup_copy_btn = tk.Button(
-                self._btn_frame,
-                text="Copy",
-                command=self._handle_copy,
-                autostyle=False,
-                bg='#0d6efd',  # Bootstrap primary blue
-                fg='#ffffff',
-                activebackground='#0b5ed7',
-                activeforeground='#ffffff',
-                font=('Segoe UI', 10),
-                relief='flat',
-                padx=12, pady=4,
-                cursor='hand2'
-            )
-            self.popup_copy_btn.pack(side=LEFT)
-
-            # Replace button (copy translated text + paste into source app)
-            self.popup_replace_btn = tk.Button(
-                self._btn_frame,
-                text="Replace",
-                command=self._handle_copy_and_replace,
-                autostyle=False,
-                bg='#6f42c1',  # Bootstrap purple/indigo
-                fg='#ffffff',
-                activebackground='#5a32a3',
-                activeforeground='#ffffff',
-                font=('Segoe UI', 10),
-                relief='flat',
-                padx=12, pady=4,
-                cursor='hand2'
-            )
-            self.popup_replace_btn.pack(side=LEFT, padx=(4, 0))
-
-            # Replace settings gear icon (opens Hotkeys tab in Settings)
-            self._replace_gear_btn = tk.Button(
-                self._btn_frame,
-                text="\u2699",  # ⚙ gear icon
-                command=self._handle_open_replace_settings,
-                autostyle=False,
-                bg='#495057',       # Dark grey (subtle)
-                fg='#ffffff',
-                activebackground='#5a6268',
-                activeforeground='#ffffff',
-                font=('Segoe UI', 10),
-                relief='flat',
-                padx=4, pady=4,
-                cursor='hand2'
-            )
-            self._replace_gear_btn.pack(side=LEFT, padx=(0, 4))
-
-            # Re-translate + Dictionary are translation-only — skip them for grammar results
-            # (Re-translate would "translate to Grammar"; Dictionary expects a target language).
-            if not is_grammar:
-                # Re-translate button - force a fresh API call, bypassing the cache
-                self.popup_retranslate_btn = tk.Button(
-                    self._btn_frame,
-                    text="Re-translate",
-                    command=self._handle_re_translate,
-                    autostyle=False,
-                    bg='#fd7e14',  # Bootstrap orange (signals redo/refresh)
-                    fg='#ffffff',
-                    activebackground='#e8590c',
-                    activeforeground='#ffffff',
-                    font=('Segoe UI', 10),
-                    relief='flat',
-                    padx=12, pady=4,
-                    cursor='hand2'
-                )
-                self.popup_retranslate_btn.pack(side=LEFT, padx=4)
-
-                # Dictionary button - opens popup for original text
-                self.popup_dict_btn = tk.Button(
-                    self._btn_frame,
-                    text="Dictionary",
-                    command=self._open_dictionary_popup,
-                    autostyle=False,
-                    bg=DICT_BUTTON_COLOR,
-                    fg='#ffffff',
-                    activebackground=DICT_BUTTON_ACTIVE,
-                    activeforeground='#ffffff',
-                    font=('Segoe UI', 10),
-                    relief='flat',
-                    padx=12, pady=4,
-                    cursor='hand2'
-                )
-                self.popup_dict_btn.pack(side=LEFT, padx=4)
-
-                # Update Dictionary button state based on NLP availability
-                self._update_dict_button_state()
-
-            # Open Translator button
-            self.popup_open_btn = tk.Button(
-                self._btn_frame,
-                text="Open Translator",
-                command=self._handle_open_translator,
-                autostyle=False,
-                bg='#198754',  # Bootstrap success green
-                fg='#ffffff',
-                activebackground='#157347',
-                activeforeground='#ffffff',
-                font=('Segoe UI', 10),
-                relief='flat',
-                padx=12, pady=4,
-                cursor='hand2'
-            )
-            self.popup_open_btn.pack(side=LEFT, padx=4)
-
-            # Custom Prompt button - make the box editable and ask the AI a freeform question
-            # (translation-only; skipped for grammar results)
-            if not is_grammar:
-                self.popup_custom_prompt_btn = tk.Button(
-                    self._btn_frame,
-                    text="Custom Prompt",
-                    command=self._handle_custom_prompt,
-                    autostyle=False,
-                    bg='#20c997',  # Bootstrap teal
-                    fg='#ffffff',
-                    activebackground='#1aa179',
-                    activeforeground='#ffffff',
-                    font=('Segoe UI', 10),
-                    relief='flat',
-                    padx=12, pady=4,
-                    cursor='hand2'
-                )
-                self.popup_custom_prompt_btn.pack(side=LEFT, padx=4)
+        self._bind_drag(self._btn_frame)
+        if is_error:
+            self._build_error_bar()
         else:
-            # For errors, show "API Settings" button (opens Settings → API Key tab)
-            settings_btn_kwargs = {"text": "API Settings", "command": self._handle_open_settings, "width": 14}
-            if HAS_TTKBOOTSTRAP:
-                settings_btn_kwargs["bootstyle"] = "warning"
-            ttk.Button(self._btn_frame, **settings_btn_kwargs).pack(side=LEFT, padx=8)
-
-            # ...and next to it, a way out of the popup entirely. A failed quick
-            # translate often just needs a different model, a longer prompt or a
-            # second attempt, all of which are quicker to do in the main window
-            # than through this popup. It opens with the source text already in
-            # the input box and an empty output, ready to translate.
-            open_btn_kwargs = {"text": "Open Translator",
-                               "command": self._handle_open_translator, "width": 16}
-            if HAS_TTKBOOTSTRAP:
-                open_btn_kwargs["bootstyle"] = "success"
-            ttk.Button(self._btn_frame, **open_btn_kwargs).pack(side=LEFT, padx=8)
-
-        # Close button
-        close_btn_kwargs = {"text": "\u2715", "command": self.close, "width": 3}
-        if HAS_TTKBOOTSTRAP:
-            close_btn_kwargs["bootstyle"] = "secondary"
-        ttk.Button(self._btn_frame, **close_btn_kwargs).pack(side=RIGHT)
+            self._build_action_bar(is_grammar)
 
         # Above the buttons: kanji-only text whose language nobody settled, or
         # a term someone did - and the way to the other language (K4)
         if source_mode:
             self._build_source_chooser(main_frame, source_mode, source_lang)
 
-        # Furigana section (if available)
+        # The original with its readings (if available), collapsible
         if furigana_text and not is_error:
-            self._render_furigana(main_frame, furigana_text,
-                                  width - HORIZONTAL_PADDING)
+            self._render_furigana(main_frame, furigana_text)
             # Separator between furigana and translation
             sep_frame = tk.Frame(main_frame, bg='#555555', height=1)
             sep_frame.pack(fill=X, pady=(8, 8))
 
-        # Translation text - USE FONT METRICS for correct sizing on all machines
+        # Translation text, in a holder whose height step 2 sets in pixels
         text_fg = '#ff6b6b' if is_error else '#ffffff'
-
-        # SAME constants as calculate_size() for consistency
-        try:
-            ui_font = font.Font(family='Segoe UI', size=11)
-            base_line_height = ui_font.metrics("linespace")
-            avg_char_width = ui_font.measure("m")
-        except tk.TclError:
-            base_line_height = 20
-            avg_char_width = 8
-
-        VERTICAL_PADDING = 100  # Must match calculate_size()
-        LINE_HEIGHT = int(base_line_height)
-
-        text_height = max(1, (height - VERTICAL_PADDING) // LINE_HEIGHT)
-        text_width = max(30, width // avg_char_width)
-
-        self.popup_text = RubyText(main_frame, wrap=tk.WORD,
-                                    bg='#3d1f1f' if is_error else '#2b2b2b',
-                                    base_fg=text_fg, kanji_fg=text_fg,
-                                    base_font=('Segoe UI', 11),
-                                    spacing1=0, spacing3=0, cursor='xterm',
-                                    width=text_width, height=text_height)
+        self._text_holder, self.popup_text, self._text_scrollbar = self._make_box(
+            main_frame, expand=True, wrap=tk.WORD, bg='#3d1f1f' if is_error else '#2b2b2b',
+            base_fg=text_fg, kanji_fg=text_fg, base_font=('Segoe UI', 11),
+            spacing1=0, spacing3=0, cursor='xterm')
         # Readings on the translation itself, not just the source block. The
         # target language is a reliable hint here, so a kanji-only translation
         # ("東京都") annotates where the source block cannot.
-        # Error text is excluded, matching the height budget above: a diagnostic
-        # needs no readings, and annotating it would overflow the box.
+        # Error text is excluded: a diagnostic needs no readings.
         insert_output(self.popup_text, '1.0', translated,
                       lang_hint=ruby_hint,
                       enabled=self._ruby_enabled() and not is_error)
         self.popup_text.config(state='disabled')
-        self.popup_text.pack(side=TOP, fill=BOTH, expand=True)
-
-        # Grow the box for the taller annotated rows, but never below the row
-        # count calculate_size() derived from word wrap.
-        if self.popup_text.has_ruby:
-            self.popup_text.fit_height(width - HORIZONTAL_PADDING,
-                                       min_rows=text_height)
 
         # Mouse wheel scroll is bound by RubyText, including over ruby frames
 
-        # Position near mouse
-        x, y, height = self._calculate_position(width, height)
-        self.popup.geometry(f"{width}x{height}+{int(x)}+{int(y)}")
+        self._build_grip()
+        self._start_layout()
 
         # Bindings
-        self.popup.bind('<Escape>', lambda e: on_popup_close())
+        self.popup.bind('<Escape>', lambda e: self.close())
+
+    # ------------------------------------------------------------------ #
+    # Building the popup (Decision 34)
+    # ------------------------------------------------------------------ #
+    def _bind_drag(self, widget) -> None:
+        """Drag the popup by `widget`."""
+        widget.bind("<Button-1>", self._start_move)
+        widget.bind("<B1-Motion>", self._on_drag)
+
+    def _frame_bg(self) -> str:
+        """The theme's frame background - what a plain tk widget on it must match."""
+        try:
+            return ttk.Style().lookup('TFrame', 'background') or '#2b2b2b'
+        except Exception:
+            return '#2b2b2b'
+
+    def _icon_family(self) -> Optional[str]:
+        """The icon font for the action bar, looked up once per manager."""
+        if self._icon_family_cache is None:
+            try:
+                families = font.families(self.root)
+            except tk.TclError:
+                families = ()
+            self._icon_family_cache = (icon_font_family(families),)
+        return self._icon_family_cache[0]
+
+    def _build_header(self, parent, model_info: Optional[str], is_grammar: bool) -> None:
+        """The top row: "Translated with <model> (<Provider>)" on the left, the close
+        button on the right. The button is packed first, so a long credit is what gets
+        cut (`_fit_header`), never the button (TODO.md S1). A drag handle, like the
+        rest of the frame; the credit is not a control."""
+        header = ttk.Frame(parent)
+        header.pack(side=TOP, fill=X, pady=(0, 6))
+        self._bind_drag(header)
+        self.popup_close_btn = tk.Button(
+            header, text=CLOSE_GLYPH, command=self.close, autostyle=False,
+            bg=self._frame_bg(), fg=CLOSE_FG, activebackground=CLOSE_ACTIVE_BG,
+            activeforeground='#ffffff', font=('Segoe UI', 9), relief='flat', bd=0,
+            padx=6, pady=0, cursor='hand2')
+        self.popup_close_btn.pack(side=RIGHT)
+        self._attribution_text = None
+        if model_info:
+            verb = "Fixed" if is_grammar else "Translated"
+            self._attribution_text = f"{verb} with {model_info}"
+            attribution = ttk.Label(header, text=self._attribution_text,
+                                    font=ATTRIBUTION_FONT, foreground=ATTRIBUTION_FG)
+            attribution.pack(side=LEFT)
+            self._bind_drag(attribution)
+            self.popup_attribution = attribution
+
+    def _build_trial_line(self, parent, trial_info: dict) -> None:
+        """The trial-mode line under the header: quota left, and the way to a key."""
+        trial_frame = ttk.Frame(parent)
+        trial_frame.pack(side=TOP, fill=X, pady=(0, 8))
+        self._trial_frame = trial_frame
+
+        # Trial mode indicator
+        remaining = trial_info.get('remaining', 0)
+        daily_limit = trial_info.get('daily_limit', 50)
+
+        if remaining <= 0:
+            trial_text = "Trial quota exhausted - Add your API key"
+            trial_color = '#ff6b6b'  # Red
+        elif remaining <= 10:
+            trial_text = f"Trial Mode ({remaining}/{daily_limit} left) - Low quota!"
+            trial_color = '#ffaa00'  # Orange
+        else:
+            trial_text = f"Trial Mode ({remaining}/{daily_limit} left)"
+            trial_color = '#88aaff'  # Light blue
+
+        ttk.Label(trial_frame, text=trial_text,
+                  font=('Segoe UI', 9, 'italic'),
+                  foreground=trial_color).pack(side=LEFT)
+
+        # "Get API Key" link button
+        def open_guide():
+            self.close()
+            if self._on_open_settings:
+                self._on_open_settings()
+
+        # Sized to its label: a 14-character width cut "Get Free API Key" (TODO.md S2)
+        guide_btn_kwargs = {"text": "Get Free API Key", "command": open_guide}
+        if HAS_TTKBOOTSTRAP:
+            guide_btn_kwargs["bootstyle"] = "link"
+        ttk.Button(trial_frame, **guide_btn_kwargs).pack(side=RIGHT)
+
+    def _text_button(self, parent, text: str, command, bg: str, active: str) -> tk.Button:
+        return tk.Button(parent, text=text, command=command, autostyle=False,
+                         bg=bg, fg='#ffffff', activebackground=active,
+                         activeforeground='#ffffff', font=('Segoe UI', 10),
+                         relief='flat', padx=12, pady=4, cursor='hand2')
+
+    def _icon_button(self, parent, key: str, name: str, command, color: str,
+                     tooltip: bool = True) -> tk.Button:
+        """A secondary action: its icon on a neutral face that takes the action's colour
+        on hover, named by a tooltip - or, without an icon font, its words as before.
+        `action_name` carries the name either way."""
+        family = self._icon_family()
+        if family:
+            button = tk.Button(parent, text=ICON_GLYPHS[key], command=command,
+                               autostyle=False, bg=ICON_BG, fg='#ffffff',
+                               activebackground=color, activeforeground='#ffffff',
+                               font=(family, ICON_SIZE), relief='flat', padx=8, pady=4,
+                               cursor='hand2')
+            if tooltip:
+                self._tooltips.append(Tooltip(button, name))
+        else:
+            button = self._text_button(parent, name, command, color, color)
+        button.action_name = name
+        return button
+
+    def _build_action_bar(self, is_grammar: bool) -> None:
+        """Copy and Replace as words - the two actions used most - and the rest as
+        icons (Decision 34, TODO.md Q1 (c)): the bar no longer holds every popup at
+        735 px. A grammar fix keeps Copy, Replace and Open Translator."""
+        bar = self._btn_frame
+
+        # Copy button
+        self.popup_copy_btn = self._text_button(bar, "Copy", self._handle_copy,
+                                                '#0d6efd', '#0b5ed7')  # Bootstrap primary blue
+        self.popup_copy_btn.pack(side=LEFT, fill=Y)
+
+        # Replace button (copy translated text + paste into source app)
+        self.popup_replace_btn = self._text_button(bar, "Replace", self._handle_copy_and_replace,
+                                                   '#6f42c1', '#5a32a3')  # Bootstrap purple
+        self.popup_replace_btn.pack(side=LEFT, fill=Y, padx=(4, 0))
+
+        # Replace settings gear icon (opens Hotkeys tab in Settings)
+        self._replace_gear_btn = tk.Button(
+            bar, text=GEAR_GLYPH, command=self._handle_open_replace_settings,
+            autostyle=False, bg='#495057', fg='#ffffff', activebackground='#5a6268',
+            activeforeground='#ffffff', font=('Segoe UI', 10), relief='flat',
+            padx=4, pady=4, cursor='hand2')
+        self._replace_gear_btn.pack(side=LEFT, fill=Y, padx=(0, 4))
+
+        # Re-translate + Dictionary are translation-only — skip them for grammar results
+        # (Re-translate would "translate to Grammar"; Dictionary expects a target language).
+        if not is_grammar:
+            # Re-translate - force a fresh API call, bypassing the cache
+            self.popup_retranslate_btn = self._icon_button(
+                bar, 'retranslate', "Re-translate", self._handle_re_translate, '#fd7e14')
+            self.popup_retranslate_btn.pack(side=LEFT, fill=Y, padx=(4, 0))
+
+            # Dictionary - opens Dictionary mode for the original text
+            self.popup_dict_btn = self._icon_button(
+                bar, 'dictionary', "Dictionary", self._open_dictionary_popup,
+                DICT_BUTTON_COLOR, tooltip=False)
+            self.popup_dict_btn.pack(side=LEFT, fill=Y, padx=(4, 0))
+            # Update Dictionary button state based on NLP availability. It unbinds
+            # <Enter> / <Leave>, so the tooltip is attached after it.
+            self._update_dict_button_state()
+            if self._icon_family():
+                self._tooltips.append(Tooltip(self.popup_dict_btn, "Dictionary"))
+
+        # Open Translator
+        self.popup_open_btn = self._icon_button(
+            bar, 'open', "Open Translator", self._handle_open_translator, '#198754')
+        self.popup_open_btn.pack(side=LEFT, fill=Y, padx=(4, 0))
+
+        # Custom Prompt - make the box editable and ask the AI a freeform question
+        # (translation-only; skipped for grammar results)
+        if not is_grammar:
+            self.popup_custom_prompt_btn = self._icon_button(
+                bar, 'prompt', "Custom Prompt", self._handle_custom_prompt, '#20c997')
+            self.popup_custom_prompt_btn.pack(side=LEFT, fill=Y, padx=(4, 0))
+
+    def _build_error_bar(self) -> None:
+        """A failure notice's bar: the way to the keys, and a way out."""
+        # For errors, show "API Settings" button (opens Settings → API Key tab)
+        settings_btn_kwargs = {"text": "API Settings", "command": self._handle_open_settings, "width": 14}
+        if HAS_TTKBOOTSTRAP:
+            settings_btn_kwargs["bootstyle"] = "warning"
+        ttk.Button(self._btn_frame, **settings_btn_kwargs).pack(side=LEFT, padx=8)
+
+        # ...and next to it, a way out of the popup entirely. A failed quick
+        # translate often just needs a different model, a longer prompt or a
+        # second attempt, all of which are quicker to do in the main window
+        # than through this popup. It opens with the source text already in
+        # the input box and an empty output, ready to translate.
+        open_btn_kwargs = {"text": "Open Translator",
+                           "command": self._handle_open_translator, "width": 16}
+        if HAS_TTKBOOTSTRAP:
+            open_btn_kwargs["bootstyle"] = "success"
+        ttk.Button(self._btn_frame, **open_btn_kwargs).pack(side=LEFT, padx=8)
+
+    def _make_box(self, parent, expand: bool, **text_options):
+        """A text box in a holder of its own. The holder's height is set in pixels
+        (step 2), so no two boxes share leftover space - they used to, both packed to
+        expand - and the scrollbar is packed beside the text only when the box is
+        capped. Returns (holder, box, scrollbar)."""
+        holder = tk.Frame(parent, height=1, bg=text_options.get('bg', '#2b2b2b'))
+        holder.pack_propagate(False)
+        holder.pack(side=TOP, fill=BOTH if expand else X, expand=expand)
+        box = RubyText(holder, **text_options)
+        box.pack(side=LEFT, fill=BOTH, expand=True)
+        scroll_options = {'orient': 'vertical', 'command': box.yview}
+        if HAS_TTKBOOTSTRAP:
+            scroll_options['bootstyle'] = 'round'
+        scrollbar = ttk.Scrollbar(holder, **scroll_options)
+        return holder, box, scrollbar
+
+    def _build_grip(self) -> None:
+        """A resize grip in the bottom-right corner (Decision 34, TODO.md P4). The size
+        the user drags the popup to is remembered and becomes the next popup's reading
+        width and height cap; a double-click returns to automatic sizing."""
+        grip = tk.Label(self.popup, text=GRIP_GLYPH, font=('Segoe UI', 8), fg='#6c757d',
+                        bg=self._frame_bg(), cursor='size_nw_se', padx=0, pady=0,
+                        autostyle=False)
+        grip.place(relx=1.0, rely=1.0, anchor='se', x=-2, y=-2)
+        grip.bind('<ButtonPress-1>', self._grip_press)
+        grip.bind('<B1-Motion>', self._grip_drag)
+        grip.bind('<ButtonRelease-1>', self._grip_release)
+        grip.bind('<Double-Button-1>', self._grip_reset)
+        self._grip = grip
+
+    # ------------------------------------------------------------------ #
+    # Measuring and placing (Decision 34)
+    # ------------------------------------------------------------------ #
+    def _anchor(self) -> Tuple[int, int]:
+        """The cursor at hotkey time - what the popup opens beside and never covers."""
+        return self._last_mouse_x, self._last_mouse_y
+
+    def _work_area(self) -> popup_layout.WorkArea:
+        """The work area of the monitor holding the cursor (the taskbar left out)."""
+        area = get_monitor_work_area(self._last_mouse_x, self._last_mouse_y)
+        if area:
+            return popup_layout.WorkArea(*area)
+        return popup_layout.WorkArea(0, 0, self.root.winfo_screenwidth(),
+                                     self.root.winfo_screenheight() - 50)
+
+    def _saved_size(self) -> Tuple[Optional[int], Optional[int]]:
+        """The size the user last dragged a popup to, or (None, None)."""
+        getter = getattr(self.config, 'get_quick_popup_size', None)
+        if not callable(getter):
+            return None, None
+        try:
+            width, height = getter()
+        except Exception:
+            return None, None
+        return width, height
+
+    def _remember_size(self, width: Optional[int], height: Optional[int]) -> None:
+        setter = getattr(self.config, 'set_quick_popup_size', None)
+        if callable(setter):
+            try:
+                setter(width, height)
+            except Exception as e:
+                logging.warning(f"[Popup] could not remember the popup size: {e}")
+
+    @staticmethod
+    def _count(box, *args) -> int:
+        """Text.count() returns a tuple, a bare int or None depending on the Tk build."""
+        value = box.count(*args)
+        if isinstance(value, tuple):
+            return value[0]
+        return value or 0
+
+    @staticmethod
+    def _insets(box, axis: str) -> int:
+        """A Text widget's border, highlight and padding, both sides of one axis."""
+        pad = 'pady' if axis == 'y' else 'padx'
+        return 2 * sum(int(float(str(box.cget(option))))
+                       for option in ('borderwidth', 'highlightthickness', pad))
+
+    def _content_px(self, box) -> int:
+        """Pixels `box`'s content needs, laid out at the box's present width."""
+        return self._count(box, '1.0', 'end', 'update', 'ypixels')
+
+    def _rows_px(self, box, rows: int) -> int:
+        """Pixels of the first `rows` display lines - all of it when there are fewer."""
+        lines = self._count(box, '1.0', 'end -1c', 'update', 'displaylines') + 1
+        if lines <= rows:
+            return self._content_px(box)
+        return self._count(box, '1.0', f'1.0 + {rows} display lines', 'update', 'ypixels')
+
+    def _required_width(self) -> int:
+        """The popup width the rows that must fit whole ask for - the action bar, the
+        trial line, the chooser row, the original's header, the close button with the
+        least of the credit - plus the frame padding. Read off the widgets
+        (`packed_row_width`), never a constant (TODO.md S1)."""
+        rows = (self._btn_frame, self._trial_frame, self.popup_source_chooser,
+                self._original_header)
+        widest = max((packed_row_width(row) for row in rows if row is not None), default=0)
+        header = self.popup_close_btn.winfo_reqwidth() if self.popup_close_btn else 0
+        if self.popup_attribution is not None:
+            header += HEADER_CREDIT_MIN_PX
+        return max(widest, header) + 2 * POPUP_FRAME_PADDING
+
+    def _automatic_width(self, saved_width: Optional[int] = None) -> int:
+        """The text's natural width, wrapped for reading (70 Latin / 36 CJK characters
+        a line) or at the width the user dragged a popup to; never narrower than the
+        rows ask for (`popup_layout.popup_width`)."""
+        insets = 2 * POPUP_FRAME_PADDING + self._insets(self.popup_text, 'x')
+        base = self.popup_text.base_font
+        measure = font.Font(family=base[0], size=base[1]).measure
+        natural = popup_layout.natural_width(self._current_translation, measure)
+        readable = popup_layout.reading_width(self._current_translation, measure)
+        if self.popup_furigana is not None:
+            # Both texts wrap at one width: the narrower of their reading widths keeps
+            # each within its own (an English line under a Japanese original at 36 CJK
+            # characters' width would otherwise run past 70 characters).
+            base = self.popup_furigana.base_font
+            original = font.Font(family=base[0], size=base[1]).measure
+            natural = max(natural, popup_layout.natural_width(self._current_original, original))
+            readable_original = popup_layout.reading_width(self._current_original, original)
+            if readable_original:
+                readable = min(readable, readable_original) if readable else readable_original
+        if saved_width:
+            readable = max(1, saved_width - insets)
+        return popup_layout.popup_width(natural, readable, insets, self._required_width(),
+                                        self._work_area().width)
+
+    def _fit_header(self, width: int) -> None:
+        """Cut the credit with an ellipsis where it would crowd the close button."""
+        if self.popup_attribution is None or not self._attribution_text:
+            return
+        available = (width - 2 * POPUP_FRAME_PADDING
+                     - self.popup_close_btn.winfo_reqwidth() - 8)
+        measure = font.Font(font=ATTRIBUTION_FONT).measure
+        self.popup_attribution.configure(
+            text=popup_layout.elide(self._attribution_text, measure, available))
+
+    def _start_layout(self) -> None:
+        """Step 1: the width now, the popup placed at the height cap - still invisible.
+        Step 2 (`_finish_layout`) follows when the translation box has been laid out at
+        that width (its <Configure>), or after POPUP_LAYOUT_WATCHDOG_MS should that
+        never come.
+
+        The cap, not a guess: a guess shorter than the chrome had the packer squeeze the
+        translation box out altogether, so it never got its width and step 2 never came
+        (measured on the trial line + chooser row case). Nobody sees this height."""
+        saved_width, saved_height = self._saved_size()
+        work = self._work_area()
+        width = self._automatic_width(saved_width)
+        self._fit_header(width)
+        cap = popup_layout.height_cap(work, saved_height)
+        x, y, height = popup_layout.place(self._anchor(), width, cap, work,
+                                          min_height=min(cap, 120))
+        self.popup.geometry(f"{width}x{height}+{x}+{y}")
+        generation = self._generation
+        self._layout = {'generation': generation, 'width': width, 'work': work,
+                        'cap': cap, 'done': False}
+        self.popup_text.bind('<Configure>',
+                             lambda _event, g=generation: self._finish_layout(g), add='+')
+        self.popup.after(POPUP_LAYOUT_WATCHDOG_MS,
+                         lambda g=generation: self._finish_layout(g, forced=True))
+
+    def _finish_layout(self, generation: int, forced: bool = False) -> None:
+        """Step 2: measure each box, give it exactly what it needs up to the cap, place
+        the popup and make it visible. Once per popup; a popup closed or replaced
+        meanwhile is left alone. Whatever goes wrong, the popup is shown."""
+        layout = self._layout
+        if (layout is None or layout['done'] or generation != self._generation
+                or self.popup is None or self.popup_text is None):
+            return
+        expected = layout['width'] - 2 * POPUP_FRAME_PADDING
+        laid_out = abs(self.popup_text.winfo_width() - expected) <= 2
+        if not laid_out and not forced:
+            return                      # an intermediate size; the next <Configure> follows
+        layout['done'] = True
+        try:
+            if self.popup_text.winfo_width() > 1:
+                self._fit_boxes(reposition=True)
+                # Seen only once Tk has redrawn it at its final size: revealed in the same
+                # breath, the first frame still carried the drawing at the provisional
+                # size, cut to the new one (caught by the gallery's screenshots).
+                self.popup.after(POPUP_REVEAL_DELAY_MS,
+                                 lambda g=generation: self._reveal(g))
+                return
+            logging.warning("[Popup] not laid out in time - shown at its estimated size")
+        except Exception as e:
+            logging.warning(f"[Popup] measuring failed - shown at its estimated size: {e}")
+        self._reveal(generation)
+
+    def _reveal(self, generation: Optional[int] = None) -> None:
+        """Make the popup visible - its pending redraws flushed first."""
+        if self.popup is None or (generation is not None and generation != self._generation):
+            return
+        try:
+            self.popup.update_idletasks()
+            self.popup.attributes('-alpha', 1.0)
+        except tk.TclError:
+            pass
+        if self._layout is not None:
+            self._layout['revealed'] = True
+
+    def _fit_boxes(self, reposition: bool = True,
+                   size: Optional[Tuple[int, int]] = None) -> None:
+        """Measure the boxes and give each its height; place the popup or keep it.
+
+        `reposition`: place the popup beside the cursor (a new popup); otherwise its
+        corner stays (the replace preview, the original's toggle) unless that would
+        run off the screen. `size`: the (width, height) the user dragged the popup to;
+        the boxes then share that height, the translation taking the rest.
+        """
+        layout = self._layout
+        work = layout['work']
+        if size is not None:
+            self.popup.geometry(f"{size[0]}x{size[1]}")
+        self.popup.update_idletasks()
+
+        text_insets = self._insets(self.popup_text, 'y')
+        need_t = self._content_px(self.popup_text) + text_insets
+        min_t = min(need_t, self._rows_px(self.popup_text, POPUP_MIN_BOX_ROWS) + text_insets)
+        need_o = min_o = 0
+        limit_o = None
+        if self.popup_furigana is not None:
+            original_insets = self._insets(self.popup_furigana, 'y')
+            need_o = self._content_px(self.popup_furigana) + original_insets
+            min_o = min(need_o, self._rows_px(self.popup_furigana,
+                                              POPUP_COLLAPSED_ORIGINAL_ROWS) + original_insets)
+            collapsible = need_o > min_o
+            self._show_original_toggle(collapsible)
+            if collapsible and self._original_collapsed:
+                limit_o = min_o
+            self.popup.update_idletasks()
+        shown_o = need_o if limit_o is None else min(need_o, limit_o)
+        chrome = (self._main_frame.winfo_reqheight() - self._text_holder.winfo_reqheight()
+                  - (self._original_holder.winfo_reqheight()
+                     if self._original_holder is not None else 0))
+
+        if size is not None:
+            width, height = size
+            x, y = self.popup.winfo_x(), self.popup.winfo_y()
+        else:
+            width = layout['width']
+            desired = min(chrome + need_t + shown_o, layout['cap'])
+            if reposition:
+                x, y, height = popup_layout.place(self._anchor(), width, desired, work,
+                                                  min_height=chrome + min_t + min_o)
+            else:
+                # The edge nearest the cursor stays; the popup grows away from it, so
+                # it still never covers the cursor - and stays on the screen.
+                x, y = self.popup.winfo_x(), self.popup.winfo_y()
+                bottom_edge = y + self.popup.winfo_height()
+                if bottom_edge <= self._anchor()[1]:
+                    height = min(desired, bottom_edge - (work.top + POPUP_SCREEN_MARGIN))
+                    y = bottom_edge - height
+                else:
+                    height = min(desired, work.bottom - POPUP_SCREEN_MARGIN - y)
+                height = max(height, chrome + min_t + min(min_o, shown_o))
+
+        room = height - chrome
+        heights = popup_layout.allocate(room, need_t, need_o, min_translation=min_t,
+                                        min_original=min_o, original_limit=limit_o)
+        if size is not None:
+            # The user's size: the translation takes whatever the original leaves.
+            translation = max(heights.translation, room - heights.original)
+            heights = popup_layout.Heights(translation, heights.original,
+                                           need_t > translation, heights.original_capped)
+        gutter = self._text_scrollbar.winfo_reqwidth() if heights.any_capped else 0
+        self._fit_box(self._text_holder, self.popup_text, self._text_scrollbar,
+                      heights.translation, heights.translation_capped, gutter)
+        if self._original_holder is not None:
+            self._fit_box(self._original_holder, self.popup_furigana, self._original_scrollbar,
+                          heights.original, heights.original_capped, gutter)
+
+        if size is None:
+            # The scrollbar sits beside the text, not on it: the text keeps its width
+            # and does not re-wrap under the measurement just made.
+            width += gutter
+            height = chrome + heights.translation + heights.original
+            if reposition and gutter:
+                x = popup_layout.place(self._anchor(), width, height, work,
+                                       min_height=height)[0]
+        self.popup.geometry(f"{width}x{height}+{x}+{y}")
+        layout.update(chrome=chrome, heights=heights, min_boxes=min_t + min_o,
+                      size=(width, height))
+
+    def _fit_box(self, holder, box, scrollbar, height: int, capped: bool,
+                 gutter: int) -> None:
+        """Give a box its height, and a scrollbar when it is capped. A box that is not
+        capped while the other one is gets a spacer as wide as the scrollbar, so both
+        texts keep one width and nothing re-wraps."""
+        holder.configure(height=max(1, height))
+        spacer = getattr(holder, 'gutter_spacer', None)
+        if capped:
+            if spacer is not None:
+                spacer.pack_forget()
+            scrollbar.pack(side=RIGHT, fill=Y, before=box)
+            box.configure(yscrollcommand=scrollbar.set)
+            return
+        scrollbar.pack_forget()
+        box.configure(yscrollcommand='')
+        if gutter:
+            if spacer is None:
+                spacer = tk.Frame(holder, width=gutter, bg=str(holder.cget('bg')))
+                holder.gutter_spacer = spacer
+            spacer.configure(width=gutter)
+            spacer.pack(side=RIGHT, fill=Y, before=box)
+        elif spacer is not None:
+            spacer.pack_forget()
+
+    # ------------------------------------------------------------------ #
+    # The grip: a size the user chooses (Decision 34, TODO.md P4)
+    # ------------------------------------------------------------------ #
+    def _grip_press(self, event) -> str:
+        if self.popup is not None:
+            self._grip_start = (event.x_root, event.y_root,
+                                self.popup.winfo_width(), self.popup.winfo_height())
+        return 'break'
+
+    def _grip_drag(self, event) -> str:
+        if self.popup is None or self._grip_start is None or self._layout is None:
+            return 'break'
+        start_x, start_y, start_width, start_height = self._grip_start
+        work = self._layout['work']
+        x, y = self.popup.winfo_x(), self.popup.winfo_y()
+        least = self._layout.get('chrome', 0) + self._layout.get('min_boxes', 0)
+        width = max(self._required_width(),
+                    min(start_width + event.x_root - start_x,
+                        work.right - POPUP_SCREEN_MARGIN - x))
+        height = max(least, min(start_height + event.y_root - start_y,
+                                work.bottom - POPUP_SCREEN_MARGIN - y))
+        self._user_size = (int(width), int(height))
+        if self._grip_pending is None:
+            self._grip_pending = self.popup.after_idle(self._apply_user_size)
+        return 'break'
+
+    def _apply_user_size(self) -> None:
+        self._grip_pending = None
+        if self.popup is not None and self._layout is not None and self._user_size:
+            try:
+                self._fit_boxes(reposition=False, size=self._user_size)
+            except tk.TclError:
+                pass
+
+    def _grip_release(self, _event=None) -> str:
+        if self._grip_start is not None and self._user_size:
+            if self._grip_pending is not None:
+                try:
+                    self.popup.after_cancel(self._grip_pending)
+                except tk.TclError:
+                    pass
+                self._grip_pending = None
+            self._apply_user_size()
+            self._remember_size(*self._user_size)
+        self._grip_start = None
+        return 'break'
+
+    def _grip_reset(self, _event=None) -> str:
+        """Double-click on the grip: forget the dragged size, back to automatic."""
+        self._user_size = None
+        self._grip_start = None
+        self._remember_size(None, None)
+        if self.popup is not None and self._layout is not None:
+            width = self._automatic_width(None)
+            self._layout['width'] = width
+            self._layout['cap'] = popup_layout.height_cap(self._layout['work'])
+            self.popup.geometry(f"{width}x{self.popup.winfo_height()}")
+            self._fit_boxes(reposition=False)
+        return 'break'
 
     def _ruby_enabled(self) -> bool:
         """Whether popup output should carry readings.
@@ -946,8 +1412,11 @@ class QuickTranslateManager:
         if self._on_choose_source:
             self._on_choose_source(language)
 
-    def _render_furigana(self, parent, furigana_text: str, available_px: int):
-        """Render the read-only furigana guide above the translation.
+    def _render_furigana(self, parent, furigana_text: str):
+        """The original, with its readings, above the translation - read-only, under a
+        small header that names it and, when it runs longer than
+        POPUP_COLLAPSED_ORIGINAL_ROWS rows, collapses or opens it (Decision 34, TODO.md
+        Q5: collapsed by default - the translation is what was asked for).
 
         RubyText owns the ruby layout, the plain-text readback and the wheel
         handling; the notation escapes are honored, so source text containing
@@ -956,81 +1425,45 @@ class QuickTranslateManager:
         Args:
             parent: Parent frame to pack into
             furigana_text: Text with {kanji|reading} notation
-            available_px: Content width the block wraps at, used for sizing
         """
-        self.popup_furigana = RubyText(parent, bg='#2b2b2b')
+        header = ttk.Frame(parent)
+        header.pack(side=TOP, fill=X, pady=(0, 2))
+        self._bind_drag(header)
+        language = language_label(self._current_source_lang or lang_id.JAPANESE)
+        name = ttk.Label(header, text=f"Original ({language})", font=ORIGINAL_HEADER_FONT,
+                         foreground=ATTRIBUTION_FG)
+        name.pack(side=LEFT)
+        self._bind_drag(name)
+        # Packed by step 2, and only when the original is longer than its collapsed rows
+        toggle = tk.Label(header, text="Show all", font=ORIGINAL_HEADER_FONT,
+                          fg=ORIGINAL_TOGGLE_FG, bg=self._frame_bg(), cursor='hand2',
+                          autostyle=False)
+        toggle.bind('<Button-1>', self._toggle_original)
+        self.popup_original_toggle = toggle
+        self._original_header = header
+
+        self._original_holder, self.popup_furigana, self._original_scrollbar = self._make_box(
+            parent, expand=False, bg='#2b2b2b')
         self.popup_furigana.insert_notation(tk.END, furigana_text)
         self.popup_furigana.config(state='disabled')
-        self.popup_furigana.fit_height(available_px)
-        self.popup_furigana.pack(side=TOP, fill=BOTH, expand=True, pady=(0, 0))
 
-    def _calculate_position(self, width: int, height: int) -> Tuple[int, int, int]:
-        """Calculate popup position and adjust height if needed.
-
-        Supports multi-monitor setups by detecting which monitor the mouse is on
-        and positioning the popup within that monitor's work area.
-
-        Args:
-            width: Popup width
-            height: Popup height
-
-        Returns:
-            Tuple of (x, y, adjusted_height)
-        """
-        mouse_x = self._last_mouse_x
-        mouse_y = self._last_mouse_y
-
-        # Get work area of the monitor containing the mouse cursor
-        work_area = get_monitor_work_area(mouse_x, mouse_y)
-
-        if work_area:
-            # Multi-monitor: use actual monitor bounds
-            mon_left, mon_top, mon_right, mon_bottom = work_area
+    def _show_original_toggle(self, collapsible: bool) -> None:
+        """"Show all" / "Show less" on the original's header - only when it is long."""
+        toggle = self.popup_original_toggle
+        if toggle is None:
+            return
+        if collapsible:
+            toggle.configure(text="Show all" if self._original_collapsed else "Show less")
+            toggle.pack(side=RIGHT)
         else:
-            # Fallback: use primary monitor (legacy behavior)
-            mon_left = 0
-            mon_top = 0
-            mon_right = self.root.winfo_screenwidth()
-            mon_bottom = self.root.winfo_screenheight() - 50  # taskbar margin
+            toggle.pack_forget()
 
-        # Safe margins within the monitor
-        margin = 10
-        safe_left = mon_left + margin
-        safe_top = mon_top + margin
-        safe_right = mon_right - margin
-        safe_bottom = mon_bottom - margin
-
-        # Calculate X position
-        x = mouse_x + 15
-        if x + width > safe_right:
-            x = mouse_x - width - 15
-        x = max(safe_left, min(x, safe_right - width))
-
-        # Calculate Y position and adjust height
-        y = mouse_y + 20
-        max_safe_height = safe_bottom - safe_top
-
-        if height >= max_safe_height:
-            height = max_safe_height
-            y = safe_top
-        else:
-            space_below = safe_bottom - y
-
-            if height <= space_below:
-                pass  # Fits below perfectly
-            else:
-                # Try above
-                y_above = mouse_y - height - 20
-                if y_above >= safe_top:
-                    y = y_above
-                else:
-                    # Pin to bottom of safe area
-                    y = safe_bottom - height
-                    if y < safe_top:
-                        y = safe_top
-                        height = max_safe_height
-
-        return x, y, height
+    def _toggle_original(self, _event=None) -> str:
+        """Open the collapsed original, or collapse it again. The popup's corner stays."""
+        self._original_collapsed = not self._original_collapsed
+        if self.popup is not None and self._layout is not None and self._layout['done']:
+            self._fit_boxes(reposition=False, size=self._user_size)
+        return 'break'
 
     def _start_move(self, event):
         """Record start position for dragging."""
@@ -1076,18 +1509,8 @@ class QuickTranslateManager:
 
     def _clear_noactivate(self):
         """Remove WS_EX_NOACTIVATE so the popup can receive keyboard focus (edit mode)."""
-        if not self.popup:
-            return
-        try:
-            hwnd = ctypes.windll.user32.GetParent(self.popup.winfo_id())
-            if not hwnd:
-                hwnd = self.popup.winfo_id()
-            GWL_EXSTYLE = -20
-            WS_EX_NOACTIVATE = 0x08000000
-            ex_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style & ~WS_EX_NOACTIVATE)
-        except Exception:
-            pass  # Non-critical - editing still works in most cases
+        if self.popup:
+            set_noactivate(self.popup, False)
 
     def _handle_custom_prompt(self):
         """Handle Custom Prompt button - switch the box to editable freeform-ask mode."""
@@ -1163,10 +1586,7 @@ class QuickTranslateManager:
             cursor='hand2'
         ).pack(side=LEFT, padx=4)
 
-        close_btn_kwargs = {"text": "✕", "command": self.close, "width": 3}
-        if HAS_TTKBOOTSTRAP:
-            close_btn_kwargs["bootstyle"] = "secondary"
-        ttk.Button(self._btn_frame, **close_btn_kwargs).pack(side=RIGHT)
+        # The close button is in the header, as in every other state.
 
     def _handle_custom_prompt_send(self):
         """Read the entire edit-box content and dispatch it as a freeform prompt."""
@@ -1231,7 +1651,7 @@ class QuickTranslateManager:
         # Agree button (green - confirms replace)
         tk.Button(
             self._btn_frame,
-            text="\u2713 Agree",
+            text=f"{CHECK_GLYPH} Agree",
             command=self._handle_replace_agree,
             autostyle=False,
             bg='#198754',
@@ -1247,7 +1667,7 @@ class QuickTranslateManager:
         # Cancel button (grey - cancels replace)
         tk.Button(
             self._btn_frame,
-            text="\u2717 Cancel",
+            text=f"{CROSS_GLYPH} Cancel",
             command=self._handle_replace_cancel,
             autostyle=False,
             bg='#6c757d',
@@ -1260,48 +1680,16 @@ class QuickTranslateManager:
             cursor='hand2'
         ).pack(side=LEFT, padx=4)
 
-        # Close button (X) - still available
-        close_btn_kwargs = {"text": "\u2715", "command": self.close, "width": 3}
-        if HAS_TTKBOOTSTRAP:
-            close_btn_kwargs["bootstyle"] = "secondary"
-        ttk.Button(self._btn_frame, **close_btn_kwargs).pack(side=RIGHT)
+        # The close button stays in the header. The bar's icons are gone, and so are
+        # their tooltips.
+        for tip in self._tooltips:
+            tip.hide()
+        self._tooltips = []
 
-        # --- Resize popup to fit preview content ---
-        combined_text = original + '\n\n\u2192\n\n' + translated
-        new_width, new_height = self.calculate_size(combined_text)
-
-        # Room for the readings on the translated half, if it has any.
-        if self.popup_text.has_ruby:
-            new_height += estimate_ruby_overhead_px(
-                translated, new_width - HORIZONTAL_PADDING,
-                lang_hint=self._ruby_hint(self._current_target_lang, self._is_grammar,
-                                          self._current_original, self._current_source_lang),
-                base_font=('Segoe UI', 11), line_spacing=0)
-
-        if self.popup:
-            current_geo = self.popup.geometry()
-            parts = current_geo.split('+')
-            current_wh = parts[0].split('x')
-            final_width = max(int(current_wh[0]), new_width)
-            final_height = max(int(current_wh[1]), new_height)
-
-            # Update text widget height
-            try:
-                ui_font = font.Font(family='Segoe UI', size=11)
-                line_height = int(ui_font.metrics("linespace"))
-            except tk.TclError:
-                line_height = 20
-            VERTICAL_PADDING = 100
-            new_text_height = max(1, (final_height - VERTICAL_PADDING) // line_height)
-            if self.popup_text.has_ruby:
-                self.popup_text.fit_height(final_width - HORIZONTAL_PADDING,
-                                           min_rows=new_text_height)
-            else:
-                self.popup_text.config(height=new_text_height)
-
-            # Reposition to stay within screen
-            x, y, adjusted_height = self._calculate_position(final_width, final_height)
-            self.popup.geometry(f"{final_width}x{adjusted_height}+{int(x)}+{int(y)}")
+        # --- Fit the box to the preview: measured, the popup's corner kept ---
+        # Before step 2 has run (the popup not yet shown), step 2 measures this content.
+        if self.popup is not None and self._layout is not None and self._layout['done']:
+            self._fit_boxes(reposition=False, size=self._user_size)
 
     def _handle_replace_agree(self):
         """User confirmed replace - execute the actual copy+paste."""
@@ -1415,6 +1803,10 @@ class QuickTranslateManager:
             self._dict_frame = None
         self._dict_mode_active = False
 
+        for tip in self._tooltips:
+            tip.hide()
+        self._tooltips = []
+
         if self.popup:
             try:
                 if self.popup.winfo_exists():
@@ -1432,6 +1824,22 @@ class QuickTranslateManager:
             self.popup_source_chooser = None
             self._btn_frame = None
             self._main_frame = None
+            self.popup_close_btn = None
+            self.popup_open_btn = None
+            self.popup_retranslate_btn = None
+            self.popup_custom_prompt_btn = None
+            self.popup_original_toggle = None
+            self._original_header = None
+            self._original_holder = None
+            self._original_scrollbar = None
+            self._text_holder = None
+            self._text_scrollbar = None
+            self._trial_frame = None
+            self._grip = None
+        self._layout = None
+        self._grip_start = None
+        self._grip_pending = None
+        self._user_size = None
 
     @property
     def is_open(self) -> bool:

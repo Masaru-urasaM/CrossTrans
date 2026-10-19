@@ -153,3 +153,29 @@ not made**: `'AIza': 'Google'` in both key-pattern tables (Google API keys have 
 - check first), so a key without it stops counting as Google's; it changes Decision 31's
 tie-break, so it is the user's call. **Trigger**: a SambaNova user on Auto, or the next change to
 `_claimant_for_key()`.
+
+---
+
+### D20 - The popup's `WS_EX_NOACTIVATE` has never been in effect
+
+**Found**: 2026-10-19, while giving the new icon tooltips the same style (Decision 34).
+**Effort**: Small to apply; deciding is the hard part.
+
+`QuickTranslateManager._apply_noactivate()` sets `WS_EX_NOACTIVATE` right after the Toplevel is
+created - before Tk has made the window that carries the style. Tk creates that wrapper when it
+first maps the Toplevel; until then `GetParent(winfo_id())` is 0, so the bit lands on Tk's inner
+window and is lost. Measured on the code before this work (`53fee8e`) and after it: once shown, the
+wrapper's extended style is `0x80` (`WS_EX_TOOLWINDOW`; `0x80080` with the new alpha's
+`WS_EX_LAYERED`), never `0x08000000`. CLAUDE.md said the popup never takes the focus; it can.
+
+What that means today (not measured - the private desktop takes no input): a click on the popup
+should activate it like any window. That is also what makes two things work which the documented
+design would break - **Ctrl+C on a selection made in the popup** (`RubyText`'s `<<Copy>>` override
+needs the keyboard) and **Esc once the popup was clicked**. Replace works either way: the popup
+closes before the paste and Windows hands the focus back.
+
+**Options**: (1) leave it, docs corrected (done: CLAUDE.md "Replace Button"); (2) make it effective
+after mapping, as the tooltips now are (`<Map>`) - the popup never takes the focus, and Ctrl+C and
+Esc go to the user's app; (3) effective, plus a way to copy part of a translation without the
+keyboard. **The user's call.** **Trigger**: a user reporting that a click on the popup takes the
+focus from their app - or one wanting Ctrl+C there; either way the trade-off above.

@@ -272,7 +272,8 @@ a provider's list.
 - `ruby_text.py` - `RubyText` widget: the single place furigana is drawn (+ `get_plain()` readback);
   `RubyLine` - one canvas per line with readings, for long lists (History rows, J9): a widget per
   line instead of two labels per segment, fonts and character widths shared across lines
-- `quick_translate.py` - QuickTranslateManager (translation popup with Copy, Replace, Dictionary, Open Translator, furigana rendering)
+- `quick_translate.py` - QuickTranslateManager (translation popup with Copy, Replace, Dictionary, Open Translator, furigana rendering; measured layout - see "Quick-translate popup layout")
+- `popup_layout.py` - The popup's size and place as pure numbers (Decision 34): reading width, height cap, allocation between the boxes, placement beside the cursor
 - `tray.py` - System tray manager
 - `dialogs.py` - Error/trial/update-failed dialogs, raised by `_raise_without_grab()` - never
   `grab_set()` or `transient()`: they hang off the withdrawn root (D16, fixed 2026-10-16)
@@ -421,8 +422,8 @@ or `Fixed with ...` for a grammar fix. Never shown on a failure popup.
   `app.show_quick_translate()` when `model_info` is not passed. Deliberately *not* a seventh
   element in the translation queue tuple, whose length already encodes the kind of result - and
   the screenshot path never goes through the queue at all (it assigns `last_attribution` itself).
-- **Height**: `ATTRIBUTION_PX` is added to the popup budget only when the line shows, so the text
-  box never loses a row to make room for it.
+- **Height**: the credit shares the header row with the close button and is cut with an ellipsis
+  when long; every box is measured (Decision 34), so the text box never loses a row to it.
 - The five copies of "trial client if trial mode, else the API manager" in `translation.py` are
   now one `_call_model()`, which is also where the credit is recorded.
 
@@ -431,7 +432,7 @@ or `Fixed with ...` for a grammar fix. Never shown on a failure popup.
   `_route_generate_content` / `_route_generate_multimodal` split
 - `src/core/translation.py` - `_call_model()`, `_cached_attribution()`, `last_attribution`
 - `src/core/history.py` - `find_cached_entry()` (whole entry) under `find_cached()` (text only)
-- `src/ui/quick_translate.py` - `ATTRIBUTION_FONT` / `ATTRIBUTION_FG` / `ATTRIBUTION_PX`,
+- `src/ui/quick_translate.py` - `ATTRIBUTION_FONT` / `ATTRIBUTION_FG`, `_build_header()`,
   `show(..., model_info=...)`, `popup_attribution`
 - `src/app.py` - `show_quick_translate(..., model_info=None)` and its default
 - `src/ui/screenshot_handler.py` - carries the credit over by hand
@@ -488,15 +489,73 @@ Corrects grammar/spelling/punctuation of selected text **without translating, re
 - `src/ui/tray.py` - Fix Grammar menu entry
 - `config.py` - `get/set_fix_grammar_hotkey`, `get/set_fix_grammar_enabled`
 
+## Quick-translate popup layout (Decision 34, v1.9.21)
+
+The popup is **measured, never estimated**. `show()` builds everything at `-alpha 0`, decides the
+width and places it; when the translation box gets its first `<Configure>` at that width,
+`_finish_layout()` reads each box's real height (`count -update -ypixels`), gives every box exactly
+that up to the cap, places the popup beside the cursor and sets `-alpha 1`. A watchdog
+(`POPUP_LAYOUT_WATCHDOG_MS`) shows it anyway if that step never runs, and a failure in it shows the
+popup at its provisional size - a popup is never left invisible. **Tests call `tk_root.update()`**
+before reading the geometry: `update_idletasks()` alone does not lay out a newly mapped window.
+
+- **Why not measure before mapping**: Tk lays out only the children of a *mapped* Toplevel - a
+  withdrawn one leaves the box 1 px wide (measured: `count -ypixels` 10180 px for a paragraph
+  needing 160). Requested sizes are known from the start, so the width is decided first
+  (`packed_row_width()` sums a row's requested widths and pack paddings) and only heights wait.
+- **Width** (`popup_layout.popup_width`): the text's natural width, wrapped at a reading width of
+  70 characters for Latin text and 36 for CJK (`POPUP_READING_CHARS_*`; WCAG 1.4.8 asks for at most
+  80 / 40) - with an original block, the narrower of the two texts' reading widths - never narrower
+  than the rows that must fit whole (`_required_width()`), never wider than 90% of the work area.
+- **Height**: at most 60% of the monitor's work area (`POPUP_HEIGHT_CAP_SHARE`), or the height the
+  user dragged a popup to. `popup_layout.allocate()`: the translation first; the original keeps at
+  most 40% when both overflow, and is collapsed to 3 rows by default ("Show all" opens it).
+- **Each box sits in its own holder** (`_make_box`: `pack_propagate(False)`, a height in pixels).
+  Two boxes both packed `expand=True` split leftover height arbitrarily (measured: -14/+14 and
+  +156/-156 px). A capped box packs its scrollbar beside the text; a box that is not capped while
+  another is gets a spacer as wide, so no text re-wraps after it was measured (`_fit_box`).
+- **Position** (`popup_layout.place`): beside the anchor - the cursor at hotkey time - right then
+  left, below then above; when neither side holds the popup, the roomier side, and the boxes
+  scroll: it never covers the cursor. Re-fitting an open popup (the replace preview, "Show all",
+  the grip) keeps the edge nearest the cursor. `show_loading()` is placed by the same rules.
+- **Header**: the credit (cut with an ellipsis by `popup_layout.elide`) and the close button
+  (`CLOSE_GLYPH`), packed first so it is never the one squeezed out. Every state has it there; the
+  bars no longer carry a close button.
+- **Action bar**: Copy and Replace (+⚙) as words; Re-translate, Dictionary, Open Translator and
+  Custom Prompt as icons (`ICON_FONTS`: Segoe Fluent Icons, else Segoe MDL2 Assets) with a
+  `Tooltip` - `WS_EX_NOACTIVATE` applied on `<Map>` (set any earlier, the bit is lost: D20).
+  `button.action_name` names an icon button for code and
+  tests; without an icon font the words come back. `_update_dict_button_state()` unbinds
+  `<Enter>`/`<Leave>`, so the Dictionary tooltip is attached after it.
+- **Grip** (bottom right): dragging resizes; the size is remembered
+  (`config.get/set_quick_popup_size()`) and becomes the next popup's reading width and height cap -
+  a short result still gets a small popup. A double-click returns to automatic sizing.
+- **Glyphs are `chr()` code points** (`CLOSE_GLYPH`, `GEAR_GLYPH`, `ICON_GLYPHS`): Edit cannot match
+  backslash-u escapes, and Write turns them into the characters.
+- **Never** size the popup from constants - `MIN_WIDTH = 670` drifted to a hidden close button when
+  the bar had grown to 735 px - call `update()` inside `show()`, or let two boxes share leftover
+  height. Policy values (characters per line, the cap, the shares) live in `src/constants.py`
+  under `POPUP_`; widget sizes are measured.
+- **Gallery**: `python tools/popup_gallery.py --label NAME` renders every case and state of
+  `tests/popup_cases.py` on the private desktop into `logs/popup_gallery/` (PNG + JSON metrics:
+  blank and hidden pixels, characters per line, the close button, clipped controls).
+  `tests/test_popup_geometry.py` asserts the same metrics; `tests/test_popup_layout.py` the pure
+  decisions.
+- **`TODO.md`** for this work - findings S1-S10, questions Q1-Q9 (all answered as recommended),
+  phases P0-P5 - was deleted on completion; code and docs that cite it mean
+  `git show 57d739f:TODO.md`. Before and after: ROADMAP_DONE "P", Decision 34.
+
 ## Replace Button (Copy & Replace)
 
 Popup "Replace" button copies translated text and pastes it back into the source app.
 
 ### Popup button bar:
 ```
-[Copy] [Replace][⚙] [Dictionary] [Open Translator]  [×]
+Translated with <model> (<Provider>)                [×]   <- header, in every state
+[Copy] [Replace][⚙] (Re-translate) (Dictionary) (Open Translator) (Custom Prompt)
 ```
-On a **failed** translation the bar is replaced by `[API Settings] [Open Translator]  [×]`.
+The four in parentheses are icons with a tooltip (Decision 34). On a **failed** translation the
+bar is replaced by `[API Settings] [Open Translator]`; the close button stays in the header.
 `is_error_text()` (module level in `quick_translate.py`) is the single predicate for "this is a
 failure notice, not a translation" — the popup picks the bar with it and `app.py` uses the same
 call to blank the output box, so a failure notice is never pasted into the main window.
@@ -512,7 +571,7 @@ call to blank the output box, so a failure notice is never pasted into the main 
 
 ### Flow (Manual Replace mode):
 1. Hotkey pressed → `_on_hotkey_translate()` captures source window HWND via `GetForegroundWindow()`
-2. Translation completes → popup shows with [Copy] [Replace][⚙] [Dictionary] [Open Translator] [×]
+2. Translation completes → popup shows with [Copy] [Replace][⚙] and the icons, [×] in its header
 3. User clicks "Replace" → `_handle_copy_and_replace()` checks mode:
    - Manual mode: `_show_replace_preview()` → strikethrough original → translated text → Agree/Cancel
    - Quick mode: immediate `_on_copy_and_replace()` callback
@@ -523,8 +582,12 @@ call to blank the output box, so a failure notice is never pasted into the main 
    - Show toast "Replaced!"
 
 ### Key implementation details:
-- **WS_EX_NOACTIVATE**: Popup uses `WS_EX_NOACTIVATE` (0x08000000) window style so clicking buttons doesn't steal focus from source app
-- **No focus restoration needed**: Source app keeps focus + selection while popup is open
+- **WS_EX_NOACTIVATE - intended, never in effect (DEFERRED D20)**: `_apply_noactivate()` sets it
+  before Tk creates the wrapper window that would carry it, so the bit is lost (measured
+  2026-10-19). A click can activate the popup - which is also what lets Ctrl+C copy a selection
+  made in it. Decide D20 before "fixing" it.
+- **No focus restoration needed**: Replace closes the popup before pasting, and Windows hands the
+  focus back to the source app.
 - **Simple paste**: Just `pyperclip.copy()` + `keyboard.press_and_release('ctrl+v')` in daemon thread
 - **Fallback**: Text is always on clipboard even if paste fails. Toast warns user.
 - **Gear dropdown**: `tk.Menu.post()` auto-dismisses when clicking outside (prevents accidental navigation)
@@ -575,7 +638,7 @@ read 汽車, 工作, 床 as Chinese (3/10 each).
   the model to decide per headword and name its decision in field 2.
 - **The popup's "Kanji-only text - read it as: [Japanese] [Chinese]" row** (J6, Decision 27):
   shown above the buttons when a translation of kanji that prove nothing came back without a
-  verdict; `SOURCE_CHOOSER_PX` joins the height budget only then. An answer re-translates with
+  verdict; the popup measures the row like everything else (Decision 34). An answer re-translates with
   that source stated (`redo_translation(..., source_language=)`) and becomes the text's verdict -
   readings alone would sit above a meaning the model may have taken from the other language.
   **When a model did place it** and the text is a term, the row reads "Kanji-only text - read as
@@ -846,8 +909,9 @@ display rather than receiving pre-annotated strings through the queue.
   of the base font (28 px) but a row carrying ruby is 42 px. `layout_rows()` simulates the
   `wrap='char'` layout and the pixel requirement is converted to `height` units. Row heights
   are derived from `font.metrics`, matching `Text.count(..., 'ypixels')` exactly.
-- `estimate_notation_px()` sizes a window *before* the widget exists — required for the popup,
-  whose `overrideredirect` Toplevel gets its geometry once.
+- `estimate_notation_px()` sizes a window *before* the widget exists. The popup sized its
+  `overrideredirect` Toplevel with it until Decision 34; it now measures its laid-out boxes and
+  uses this only for a provisional height.
 - `MAX_ANNOTATE_CHARS = 3000`: longer text inserts plain, because annotation and frame
   construction run on the UI thread.
 - Every ruby frame and label is bound to the wheel handler; an embedded window otherwise

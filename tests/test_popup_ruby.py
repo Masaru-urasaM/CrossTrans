@@ -234,8 +234,9 @@ class TestReplacePreview:
 class TestPopupSizing:
     @staticmethod
     def _popup_height(mgr, tk_root):
-        # geometry() reports 1x1 until the request has been processed.
-        tk_root.update_idletasks()
+        # geometry() reports 1x1 until the request has been processed, and since
+        # Decision 34 the popup takes its height once it has been laid out.
+        tk_root.update()
         return int(mgr.popup.geometry().split('+')[0].split('x')[1])
 
     @HAS_PROVIDER

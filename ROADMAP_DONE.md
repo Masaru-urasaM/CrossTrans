@@ -5,6 +5,61 @@
 
 ---
 
+## P — The quick-translate popup: sized by measuring, laid out for reading — ✅ Done (2026-10-19) [unreleased, branch `feature/popup-sizing`, for 1.9.21]
+
+**Goal (user, 2026-10-19, restated in English):** the quick-translate box "does not size itself
+well - a better way, or a new way of deciding its size; the end goal is an interface much easier to
+read and to operate". Measured on 13 cases and presented as three options; the user chose **B + C**
+- measure the real layout, size for reading, and lay the popup out again - every open question as
+recommended, all of it for 1.9.21, and P1-P4 "in one pass, tested once at the end". The plan, with
+the findings: `git show 57d739f:TODO.md`. Decision 34.
+
+| Phase | What | Commit | Tests |
+|---|---|---|---|
+| Plan | Findings S1-S10 measured on 13 cases, design, phases; Decision 34 (Decision 3 superseded) | `87faae7` | 1525 |
+| P0 | The corpus (`tests/popup_cases.py`) and the gallery tool (`tools/popup_gallery.py`); the `before` gallery | `57d739f` | 1547 |
+| P1 | The close button always drawn: the minimum width read off the rows (`packed_row_width`); "Get Free API Key" sized to its label | this entry | |
+| P2 | The two-step show (alpha 0, laid out, measured, placed, shown); boxes in holders with exact heights; scrollbars only when capped; the 60% cap; placement beside the cursor (`src/ui/popup_layout.py`); the loading indicator by the same rules | this entry | |
+| P3 | The header with the credit and the close button in every state; Copy and Replace as words, four icons with tooltips; the original named and collapsed to three rows | this entry | |
+| P4 | The resize grip; the size remembered (`config.get/set_quick_popup_size`); a double-click returns to automatic | this entry | 1711 |
+
+| Same 17 popups | Before | After |
+|---|---|---|
+| Close button drawn | 12 of 17 | 17 of 17 |
+| Blank band under the text | 2-37 px (28 typical) | 0 px in every case |
+| Characters per line, Latin, worst paragraph | 99-111 | 66 |
+| One word | 670×161 | 395×136 |
+| Kanji term, trial line + chooser row | 670×232, "Get Free API Key" cut | 395×209, nothing cut |
+| Long Japanese with readings | 800×1012 across the cursor's line, 156 px hidden, no scrollbar | 521×619, below the cursor's line, scrollbars |
+
+**Checked, not assumed**: the gallery (`tools/popup_gallery.py --label after`) - every case and
+state with its close button inside, no blank pixels, nothing clipped, nothing over the cursor; the
+full suite on the private desktop (1711 passed, 1 skipped); 19 mutations, all killed. **Found**: DEFERRED D20 - the popup's `WS_EX_NOACTIVATE` has
+never been in effect; left for the user (it decides whether Ctrl+C on a selection in the popup
+keeps working).
+
+**Still the user's**: merging into `main`, the rebuild, the tag - and the manual checks, with the
+running CrossTrans closed first (a second instance only brings the first one forward):
+1. In Notepad select `Hello` and press your translate hotkey: a small popup beside the cursor, the
+   close button at the top right, no empty band under the text; the close button closes it.
+2. A paragraph of about five lines: about 70 characters a line, the box ending where the text ends.
+3. A long article: at most about 60% of the screen high, a scrollbar, the cursor's line not covered.
+4. Japanese text: "Original (Japanese)" above the translation, collapsed to three rows; "Show all"
+   opens it, "Show less" closes it.
+5. A kanji-only word such as 汽車: the chooser row; the popup grows by that row only.
+6. Trial mode: "Get Free API Key" fully readable.
+7. Replace: the preview fits, Agree pastes; Custom Prompt: the box keeps its size and scrolls,
+   Send and Cancel work.
+8. An invalid key: the error popup with API Settings, Open Translator and the close button.
+9. The cursor at the bottom-right corner of the screen: the popup opens above and to the left.
+10. Hover each icon: its name appears; each icon does what its name says.
+11. Drag the grip at the bottom right: the popup resizes; the next popup uses that width and
+    height; a double-click on the grip returns to automatic sizing.
+12. Translate into and from Vietnamese (not in the automated corpus): lines and heights look right
+    with the diacritics.
+
+---
+
 ## K — Follow-ups to the language-identity work, then quiet tests — ✅ Done (2026-10-16) [unreleased, branch `feature/japanese-language-identity`]
 
 **Goal (user, 2026-10-16):** do all fifteen items proposed after J12 - the suite on a clean machine,

@@ -244,3 +244,31 @@ class TestConfigPersistence:
                 config.save(secure=True)
 
                 assert os.path.exists(config_file)
+
+
+class TestQuickPopupSize:
+    """The size the user dragged the quick-translate popup to (Decision 34, P4)."""
+
+    @staticmethod
+    def _patched(temp_config_dir):
+        return (patch.object(Config, 'CONFIG_DIR', temp_config_dir),
+                patch.object(Config, 'CONFIG_FILE', os.path.join(temp_config_dir, 'config.json')))
+
+    def test_automatic_until_the_user_drags_it(self, temp_config_dir):
+        directory, file = self._patched(temp_config_dir)
+        with directory, file:
+            assert Config().get_quick_popup_size() == (None, None)
+
+    def test_a_dragged_size_survives_a_restart(self, temp_config_dir):
+        directory, file = self._patched(temp_config_dir)
+        with directory, file:
+            Config().set_quick_popup_size(480, 300)
+            assert Config().get_quick_popup_size() == (480, 300)
+
+    def test_none_returns_it_to_automatic(self, temp_config_dir):
+        directory, file = self._patched(temp_config_dir)
+        with directory, file:
+            config = Config()
+            config.set_quick_popup_size(480, 300)
+            config.set_quick_popup_size(None, None)
+            assert Config().get_quick_popup_size() == (None, None)

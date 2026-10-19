@@ -8,7 +8,7 @@ import json
 import shutil
 import logging
 import winreg
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
 from src.core.crypto import SecureStorage
 
@@ -74,6 +74,8 @@ class Config:
         "model_rotation": False,  # Try other models before switching keys on failure
         "furigana_enabled": True,  # Show furigana (reading guides) for Japanese source text
         "furigana_reading_pane": True,  # Reading pane under the main-window input box
+        "quick_popup_width": None,   # quick-translate popup size the user dragged it to;
+        "quick_popup_height": None,  # None = automatic (Decision 34)
     }
 
     def __init__(self):
@@ -366,6 +368,21 @@ class Config:
     def set_furigana_reading_pane(self, expanded: bool):
         """Remember whether the Reading pane is expanded."""
         self._config['furigana_reading_pane'] = expanded
+        self.save()
+
+    def get_quick_popup_size(self) -> Tuple[Optional[int], Optional[int]]:
+        """The size the user last dragged the quick-translate popup to, or (None, None)
+        for automatic sizing (Decision 34). The width becomes the popup's reading width
+        and the height its height cap - a short result still gets a small popup."""
+        width = self._config.get('quick_popup_width')
+        height = self._config.get('quick_popup_height')
+        return (int(width) if width else None, int(height) if height else None)
+
+    def set_quick_popup_size(self, width: Optional[int], height: Optional[int]):
+        """Remember the quick-translate popup's size; (None, None) returns it to
+        automatic sizing."""
+        self._config['quick_popup_width'] = int(width) if width else None
+        self._config['quick_popup_height'] = int(height) if height else None
         self.save()
 
     # Fix Grammar settings

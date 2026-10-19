@@ -56,13 +56,15 @@ def popup(tk_root):
 
 
 def button_labels(widget):
-    """Every button caption in the window, in creation order."""
+    """Every button caption in the window, in creation order - an icon button by the
+    action it names (its tooltip), since Decision 34."""
     found = []
     for child in widget.winfo_children():
         try:
             text = str(child.cget('text'))
         except tk.TclError:
             text = ''
+        text = getattr(child, 'action_name', None) or text
         if text and 'button' in child.winfo_class().lower():
             found.append(text)
         found.extend(button_labels(child))
@@ -72,7 +74,7 @@ def button_labels(widget):
 def find_button(widget, label):
     for child in widget.winfo_children():
         try:
-            if str(child.cget('text')) == label:
+            if (getattr(child, 'action_name', None) or str(child.cget('text'))) == label:
                 return child
         except tk.TclError:
             pass
