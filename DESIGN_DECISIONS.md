@@ -5,6 +5,59 @@ approaches. Newest first.
 
 ---
 
+### Decision 34 - The quick-translate popup is sized by measuring its real layout, and laid out for reading
+
+**Date**: 2026-10-19
+**Status**: RESOLVED - the approach ("B + C") and its details (every TODO.md §3 question as
+recommended), the user's choices on 2026-10-19; ships in 1.9.21
+
+**Problem**: The popup was sized before it existed, from constants - `MIN_WIDTH` 670,
+`VERTICAL_PADDING` 100, a "+1 line" buffer, `ceil(width / available)` for word wrap - and the
+constants had drifted from the widgets. Measured on 13 cases (TODO.md §4): the action bar needs
+735 px, so on every short result the close button is not drawn, and Esc cannot close a popup that
+never has the focus; one word sits in a 670×161 box of which the text covers 1%; every text has a
+~28 px blank band under it; Latin lines run 88-111 characters (WCAG 1.4.8: at most 80); a long
+Japanese source with readings made the popup 1012 px tall on a 1080 px screen, over the selection,
+with 156 px of the source hidden and no scrollbar.
+
+**Options considered**:
+1. **A - patch the estimator** (the minimum width from the real bar, the constants corrected, a
+   scrollbar) - Pros: small. Cons: the bar still holds every popup at 735 px or more, lines stay
+   long, and the next widget change drifts again.
+2. **B - measure the real layout, size for reading** - Pros: exact on every machine, font and DPI;
+   a readable line length; a height cap with a scrollbar; the translation first; never over the
+   cursor. Cons: a two-step show; reopens "measure the built widget", rejected in Decision 8
+   (Phase 1 addendum) and Decision 10 (option 4).
+3. **C - lay the popup out again** - a header with an always-visible close button, a compact action
+   bar, a collapsible original block, optionally resizable. Pros: lets a short result be small.
+   Cons: changes a familiar look; supersedes Decision 3.
+4. **B + C.**
+
+**Resolution**: **B + C**, chosen by the user on 2026-10-19 ("do B + C"). Why the earlier
+rejection of measuring no longer holds - each premise measured the same day on a private desktop:
+- *"The window must be sized before the widget exists"* - still true of a **withdrawn** window:
+  Tk does not lay out the children of an unmapped Toplevel (the box stays 1 px wide; `count
+  -ypixels` gave 10180 px for a paragraph needing 160). But a window mapped at `-alpha 0` is laid
+  out normally, and Tk 8.6.15's `text sync -command` (TIP 438) signals when the line heights are
+  current. Requested sizes (`winfo_reqwidth/height`) are known even before mapping, so the width is
+  decided first and only the heights wait.
+- *"It would flash at the wrong position"* - it is transparent until it has been measured and
+  placed.
+- *"Rendering off-screen doubles the construction cost"* - nothing is built twice. The measuring
+  step costs 2-8 ms on 11 of the 13 cases, 17 ms on a Japanese paragraph with readings, 114 ms at
+  the 3000-character annotation cap (whose `show()` already takes 278 ms).
+- The alternative, a pure word-wrap model, matched Tk on 61 of 65 (width, text) pairs - close, not
+  exact.
+
+Rejected: **A** alone - it treats the symptoms and keeps the 735 px floor. **Decision 3** (one wide
+bar) is superseded; the bar's new style is the user's choice (TODO.md Q1).
+
+**References**: TODO.md (§4 findings, §5 design, phases P0-P5); `src/ui/quick_translate.py`;
+[WCAG 2.2 Understanding 1.4.8](https://www.w3.org/WAI/WCAG22/Understanding/visual-presentation);
+[Tk TIP 438](https://core.tcl-lang.org/tips/doc/trunk/tip/438.md); Decisions 3, 8, 10, 32.
+
+---
+
 ### Decision 33 - UniDic is a download in Settings -> Dictionary, not part of the EXE
 
 **Date**: 2026-10-16
@@ -1025,7 +1078,8 @@ values were measured; none produces a shared baseline.
    kind for plain rows that share a line with ruby, and the tag must be re-applied after each
    insertion since a Tk tag does not grow into text appended after its range.
 4. **Measure the built widget instead of modelling it** — Pros: exact. Cons: the popup sizes its
-   `overrideredirect` Toplevel before the widget exists; the model is not optional.
+   `overrideredirect` Toplevel before the widget exists; the model is not optional. *(Revisited in
+   Decision 34, 2026-10-19: mapped at alpha 0, the popup can be measured after layout.)*
 
 **Resolution**: option 3, plus the `<<Copy>>` override (`get_plain()` over the selection, bases
 only — 日本語, not 日本語(にほんご)), plus the Word look the user chose: the ruby pair takes the
@@ -1136,7 +1190,9 @@ charged once per *logical* line, not per wrapped row). Predictions match
 `Text.count(..., 'ypixels')` exactly on every case measured, which is what exposed the
 per-logical-line spacing rule — a per-display-row model over-estimated by 4 px per wrapped row.
 Rejected alternative: render off-screen and measure, which doubles the frame construction cost
-on the UI thread for content that is already capped at `MAX_ANNOTATE_CHARS`.
+on the UI thread for content that is already capped at `MAX_ANNOTATE_CHARS`. *(Revisited for the
+quick-translate popup in Decision 34, 2026-10-19: built once at alpha 0 and measured after
+layout - nothing is built twice and nothing flashes.)*
 
 **Phase 4 addendum — how the Reading pane learns the text changed.** The pane could have been
 refreshed from each site that writes to the input box (the plan named
@@ -1422,7 +1478,8 @@ asks should be excluded from history entirely.
 ### Decision 3 — Quick Translate button bar: single wide row
 
 **Date**: 2026-06-29
-**Status**: RESOLVED
+**Status**: SUPERSEDED by Decision 34 (2026-10-19) - the bar grew to need 735 px, so at 670 px
+the close button is not drawn on any short result
 
 **Problem**: R1 + R2 add two buttons (Re-translate, Custom Prompt) to an already 5-element
 bar, making 7 actions + close — crowded.

@@ -45,7 +45,8 @@ the measurements used up the translation quota. Archived in `ROADMAP_DONE.md` ("
 
 | Item | Status | Notes |
 |------|--------|-------|
-| Cut 1.9.21 | 🔨 In progress | Chosen by the user on 2026-10-16: `VERSION` bumped, the branch merged into `main` and pushed (CI green), and built by hand as `dist\CrossTrans_v1.9.21.exe` (`build_exe.bat` deletes `dist\` first, released EXEs included). Still to do: the user's manual checks on that EXE (the user, 2026-10-19: test first, then release), then tag, write release notes. The H1 work is on `main` and tested; the language-identity work is on its branch - merge it first if it ships in 1.9.21 rather than 1.9.22 (the user's call) |
+| Quick-translate popup: sized by measuring, laid out for reading (B + C) | 🔨 In progress | Chosen by the user on 2026-10-19, every TODO.md §3 question as recommended; **ships in 1.9.21**. Branch `feature/popup-sizing`. Plan in `TODO.md` - findings measured on 13 cases, design, phases P0-P5 - and Decision 34. P1 fixes a visible bug: on every short result the close button is not drawn (the bar needs 735 px, the popup is 670) |
+| Cut 1.9.21 | 🔨 In progress | Chosen by the user on 2026-10-16: `VERSION` bumped, the branch merged into `main` and pushed (CI green), and built by hand as `dist\CrossTrans_v1.9.21.exe` (`build_exe.bat` deletes `dist\` first, released EXEs included). Still to do: the quick-translate popup work above lands first (the user, 2026-10-19: everything in that session goes into 1.9.21), then a rebuild, the user's manual checks on the new EXE (test first, then release), then tag, write release notes. The H1 work is on `main` and tested; the language-identity work is on its branch - merge it first if it ships in 1.9.21 rather than 1.9.22 (the user's call) |
 
 ---
 
