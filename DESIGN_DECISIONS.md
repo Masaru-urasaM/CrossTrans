@@ -16,7 +16,7 @@ recommended), the user's choices on 2026-10-19; ships in 1.9.21
 constants had drifted from the widgets. Measured on 13 cases (TODO.md §4): the action bar needs
 735 px, so on every short result the close button is not drawn, and Esc cannot close a popup that
 never has the focus; one word sits in a 670×161 box of which the text covers 1%; every text has a
-~28 px blank band under it; Latin lines run 88-111 characters (WCAG 1.4.8: at most 80); a long
+~28 px blank band under it; Latin lines run 99-111 characters (WCAG 1.4.8: at most 80); a long
 Japanese source with readings made the popup 1012 px tall on a 1080 px screen, over the selection,
 with 156 px of the source hidden and no scrollbar.
 

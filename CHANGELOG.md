@@ -24,6 +24,35 @@ real EXE the bootloader's pywin32 hook sets up those DLLs first.) Not done here:
 itself, and a real run takes the user's hotkeys and spends an API call. The manual checks are the
 user's (the user, 2026-10-19: test first, then release).
 
+### Phase P0 — The quick-translate popup, measured: a corpus and a gallery tool (2026-10-19)
+
+The user asked whether the quick-translate box could size itself better - "an interface much easier
+to read and to operate". Measured on 13 cases, then the user chose **B + C** (Decision 34; plan in
+`TODO.md`): measure the real layout before showing, size for reading, and lay the popup out again -
+every open question as recommended, all of it for 1.9.21. P0 is the measuring, no production code.
+
+**Added**
+- `tests/popup_cases.py` - the corpus: 13 cases A-M (one word up to a long Japanese source with
+  readings) and 4 states (a grammar fix, two replace previews, Custom Prompt), with `show_case()`
+  to put one up the way the app does - no API call. No Vietnamese (project rule); French stands in.
+- `tools/popup_gallery.py --label NAME` - renders every case on the private desktop into
+  `logs/popup_gallery/NAME/*.png` (`PrintWindow` works off-screen) and `NAME.json`: size and
+  position, each box's given against needed height, characters per line, the close button,
+  clipped controls, whether it covers the cursor. Refuses to run without the private desktop;
+  `APPDATA` points at a scratch folder; exits 1 if anything was blocked or a window reached the
+  user's desktop. Its first run is the `before` gallery.
+- `tests/test_popup_gallery_tool.py` (22): the refusal, the scratch settings, the metrics on stub
+  widgets, the corpus (no Vietnamese, the error case is an error, Japanese sources carry kana), and
+  the tool's metrics on two real popups.
+
+**Found while building it** (TODO.md §4)
+- "Get Free API Key" is cut at every popup width: a 16-character label in a `width=14` button (S2)
+  - not the popup's edge, as the first screenshots had been read.
+- Characters per line are measured per paragraph now: the first count divided by all display lines,
+  the blank ones between paragraphs included (D read 88; it is 99).
+
+**Tests**: 1525 -> 1547 (+22). Full suite 1546 passed, 1 skipped; `check_test_counts` OK.
+
 ### Worker deploy — D11's defaults reach users (2026-10-19)
 
 The user, on the Worker deploy: "do it now". Deployed with the user's own `wrangler login`

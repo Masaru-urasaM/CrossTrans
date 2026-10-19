@@ -5,8 +5,9 @@
 > same day, and **all of this work ships in 1.9.21** - the release waits for it. Decision 34
 > records the choice.
 >
-> **Next step:** P0, then P1 (approved); each later phase presented before it starts, through the
-> CLAUDE.md Core Workflow: present → approve → plan → code → verify → bookkeeping (§11).
+> **P0 ✅ done 2026-10-19**: the corpus, the gallery tool and its `before` run; suite 1525 → 1547.
+> **Next:** P1-P4 in one pass - the user, 2026-10-19: "no need to test after every small step;
+> do it all from start to end, then test once".
 
 ## Contents
 
@@ -119,19 +120,19 @@ proposed.
 desktop (Decision 32), fixed texts (no API call), the cursor at (960, 360). Screenshots taken with
 `PrintWindow` (they work off-screen - see the Appendix). The cases are in the Appendix.
 
-| Case | Popup | Translation box: given / needed px | Blank | Hidden | Lines | Chars per line | × shown |
+| Case | Popup | Translation box: given / needed px | Blank | Hidden | Lines | Chars per line (worst paragraph) | × shown |
 |------|-------|------------------------------------|------:|-------:|------:|---------------:|:-------:|
 | A one word ("Bonjour") | 670×161 | 48 / 20 | 28 | 0 | 1 | 7 | **no** |
 | B one sentence | 670×161 | 48 / 20 | 28 | 0 | 1 | 83 | **no** |
 | C paragraph (French, 520 chars) | 800×261 | 148 / 120 | 28 | 0 | 6 | **99** | yes |
-| D four paragraphs | 800×681 | 568 / 540 | 28 | 0 | 27 | **88** | yes |
+| D four paragraphs | 800×681 | 568 / 540 | 28 | 0 | 27 | **99** | yes |
 | E Japanese sentence + readings | 670×220 | 22 / 20; original 56 / 42 | 2; 14 | 0 | 1 | 27 | **no** |
 | F Japanese paragraph + readings | 800×328 | 74 / 60; original 112 / 110 | 14; 2 | 0 | 3 | **111** | yes |
-| G long Japanese + readings | **800×1012** | 366 / 360; original 504 / 660 | 6 | **156** (original) | 18 | **103** | yes |
+| G long Japanese + readings | **800×1012** | 366 / 360; original 504 / 660 | 6 | **156** (original) | 18 | **111** | yes |
 | H English → Japanese (readings in the box) | 752×200 | 87 / 55 | 32 | 0 | 2 | 26 | yes |
-| I 10-line list | 670×341 | 228 / 200 | 28 | 0 | 10 | 10 | **no** |
+| I 10-line list | 670×341 | 228 / 200 | 28 | 0 | 10 | 18 | **no** |
 | J long URL | 800×181 | 68 / 60 | 8 | 0 | 3 | 46 | yes |
-| K error | 670×180 | 97 / 60 | 37 | 0 | 3 | 45 | yes |
+| K error | 670×180 | 97 / 60 | 37 | 0 | 3 | 67 | yes |
 | L kanji term, trial line + chooser row | 670×232 | 46 / 20 | 26 | 0 | 1 | 3 | **no** |
 | M English → Chinese paragraph | 800×201 | 88 / 60 | 28 | 0 | 3 | **49** (CJK) | yes |
 
@@ -140,9 +141,15 @@ desktop (Decision 32), fixed texts (no API call), the cursor at (960, 360). Scre
 The action bar - Copy, Replace, ⚙, Re-translate, Dictionary, Open Translator, Custom Prompt, ✕ -
 needs **735 px**; `MIN_WIDTH` is **670** (Decision 3, set when the bar had fewer buttons). The ✕ is
 packed last, so it is the one squeezed out: cases A, B, E, I, L - every result shorter than a
-line. "Custom Prompt" and the trial line's "Get Free API Key" are clipped at the edge too.
+line. "Custom Prompt", next to it, is clipped at the edge.
 
-### S2 - With the ✕ gone, a short result is hard to close
+### S2 - "Get Free API Key" is cut at every width
+
+The trial line's link is a `width=14` button holding a 16-character label: Tk gives it 14
+characters, whatever the popup's width (case L). Found by the gallery tool's check, after the
+first screenshots had been read as the popup's edge cutting it.
+
+### S2b - With the ✕ gone, a short result is hard to close
 
 Copy does not close the popup (`app._on_quick_translate_copy` copies and shows a toast). Esc never
 reaches it: the popup is `WS_EX_NOACTIVATE` and never has the keyboard focus. What is left:
@@ -161,7 +168,8 @@ popup for one word (A: 52 px of a 628 px line), **0.3%** for a kanji term with t
 
 ### S5 - Lines too long to read comfortably
 
-At the 800 px maximum, Latin text runs **88-111 characters per line** (C 99, D 88, F 111, G 103).
+At the 800 px maximum, Latin text runs **99-111 characters per line** (C 99, D 99, F 111, G 111),
+and a sentence that does not wrap is set as one 83-character line (B).
 WCAG 1.4.8 asks for at most 80 (40 for CJK); typography's long-standing range is 45-75, 66 ideal
 (Bringhurst, *The Elements of Typographic Style*, 2.1.2). English → Chinese runs 49 CJK
 characters per line.
@@ -315,7 +323,7 @@ dictionary result window (separate; keeps `calculate_size()`).
 Every phase: tests first where a bug is reproduced; the full suite after; CHANGELOG, ROADMAP and
 memory in the same commit (§11); a step-by-step manual check for the user.
 
-### P0 - Baseline, the gallery tool, the bar prototypes  *(no production code)*
+### P0 - Baseline, the gallery tool, the bar prototypes  *(no production code)*  ✅ Done (2026-10-19)
 
 - `tests/popup_cases.py`: the corpus (A-M, §Appendix) plus the states - grammar fix, error,
   replace preview, Custom Prompt - shared by the tool and the tests. Not a test module.
@@ -333,9 +341,12 @@ memory in the same commit (§11); a step-by-step manual check for the user.
 ### P1 - The close button always visible  *(S1, S2; DoD1)*
 
 - In today's layout: the minimum width comes from the bar's and the trial line's requested width
-  (`update_idletasks()` + `winfo_reqwidth()` before the geometry is set, §S9) instead of 670.
+  (read off the widgets before the geometry is set, §S9) instead of 670.
+- The trial line's "Get Free API Key" button loses its `width=14`, so it is as wide as its label
+  (S2).
 - **Tests first** (they fail today on A, B, E, I, L): `test_close_button_is_inside_the_popup` for
-  every case and state; `test_the_trial_line_is_not_clipped`.
+  every case and state; no control clipped (`popup_gallery.clipped_controls`), which also fails
+  on L's link.
 - Ships on its own (Q8): P3 moves the ✕ to the header later, but users get the fix now.
 - **Manual check:** select one word, translate, see ✕ and click it; in trial mode, read the whole
   "Get Free API Key".
@@ -480,8 +491,11 @@ first - a second instance only brings the first one forward.
   mapping). All run under `tests/quiet_session.py` on a private desktop, with `APPDATA` pointed at
   a scratch folder - nothing on the screen, no network, no API call, the user's settings untouched.
 - **Metrics:** "given" = the box's height less its border, highlight and padding; "needed" =
-  `count -update -ypixels 1.0 end`; "chars per line" = characters ÷ display lines; "text covers" =
-  the widest line × the shown text height ÷ the popup's area.
+  `count -update -ypixels 1.0 end`; "chars per line" = each paragraph's characters over the
+  display lines Tk wrapped it into (an unwrapped line counts whole), the largest of them - first
+  measured as all characters over all display lines, which counted the blank lines between
+  paragraphs (D read 88); "text covers" = the widest line × the shown text height ÷ the popup's
+  area. `tools/popup_gallery.py` computes all of them (P0).
 - **Cases** (credit line "gemini-2.5-flash (Google)" on all but K):
   A `Hello` → `Bonjour`; B one English sentence → French; C an English paragraph on machine
   translation → French (520 characters); D C four times; E 私は毎日日本語を勉強しています。 →
