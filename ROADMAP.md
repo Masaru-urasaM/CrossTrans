@@ -45,8 +45,7 @@ the measurements used up the translation quota. Archived in `ROADMAP_DONE.md` ("
 
 | Item | Status | Notes |
 |------|--------|-------|
-| Quick-translate popup: sized by measuring, laid out for reading (B + C) | 🔨 In progress | Chosen by the user on 2026-10-19, every TODO.md §3 question as recommended; **ships in 1.9.21**. Branch `feature/popup-sizing`. Plan in `TODO.md` - findings measured on 13 cases, design, phases P0-P5 - and Decision 34. P1 fixes a visible bug: on every short result the close button is not drawn (the bar needs 735 px, the popup is 670) |
-| Cut 1.9.21 | 🔨 In progress | Chosen by the user on 2026-10-16: `VERSION` bumped, the branch merged into `main` and pushed (CI green), and built by hand as `dist\CrossTrans_v1.9.21.exe` (`build_exe.bat` deletes `dist\` first, released EXEs included). Still to do: the quick-translate popup work above lands first (the user, 2026-10-19: everything in that session goes into 1.9.21), then a rebuild, the user's manual checks on the new EXE (test first, then release), then tag, write release notes. The H1 work is on `main` and tested; the language-identity work is on its branch - merge it first if it ships in 1.9.21 rather than 1.9.22 (the user's call) |
+| Cut 1.9.21 | 🔨 In progress | Chosen by the user on 2026-10-16: `VERSION` bumped, the branch merged into `main` and pushed (CI green), and built by hand as `dist\CrossTrans_v1.9.21.exe` (`build_exe.bat` deletes `dist\` first, released EXEs included). The quick-translate popup work (ROADMAP_DONE "P", Decision 34) is done on branch `feature/popup-sizing` - the user, 2026-10-19: everything in that session goes into 1.9.21. Still to do: merge it, rebuild, the user's manual checks on the new EXE (test first, then release), then tag, write release notes. The H1 work is on `main` and tested; the language-identity work is on its branch - merge it first if it ships in 1.9.21 rather than 1.9.22 (the user's call) |
 
 ---
 
@@ -76,4 +75,7 @@ path (**closed 2026-10-16**, K2). The language-identity work then added **D17** 
 carries its own trigger condition. **D19** (2026-10-16, K1): pykakasi - the one reading provider
 every install has - reads a word differently from fugashi in 30% of real sentences (**closed
 2026-10-16**, K14: the user chose a download over bundling - the Japanese pack in Settings ->
-Dictionary now applies to furigana at once, and the tab says which reader is in use).
+Dictionary now applies to furigana at once, and the tab says which reader is in use). **D20** (2026-10-19, found in the popup work): the
+quick-translate popup's `WS_EX_NOACTIVATE` has never been in effect - set before Tk creates the
+window that would carry it; left for the user, since making it effective would send Ctrl+C on a
+selection in the popup to the user's app.

@@ -24,7 +24,7 @@ from src.core.history import HistoryManager
 from src.core.lang_id import CHINESE_SIMPLIFIED, CHINESE_TRADITIONAL, JAPANESE
 from src.core.source_marker import ROW_ASK, ROW_CHANGE, stated_clause
 from src.core.translation import TranslationService
-from src.ui.quick_translate import SOURCE_CHOOSER_PX, QuickTranslateManager
+from src.ui.quick_translate import QuickTranslateManager
 
 HAS_PROVIDER = pytest.mark.skipif(not F.is_available(),
                                   reason="requires a reading provider (fugashi or pykakasi)")
@@ -190,7 +190,7 @@ def manager(tk_root):
 
 
 def popup_height(mgr, tk_root):
-    tk_root.update_idletasks()
+    tk_root.update()          # the popup takes its height once laid out (Decision 34)
     return int(mgr.popup.geometry().split('+')[0].split('x')[1])
 
 
@@ -245,7 +245,9 @@ class TestPopup:
         manager.show("Teacher", "English", None, "Sensei")
         without = popup_height(manager, tk_root)
         manager.show("Teacher", "English", None, "先生")
-        assert popup_height(manager, tk_root) == without + SOURCE_CHOOSER_PX
+        with_row = popup_height(manager, tk_root)
+        row = manager.popup_source_chooser.winfo_reqheight() + 8     # with its pady above
+        assert with_row == without + row
 
     def test_the_translation_is_not_clipped_by_the_row(self, manager, tk_root):
         manager.show("A translation long enough to wrap onto a second row of the box. " * 3,

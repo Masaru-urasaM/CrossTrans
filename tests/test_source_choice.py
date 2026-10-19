@@ -25,7 +25,7 @@ from src.core.lang_id import CHINESE_SIMPLIFIED, CHINESE_TRADITIONAL, JAPANESE
 from src.core.source_marker import (ROW_ASK, ROW_CHANGE, language_label, other_language,
                                     source_row)
 from src.core.translation import TranslationService
-from src.ui.quick_translate import SOURCE_CHOOSER_PX, QuickTranslateManager
+from src.ui.quick_translate import QuickTranslateManager
 
 
 class HistoryConfig:
@@ -270,12 +270,14 @@ class TestPopupChangeRow:
 
     def test_the_row_is_in_the_height_budget(self, popup, tk_root):
         def height():
-            tk_root.update_idletasks()
+            tk_root.update()      # the popup takes its height once laid out (Decision 34)
             return int(popup.popup.geometry().split('+')[0].split('x')[1])
         popup.show("Car", "English", None, "Kisha")
         without = height()
         popup.show("Car", "English", None, "汽車", source_lang=CHINESE_SIMPLIFIED)
-        assert height() == without + SOURCE_CHOOSER_PX
+        with_row = height()
+        row = popup.popup_source_chooser.winfo_reqheight() + 8      # with its pady above
+        assert with_row == without + row
 
     def test_a_sentence_a_model_placed_gets_no_row(self, popup):
         popup.show("This is my book.", "English", None, "這是我的書。",

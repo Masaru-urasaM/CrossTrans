@@ -61,6 +61,23 @@ FURIGANA_DEFAULT_MAX_ROWS = 12       # rows a RubyText grows to before scrolling
 FURIGANA_READING_PANE_DEBOUNCE_MS = 350  # keystroke burst absorbed before annotating
 FURIGANA_READING_PANE_MAX_ROWS = 4       # taller than this and the pane scrolls
 
+# ============== QUICK-TRANSLATE POPUP ==============
+# How the quick-translate popup sizes itself (Decision 34, src/ui/popup_layout.py).
+# Policy only: how tall or wide a widget is gets measured on the widget, never
+# written down here - constants for that drifted once (the hidden close button).
+POPUP_READING_CHARS_LATIN = 70      # characters per line, Latin text (WCAG 1.4.8: at most 80)
+POPUP_READING_CHARS_CJK = 36        # characters per line, CJK text (WCAG 1.4.8: at most 40)
+POPUP_HEIGHT_CAP_SHARE = 0.60       # of the monitor's work area; beyond it a box scrolls
+POPUP_MAX_WIDTH_SHARE = 0.90        # of the monitor's work area
+POPUP_ORIGINAL_SHARE = 0.40         # of the text room the original may keep when both overflow
+POPUP_MIN_BOX_ROWS = 3              # a box squeezed by the cap still shows this many rows
+POPUP_COLLAPSED_ORIGINAL_ROWS = 3   # the original block (with readings) when collapsed
+POPUP_ANCHOR_OFFSET = (15, 20)      # from the cursor to the popup's nearest corner
+POPUP_SCREEN_MARGIN = 10            # kept clear along the work area's edges
+POPUP_TOOLTIP_DELAY_MS = 500        # before an icon button names itself
+POPUP_LAYOUT_WATCHDOG_MS = 300      # the popup is shown by then even if measuring never ran
+POPUP_REVEAL_DELAY_MS = 30          # after the final size, for Tk to redraw before it is seen
+
 # ============== AVAILABLE LANGUAGES ==============
 # Format: (English name, ISO code, Native name)
 LANGUAGES = [

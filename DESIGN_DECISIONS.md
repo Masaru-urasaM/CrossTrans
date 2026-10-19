@@ -14,11 +14,11 @@ recommended), the user's choices on 2026-10-19; ships in 1.9.21
 **Problem**: The popup was sized before it existed, from constants - `MIN_WIDTH` 670,
 `VERTICAL_PADDING` 100, a "+1 line" buffer, `ceil(width / available)` for word wrap - and the
 constants had drifted from the widgets. Measured on 13 cases (TODO.md §4): the action bar needs
-735 px, so on every short result the close button is not drawn, and Esc cannot close a popup that
-never has the focus; one word sits in a 670×161 box of which the text covers 1%; every text has a
+735 px, so on every short result the close button is not drawn - and Copy does not close the
+popup; one word sits in a 670×161 box of which the text covers 1%; every text has a
 ~28 px blank band under it; Latin lines run 99-111 characters (WCAG 1.4.8: at most 80); a long
-Japanese source with readings made the popup 1012 px tall on a 1080 px screen, over the selection,
-with 156 px of the source hidden and no scrollbar.
+Japanese source with readings made the popup 1012 px tall on a 1080 px screen, across the cursor's
+line, with 156 px of the source hidden and no scrollbar.
 
 **Options considered**:
 1. **A - patch the estimator** (the minimum width from the real bar, the constants corrected, a
@@ -51,6 +51,35 @@ rejection of measuring no longer holds - each premise measured the same day on a
 
 Rejected: **A** alone - it treats the symptoms and keeps the 735 px floor. **Decision 3** (one wide
 bar) is superseded; the bar's new style is the user's choice (TODO.md Q1).
+
+**Implemented, 2026-10-19** (P1-P4 in one pass, at the user's request; branch
+`feature/popup-sizing`). `src/ui/popup_layout.py` makes the decisions as pure numbers;
+`QuickTranslateManager` measures and applies them. The same 17 popups before and after
+(`tools/popup_gallery.py` on the TODO.md corpus):
+
+| | Before | After |
+|---|---|---|
+| Close button drawn | 12 of 17 | 17 of 17 |
+| Blank band under the text | 2-37 px (28 typical) | 0 px in every case |
+| Characters per line, Latin, worst paragraph | 99-111 | 66 |
+| One word | 670×161 | 395×136 |
+| Kanji term with the trial line and the chooser row | 670×232, "Get Free API Key" cut | 395×209, nothing cut |
+| Long Japanese with readings | 800×1012 across the cursor's line, 156 px hidden, no scrollbar | 521×619 (the 60% cap), below the cursor's line, scrollbars |
+
+Three lessons from the first full run, each now in the code and in a test:
+- **The provisional height is the cap, not a guess.** A guess shorter than the chrome had the
+  packer squeeze the translation box out altogether; it never got its width, so step 2 never came
+  (case L).
+- **Visible only after the redraw.** Turned visible together with the final geometry, the first
+  composed frame still held the drawing at the provisional size, cut to the new one - the
+  gallery's screenshots caught it. The popup turns visible `POPUP_REVEAL_DELAY_MS` (30) later.
+- **`WS_EX_NOACTIVATE` must be set once mapped** - Tk creates the window that carries it then. The
+  popup's own has therefore never been in effect: DEFERRED D20, left as it is for the user to
+  decide.
+
+"Over the selection" (TODO.md S6) overstated it: the old popups overlapped the cursor's *line*, to
+the right of the cursor, not the cursor itself. The new placement keeps the popup wholly above or
+below that line.
 
 **References**: TODO.md (§4 findings, §5 design, phases P0-P5); `src/ui/quick_translate.py`;
 [WCAG 2.2 Understanding 1.4.8](https://www.w3.org/WAI/WCAG22/Understanding/visual-presentation);

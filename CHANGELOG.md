@@ -24,6 +24,65 @@ real EXE the bootloader's pywin32 hook sets up those DLLs first.) Not done here:
 itself, and a real run takes the user's hotkeys and spends an API call. The manual checks are the
 user's (the user, 2026-10-19: test first, then release).
 
+### Phases P1-P4 — The quick-translate popup: sized by measuring, laid out for reading (2026-10-19)
+
+B + C (Decision 34), built in one pass and tested once at the end, at the user's request. Same 17
+popups before and after (`tools/popup_gallery.py`): the close button drawn on 17 of 17 (was 12);
+no blank band under any text (was 28 px typical); Latin lines at 66 characters (were 99-111); one
+word in 395×136 (was 670×161); a long Japanese source with readings 521×619 below the cursor's
+line, with scrollbars (was 800×1012 across it, 156 px hidden).
+
+**Added**
+- `src/ui/popup_layout.py` - the decisions as pure numbers: reading width (70 Latin / 36 CJK
+  characters a line, WCAG 1.4.8: at most 80 / 40), popup width, height cap (60% of the work area),
+  allocation between the boxes (the translation first, the original at most 40%), placement beside
+  the cursor (never over its line while a side has room), the credit's ellipsis.
+- `src/constants.py` - the `POPUP_` policy values; widget sizes are measured, never written down.
+- `config.py` - `get/set_quick_popup_size()`: the size the user dragged the popup to.
+- `tests/test_popup_layout.py` (58), `tests/test_popup_geometry.py` (104), `tests/test_config.py`
+  (+3).
+
+**Changed** (`src/ui/quick_translate.py`)
+- **P1**: the minimum width is read off the rows that must fit whole (`packed_row_width()`: the
+  requested widths and pack paddings - known before the popup is shown); the close button is never
+  squeezed out again. "Get Free API Key" lost its `width=14`.
+- **P2**: the two-step show - built at alpha 0 and placed at the height cap; when the translation
+  box is laid out at its width, each box is measured (`count -update -ypixels`) and given exactly
+  that up to the cap, the popup placed beside the cursor and shown 30 ms later, once redrawn. Each
+  box sits in a holder with a height in pixels (two boxes no longer split leftover height); a
+  scrollbar only beside a capped box, a spacer as wide beside the other. The replace preview, Custom
+  Prompt, the error and grammar popups, the chooser row and the trial line go through it; the
+  loading indicator is placed by the same rules.
+- **P3**: a header with the credit (cut with an ellipsis when long) and the close button, in every
+  state - the bars no longer carry one. Copy and Replace stay words; Re-translate, Dictionary, Open
+  Translator and Custom Prompt are icons (Segoe Fluent Icons, else Segoe MDL2 Assets) with a
+  tooltip, `action_name` naming each; without an icon font the words come back. The original block
+  is named ("Original (Japanese)") and collapsed to three rows, "Show all" opening it.
+- **P4**: a resize grip, bottom right; the size is remembered and becomes the next popup's reading
+  width and height cap (short results stay small); a double-click returns to automatic sizing.
+- Removed with the estimating: `ATTRIBUTION_PX`, `SOURCE_CHOOSER_PX`, `FURIGANA_SEPARATOR_PX`,
+  `_calculate_position()`, the provisional estimate. `calculate_size()` stays for the dictionary
+  result window.
+
+**Fixed during implementation** (the first full run: 5 of 1711 failed)
+- The trial line + chooser row case never got measured: a provisional height shorter than the
+  chrome let the packer squeeze the translation box out, so it never got its width. The
+  provisional height is now the cap - nobody sees it.
+- Shown in the same breath as its final geometry, the first frame still held the drawing at the
+  provisional size, cut to the new one (the gallery's screenshots caught it): the popup now turns
+  visible after the redraw.
+- The tooltips' `WS_EX_NOACTIVATE` was lost: Tk creates the window that carries it only when it
+  maps it. Set on `<Map>` now. **The popup's own has never been in effect** (measured on the old
+  code too) - DEFERRED D20, left for the user: making it effective would send Ctrl+C on a selection
+  in the popup to the user's app. CLAUDE.md, which said the popup never takes the focus, corrected.
+- Two of the rewritten height tests read a row's height before Tk had laid it out.
+
+**Tests**: 1547 -> 1712 (+165); full suite 1711 passed, 1 skipped, `check_test_counts` OK; 19
+mutations killed (14 in `popup_layout.py`, 5 in `quick_translate.py`). Rewritten, never deleted, where they asserted a removed constant or
+the old bar: `test_attribution` (the note never costs the box a row), `test_popup_source_language`
+and `test_source_choice` (the row's measured height), `test_error_popup_actions` (icon buttons by
+`action_name`), `test_popup_ruby` (heights read after the layout).
+
 ### Phase P0 — The quick-translate popup, measured: a corpus and a gallery tool (2026-10-19)
 
 The user asked whether the quick-translate box could size itself better - "an interface much easier

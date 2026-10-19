@@ -26,7 +26,7 @@ from src.constants import TRIAL_MODEL
 from src.core.api_manager import AIAPIManager
 from src.core.history import HistoryManager
 from src.core.translation import TranslationService
-from src.ui.quick_translate import QuickTranslateManager, ATTRIBUTION_PX
+from src.ui.quick_translate import QuickTranslateManager
 
 
 class FakeConfig:
@@ -263,12 +263,17 @@ class TestTheNoteOnThePopup:
                         model_info="gemini-2.0-flash (Google)")
         assert "Fixed with gemini-2.0-flash (Google)" in label_texts(manager.popup)
 
-    def test_the_popup_grows_by_exactly_the_note(self, popup):
-        # The box below must not lose a row to make room for the note.
+    def test_the_note_never_costs_the_box_a_row(self, popup):
+        # The box below must not lose a row to make room for the note. Since Decision 34
+        # the note shares the header with the close button and every box is measured,
+        # so the box shows all of its text either way, and the note never makes the
+        # popup shorter.
         without = popup("Bonjour le monde")
         with_note = popup("Bonjour le monde", model_info="gemini-2.0-flash (Google)")
-        assert (with_note.popup.winfo_height() - without.popup.winfo_height()
-                == ATTRIBUTION_PX)
+        for manager in (without, with_note):
+            box = manager.popup_text
+            assert box.winfo_height() >= box.count('1.0', 'end', 'ypixels')[0]
+        assert with_note.popup.winfo_height() >= without.popup.winfo_height()
 
     def test_it_is_smaller_and_dimmer_than_the_translation(self, popup):
         manager = popup(model_info="gemini-2.0-flash (Google)")
