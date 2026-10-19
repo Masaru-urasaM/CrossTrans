@@ -77,6 +77,7 @@ POPUP_SCREEN_MARGIN = 10            # kept clear along the work area's edges
 POPUP_TOOLTIP_DELAY_MS = 500        # before an icon button names itself
 POPUP_LAYOUT_WATCHDOG_MS = 300      # the popup is shown by then even if measuring never ran
 POPUP_REVEAL_DELAY_MS = 30          # after the final size, for Tk to redraw before it is seen
+POPUP_GRIP_PREVIEW_MS = 150         # a grip drag paused this long lays the popup out at its size
 
 # ============== AVAILABLE LANGUAGES ==============
 # Format: (English name, ISO code, Native name)

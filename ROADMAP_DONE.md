@@ -22,6 +22,8 @@ the findings: `git show 57d739f:TODO.md`. Decision 34.
 | P2 | The two-step show (alpha 0, laid out, measured, placed, shown); boxes in holders with exact heights; scrollbars only when capped; the 60% cap; placement beside the cursor (`src/ui/popup_layout.py`); the loading indicator by the same rules | this entry | |
 | P3 | The header with the credit and the close button in every state; Copy and Replace as words, four icons with tooltips; the original named and collapsed to three rows | this entry | |
 | P4 | The resize grip; the size remembered (`config.get/set_quick_popup_size`); a double-click returns to automatic | this entry | 1711 |
+| Fix | "Show all" on a small screen (CI) | `51435a3` | 1714 |
+| Fix | The grip drags an outline; the popup follows when the drag pauses (the user found the drag laggy; Decision 35) | this entry | 1723 |
 
 | Same 17 popups | Before | After |
 |---|---|---|
@@ -53,8 +55,10 @@ running CrossTrans closed first (a second instance only brings the first one for
 8. An invalid key: the error popup with API Settings, Open Translator and the close button.
 9. The cursor at the bottom-right corner of the screen: the popup opens above and to the left.
 10. Hover each icon: its name appears; each icon does what its name says.
-11. Drag the grip at the bottom right: the popup resizes; the next popup uses that width and
-    height; a double-click on the grip returns to automatic sizing.
+11. Drag the grip at the bottom right: a blue outline follows the mouse smoothly, even on a long
+    text; hold still for a moment and the popup takes the outline's size; let go and it keeps it.
+    The next popup uses that width and height; a double-click on the grip returns to automatic
+    sizing.
 12. Translate into and from Vietnamese (not in the automated corpus): lines and heights look right
     with the diacritics.
 
