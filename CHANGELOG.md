@@ -37,6 +37,12 @@ was running the `_popup_` build. Both post-build checks pass (`kanwadict4.db`, 1
 the four glyph codecs), and its PYZ carries the new grip code (`_show_grip_outline`,
 `_grip_preview`, `POPUP_GRIP_PREVIEW_MS`; `_grip_pending` gone). Not started here.
 
+**Rebuilt again 2026-10-19 with the edges and the on-top fix** (from `f4781dc`):
+`dist\CrossTrans_v1.9.21_edges_2026-10-19.exe`, 66 057 472 bytes - its own name again, the user
+was running the `_grip_` build. Both post-build checks pass (`kanwadict4.db`, 1158 archive
+entries; the four glyph codecs), and its PYZ carries the new code (`_bind_edges`, `_end_front`,
+`popup_layout.edge_at` / `resize`, `POPUP_FRONT_MS`; no `_resize_handles`). Not started here.
+
 ### Fix — The popup hidden under its source app; resized from any edge, to any sensible size (2026-10-19)
 
 The user, testing the `_grip` build: after the hotkey the "Translating" box showed, then nothing.
