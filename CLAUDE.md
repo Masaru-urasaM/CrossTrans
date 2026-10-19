@@ -535,6 +535,17 @@ before reading the geometry: `update_idletasks()` alone does not lay out a newly
   so doing it per motion made a long text follow the mouse at ~5 frames a second; the outline
   costs ~2 ms. The popup is laid out when the drag pauses (`POPUP_GRIP_PREVIEW_MS`) and on
   release. Do not lay it out from `_grip_drag`.
+  **Every edge and corner resizes** (`_bind_edges`): the outer `RESIZE_EDGE_PX` of the main frame's
+  padding, read by `popup_layout.edge_at`; the rest of the padding still moves the popup. No edge
+  widgets - eight cost every popup ~11 ms to build. `popup_layout.resize` moves the dragged sides,
+  down to `POPUP_USER_MIN_ROWS` a box and the widest row across, out to the work area **under the
+  pointer** (not `_layout['work']`, the monitor it opened on - it may have been dragged off it).
+- **On top from when it appears**: topmost from creation until `POPUP_FRONT_MS` after `_reveal`,
+  then free to go behind. A timer counted from creation ran out while the popup was still
+  invisible, and the source app rose over it (under a maximized VS Code, 2026-10-19).
+- **Timers go on `self.root`, not the popup** (watchdog, reveal): destroying a widget deletes the
+  commands of its timers but not the timers, which then fire into whatever command reuses the name
+  (Tkinter names commands `id()` + function name) - a resize handler was called with no event.
 - **Glyphs are `chr()` code points** (`CLOSE_GLYPH`, `GEAR_GLYPH`, `ICON_GLYPHS`): Edit cannot match
   backslash-u escapes, and Write turns them into the characters.
 - **Never** size the popup from constants - `MIN_WIDTH = 670` drifted to a hidden close button when

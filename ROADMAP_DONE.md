@@ -23,7 +23,8 @@ the findings: `git show 57d739f:TODO.md`. Decision 34.
 | P3 | The header with the credit and the close button in every state; Copy and Replace as words, four icons with tooltips; the original named and collapsed to three rows | this entry | |
 | P4 | The resize grip; the size remembered (`config.get/set_quick_popup_size`); a double-click returns to automatic | this entry | 1711 |
 | Fix | "Show all" on a small screen (CI) | `51435a3` | 1714 |
-| Fix | The grip drags an outline; the popup follows when the drag pauses (the user found the drag laggy; Decision 35) | this entry | 1723 |
+| Fix | The grip drags an outline; the popup follows when the drag pauses (the user found the drag laggy; Decision 35) | `7a0a79d` | 1723 |
+| Fix | On top from when it appears (found under a maximized VS Code); every edge and corner resizes; one row a box at least, out to the screen under the pointer; the popup's timers on the root (Decision 35, "Then, the same day") | this entry | 1780 |
 
 | Same 17 popups | Before | After |
 |---|---|---|
@@ -58,9 +59,13 @@ running CrossTrans closed first (a second instance only brings the first one for
 11. Drag the grip at the bottom right: a blue outline follows the mouse smoothly, even on a long
     text; hold still for a moment and the popup takes the outline's size; let go and it keeps it.
     The next popup uses that width and height; a double-click on the grip returns to automatic
-    sizing.
+    sizing. Every edge and corner works the same way - the cursor changes over the outer few
+    pixels - and the rest of the border still moves the popup. It shrinks to a row of text, grows to
+    the screen's edge, and can be stretched onto a second monitor.
 12. Translate into and from Vietnamese (not in the automated corpus): lines and heights look right
     with the diacritics.
+13. With two monitors: select text in a maximized window (VS Code) on the second monitor and press
+    the hotkey - the popup shows above it, beside the cursor, every time.
 
 ---
 

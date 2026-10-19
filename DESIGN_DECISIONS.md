@@ -39,9 +39,38 @@ release, so the popup is never seen at neither size; a release at the size a pau
 out does not lay it out again. Measured with the real handlers: 1.5-2.1 ms a step, against
 14-191 ms. Rejected: A (still 121 ms on a long text), the layered-style change (no effect).
 
+**Then, the same day - every edge, any size, and a popup that went missing.** Testing the build,
+the user found the popup missing after the hotkey - inspected read-only in the running process, it
+was there, fully shown, beside the cursor on the second monitor, **under** a maximized VS Code and
+RustDesk - and asked for (2a) all four corners, not one, and (2b) to make it as small or large as
+they like "if the trade-off is small to very small; if it is big, drop it".
+- **Hidden popup (1a, the user's choice over "always on top")**: it was topmost for 100 ms from its
+  creation - written when a popup was visible from creation. Since Decision 34 it is invisible while
+  measured, the 100 ms could end first, and a window raised meanwhile stayed above it. Now topmost
+  from creation until `POPUP_FRONT_MS` (500) after it appears, then free to go behind as before.
+  Reproduced on the private desktop (a window raised mid-measuring ends above the popup with the old
+  timing, below it with the new); whether the user's VS Code rose for that reason is inferred.
+- **Edges (2a)**: options were eight invisible edge widgets, the main frame's own padding, or
+  Windows' resizing border (rejected: it redraws live - the lag again - and draws a frame). The
+  widgets were built first and measured: every popup's first layout went from 27 to 39 ms, and their
+  `lambda` bindings exposed the stale-timer hazard below. The padding it is: `edge_at` reads the
+  outer 6 px, corners 14 px along a side; no widgets, no cost.
+- **Size (2b)**, judged by the user's rule: down to **one row** a box (was three) - very small
+  trade-off, done; out to the edge of **the screen under the pointer**, any monitor, no margin -
+  very small, done (and it fixes a popup dragged onto another monitor snapping to its smallest
+  width on any resize: the bound was the monitor it opened on); **narrower than the widest row** -
+  the buttons, the close button among them, would be cut, or four kinds of row rebuilt to wrap:
+  big, dropped. A new popup still opens with three rows a box whatever height was remembered, and
+  a remembered height shorter than the next popup's chrome no longer squeezes its box out before it
+  is measured (the provisional height is at least the automatic cap - found by the new tests).
+- **Timers on the root**: destroying a widget deletes the commands of its timers but not the
+  timers; the watchdog and the reveal, set on the popup, fired after an early close into whatever
+  new command reused the name (`id()` + function name) - a resize handler called with no event.
+
 **References**: `src/ui/quick_translate.py` (`_grip_drag`, `_show_grip_outline`,
-`_grip_preview`, `_apply_user_size`); `tests/test_popup_geometry.py::TestGripDragsAnOutline`;
-Decision 34.
+`_grip_preview`, `_apply_user_size`, `_bind_edges`, `_reveal`, `_end_front`);
+`src/ui/popup_layout.py` (`edge_at`, `resize`); `tests/test_popup_geometry.py`
+(`TestGripDragsAnOutline`, `TestResizeFromEveryEdge`, `TestOnTopWhenItAppears`); Decision 34.
 
 ---
 
@@ -116,6 +145,9 @@ Three lessons from the first full run, each now in the code and in a test:
 - **`WS_EX_NOACTIVATE` must be set once mapped** - Tk creates the window that carries it then. The
   popup's own has therefore never been in effect: DEFERRED D20, left as it is for the user to
   decide.
+- **Anything timed from the popup's creation now runs while it is invisible** - found later by the
+  user: the 100 ms on top ran out before the popup appeared and it ended under the source app.
+  Timed from `_reveal` since (Decision 35, "Then, the same day").
 
 **Then CI** (1024×768): "Show all" gave the opened original the 40% share, which there was less
 than its three collapsed rows - the button changed nothing. Opened, the original now gets all the

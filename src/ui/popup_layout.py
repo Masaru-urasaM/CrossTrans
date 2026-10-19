@@ -208,6 +208,44 @@ def place(anchor: Tuple[int, int], width: int, height: int, work: WorkArea, *,
     return x, y, height
 
 
+EDGES = ('n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw')
+
+
+def edge_at(x: int, y: int, width: int, height: int, edge_px: int, corner_px: int) -> str:
+    """Which edge of a `width` x `height` popup the point (x, y) is on: one of EDGES, or
+    '' inside. Within `edge_px` of a side is that side; along a side, within `corner_px`
+    of a corner is the corner - a target easier to hit than the bare `edge_px` square."""
+    ns = 'n' if y < edge_px else 's' if y >= height - edge_px else ''
+    we = 'w' if x < edge_px else 'e' if x >= width - edge_px else ''
+    if ns and not we:
+        we = 'w' if x < corner_px else 'e' if x >= width - corner_px else ''
+    elif we and not ns:
+        ns = 'n' if y < corner_px else 's' if y >= height - corner_px else ''
+    return ns + we
+
+
+def resize(rect: Tuple[int, int, int, int], edge: str, dx: int, dy: int, *,
+           min_width: int, min_height: int, bounds: WorkArea) -> Tuple[int, int, int, int]:
+    """`rect` (x, y, width, height) dragged by `edge` - one of EDGES - by (dx, dy).
+
+    The dragged sides move and the opposite ones stay. A moving side stops at `bounds`,
+    the work area under the pointer - whichever monitor that is, so the popup can be
+    made as large as the screen, or reach across to the next one. The size never drops
+    below the minimum, which wins over `bounds`.
+    """
+    x, y, width, height = rect
+    left, top, right, bottom = x, y, x + width, y + height
+    if 'e' in edge:
+        right = max(min(right + dx, bounds.right), left + min_width)
+    if 'w' in edge:
+        left = min(max(left + dx, bounds.left), right - min_width)
+    if 's' in edge:
+        bottom = max(min(bottom + dy, bounds.bottom), top + min_height)
+    if 'n' in edge:
+        top = min(max(top + dy, bounds.top), bottom - min_height)
+    return left, top, right - left, bottom - top
+
+
 def covers(x: int, y: int, width: int, height: int, point: Tuple[int, int]) -> bool:
     """Whether the rectangle covers `point`."""
     return x <= point[0] < x + width and y <= point[1] < y + height
