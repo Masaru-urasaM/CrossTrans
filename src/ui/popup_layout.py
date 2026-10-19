@@ -146,16 +146,19 @@ def allocate(room: int, translation: int, original: int = 0, *, min_translation:
     block); `original_limit` is the collapsed block's height, when it is collapsed;
     `min_translation` / `min_original` the least a box squeezed by the cap keeps (its
     first rows). When both fit, both get what they need. Otherwise the original keeps
-    at most `original_share` of the room and the translation gets the rest - the
-    translation is what was asked for - and whatever the translation does not use goes
-    back to the original. The minimums win over `room` on a screen too small for them.
+    at most `original_share` of the room - never so much that the translation loses its
+    first rows - and the translation gets the rest: the translation is what was asked
+    for. Whatever the translation does not use goes back to the original. An original
+    the user opened ("Show all") is given `original_share=1.0`. The minimums win over
+    `room` on a screen too small for them.
     """
     wanted = original if original_limit is None else min(original, original_limit)
     if translation + wanted <= room:
         return Heights(translation, wanted, False, wanted < original)
     kept = 0
     if wanted:
-        kept = min(wanted, max(min(min_original, wanted), int(room * original_share)))
+        share = min(int(room * original_share), room - min(min_translation, translation))
+        kept = min(wanted, max(min(min_original, wanted), share))
     given = max(min(translation, room - kept), min(min_translation, translation))
     if kept < wanted and given + kept < room:
         kept = min(wanted, room - given)

@@ -1209,6 +1209,7 @@ class QuickTranslateManager:
         min_t = min(need_t, self._rows_px(self.popup_text, POPUP_MIN_BOX_ROWS) + text_insets)
         need_o = min_o = 0
         limit_o = None
+        original_share = popup_layout.ORIGINAL_SHARE
         if self.popup_furigana is not None:
             original_insets = self._insets(self.popup_furigana, 'y')
             need_o = self._content_px(self.popup_furigana) + original_insets
@@ -1218,6 +1219,11 @@ class QuickTranslateManager:
             self._show_original_toggle(collapsible)
             if collapsible and self._original_collapsed:
                 limit_o = min_o
+            elif collapsible:
+                # "Show all": all the room but the translation's first rows. The default
+                # share (40%) was smaller than the collapsed rows on a 1024x768 screen, so
+                # the button changed nothing (CI, 2026-10-19).
+                original_share = 1.0
             self.popup.update_idletasks()
         shown_o = need_o if limit_o is None else min(need_o, limit_o)
         chrome = (self._main_frame.winfo_reqheight() - self._text_holder.winfo_reqheight()
@@ -1247,7 +1253,8 @@ class QuickTranslateManager:
 
         room = height - chrome
         heights = popup_layout.allocate(room, need_t, need_o, min_translation=min_t,
-                                        min_original=min_o, original_limit=limit_o)
+                                        min_original=min_o, original_limit=limit_o,
+                                        original_share=original_share)
         if size is not None:
             # The user's size: the translation takes whatever the original leaves.
             translation = max(heights.translation, room - heights.original)

@@ -111,6 +111,16 @@ class TestAllocate:
                              original_limit=126)
         assert heights == L.Heights(100, 126, False, True)
 
+    def test_an_opened_original_takes_all_but_the_translations_first_rows(self):
+        heights = L.allocate(500, 600, 900, min_translation=60, min_original=126,
+                             original_share=1.0)
+        assert (heights.translation, heights.original) == (60, 440)
+
+    def test_the_share_never_eats_the_translations_first_rows(self):
+        heights = L.allocate(200, 600, 900, min_translation=60, min_original=40,
+                             original_share=1.0)
+        assert heights.translation == 60 and heights.translation + heights.original == 200
+
     def test_without_an_original_the_translation_takes_the_room(self):
         assert L.allocate(300, 900, min_translation=60) == L.Heights(300, 0, True, False)
 

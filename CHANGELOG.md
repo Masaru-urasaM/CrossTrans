@@ -30,6 +30,16 @@ user was running `CrossTrans_v1.9.21.exe` to test it. Both post-build checks pas
 1158 archive entries; the four glyph codecs) and `src.ui.popup_layout` is in its PYZ. Not started
 here, for the same reasons.
 
+### Fix — "Show all" changed nothing on a small screen (2026-10-19)
+
+CI (1024×768) failed `test_show_all_opens_it_within_the_cap`: opened, the original was given 40% of
+the room, which there was less than its three collapsed rows - the button did nothing visible (and
+on 1080p it added about a row and a half). "Show all" now gives the original all the room but the
+translation's first three rows (`popup_layout.allocate(..., original_share=1.0)`), and a share can
+never eat those rows.
+
+**Tests**: 1712 -> 1714 (+2 in `tests/test_popup_layout.py`).
+
 ### Phases P1-P4 — The quick-translate popup: sized by measuring, laid out for reading (2026-10-19)
 
 B + C (Decision 34), built in one pass and tested once at the end, at the user's request. Same 17

@@ -508,8 +508,9 @@ before reading the geometry: `update_idletasks()` alone does not lay out a newly
   80 / 40) - with an original block, the narrower of the two texts' reading widths - never narrower
   than the rows that must fit whole (`_required_width()`), never wider than 90% of the work area.
 - **Height**: at most 60% of the monitor's work area (`POPUP_HEIGHT_CAP_SHARE`), or the height the
-  user dragged a popup to. `popup_layout.allocate()`: the translation first; the original keeps at
-  most 40% when both overflow, and is collapsed to 3 rows by default ("Show all" opens it).
+  user dragged a popup to. `popup_layout.allocate()`: the translation first. The original is
+  collapsed to 3 rows by default; "Show all" gives it all the room but the translation's first 3
+  rows (a 40% share left it unchanged on a 1024x768 screen - CI caught it).
 - **Each box sits in its own holder** (`_make_box`: `pack_propagate(False)`, a height in pixels).
   Two boxes both packed `expand=True` split leftover height arbitrarily (measured: -14/+14 and
   +156/-156 px). A capped box packs its scrollbar beside the text; a box that is not capped while

@@ -77,6 +77,10 @@ Three lessons from the first full run, each now in the code and in a test:
   popup's own has therefore never been in effect: DEFERRED D20, left as it is for the user to
   decide.
 
+**Then CI** (1024×768): "Show all" gave the opened original the 40% share, which there was less
+than its three collapsed rows - the button changed nothing. Opened, the original now gets all the
+room but the translation's first three rows.
+
 "Over the selection" (TODO.md S6) overstated it: the old popups overlapped the cursor's *line*, to
 the right of the cursor, not the cursor itself. The new placement keeps the popup wholly above or
 below that line.
