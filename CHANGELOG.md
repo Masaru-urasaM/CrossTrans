@@ -24,8 +24,9 @@ real EXE the bootloader's pywin32 hook sets up those DLLs first.) Not done here:
 itself, and a real run takes the user's hotkeys and spends an API call. The manual checks are the
 user's (the user, 2026-10-19: test first, then release).
 
-**Rebuilt 2026-10-19 with the quick-translate popup work** (from `32c9b62`, merged as `b64cd92`):
-`dist\CrossTrans_v1.9.21_popup_2026-10-19.exe`, 66 050 975 bytes - under its own name, because the
+**Rebuilt 2026-10-19 with the quick-translate popup work** (from `51435a3`, the "Show all" fix
+on top of the merge `b64cd92`): `dist\CrossTrans_v1.9.21_popup_2026-10-19.exe`, 66 052 404 bytes -
+under its own name, because the
 user was running `CrossTrans_v1.9.21.exe` to test it. Both post-build checks pass (`kanwadict4.db`,
 1158 archive entries; the four glyph codecs) and `src.ui.popup_layout` is in its PYZ. Not started
 here, for the same reasons.
