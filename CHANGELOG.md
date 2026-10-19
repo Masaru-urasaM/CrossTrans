@@ -31,6 +31,12 @@ user was running `CrossTrans_v1.9.21.exe` to test it. Both post-build checks pas
 1158 archive entries; the four glyph codecs) and `src.ui.popup_layout` is in its PYZ. Not started
 here, for the same reasons.
 
+**Rebuilt again 2026-10-19 with the grip outline** (from `4f926b4`, the merge of Decision 35):
+`dist\CrossTrans_v1.9.21_grip_2026-10-19.exe`, 66 053 941 bytes - under its own name again, the user
+was running the `_popup_` build. Both post-build checks pass (`kanwadict4.db`, 1158 archive entries;
+the four glyph codecs), and its PYZ carries the new grip code (`_show_grip_outline`,
+`_grip_preview`, `POPUP_GRIP_PREVIEW_MS`; `_grip_pending` gone). Not started here.
+
 ### Fix — The popup's grip drags an outline: smooth at any length (2026-10-19)
 
 The user, testing the rebuilt 1.9.21: dragging the grip "feels very laggy". Every motion laid the
