@@ -213,7 +213,11 @@ class TestShownOnlyOnceMeasured:
         settle(manager, tk_root)
         assert manager._layout['done'] and alpha(manager) == 1.0
 
-    def test_it_is_shown_only_after_its_final_size_is_drawn(self, manager, tk_root):
+    def test_it_is_shown_only_after_its_final_size_is_drawn(self, manager, tk_root,
+                                                            monkeypatch):
+        # A delay one update() cannot outlast: at the real 30 ms, a busy machine's first
+        # update() took longer, and the popup was already shown within it.
+        monkeypatch.setattr(quick_translate, 'POPUP_REVEAL_DELAY_MS', 500)
         cases.show_case(manager, cases.case('A'))
         tk_root.update_idletasks()
         tk_root.update()
@@ -233,6 +237,29 @@ class TestShownOnlyOnceMeasured:
         cases.show_case(manager, cases.case('A'))
         manager._finish_layout(manager._generation, forced=True)
         assert alpha(manager) == 1.0
+
+    def test_closing_it_early_leaves_no_timer_on_a_deleted_command(self, manager, tk_root,
+                                                                   monkeypatch):
+        # Timers set on the popup outlived it: destroying a widget deletes its commands,
+        # not its timers, which then fired into whatever new command reused the name -
+        # a resize handler was called with no event (2026-10-19). Closed once measured,
+        # with the watchdog and the reveal both still pending.
+        monkeypatch.setattr(quick_translate, 'POPUP_REVEAL_DELAY_MS', 500)
+
+        def timers():
+            return set(tk_root.tk.splitlist(tk_root.tk.call('after', 'info')))
+
+        before = timers()
+        cases.show_case(manager, cases.case('C'))
+        run_until(tk_root, lambda: manager._layout['done'])
+        assert manager._layout['done'] and not manager._layout.get('revealed')
+        manager.close()
+        tk_root.update()
+        for timer in timers() - before:
+            script = tk_root.tk.splitlist(tk_root.tk.call('after', 'info', timer))[0]
+            command = tk_root.tk.splitlist(script)[0]
+            assert tk_root.tk.call('info', 'commands', command), (
+                f"timer {timer} would call the deleted command {command}")
 
     def test_a_closed_popup_ignores_its_late_watchdog(self, manager, tk_root):
         cases.show_case(manager, cases.case('C'))
@@ -590,6 +617,263 @@ class TestGripDragsAnOutline:
         tk_root.update()
         assert not outline.winfo_exists()
         assert mgr._grip_outline is None and mgr.popup is None
+
+
+def rect_of(widget):
+    return (widget.winfo_rootx(), widget.winfo_rooty(),
+            widget.winfo_rootx() + widget.winfo_width(),
+            widget.winfo_rooty() + widget.winfo_height())
+
+
+def overlap(a, b):
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def popup_rect(mgr):
+    popup = mgr.popup
+    return popup.winfo_x(), popup.winfo_y(), popup.winfo_width(), popup.winfo_height()
+
+
+def drag_edge(mgr, edge, dx, dy, release=True, start=(600, 400)):
+    mgr._grip_press(SimpleNamespace(x_root=start[0], y_root=start[1]), edge)
+    mgr._grip_drag(SimpleNamespace(x_root=start[0] + dx, y_root=start[1] + dy))
+    if release:
+        mgr._grip_release()
+
+
+class TestResizeFromEveryEdge:
+    """Every edge and corner resizes, like a window; down to a row a box, out to the
+    edge of whichever screen the pointer is on (Decision 35)."""
+
+    @pytest.fixture(autouse=True)
+    def no_pause(self, monkeypatch):
+        monkeypatch.setattr(quick_translate, 'POPUP_GRIP_PREVIEW_MS', 60_000)
+
+    @pytest.mark.parametrize('key', ['A', 'C', 'G', 'K', 'L', 'C-replace', 'C-prompt'])
+    def test_no_text_and_no_button_reaches_the_edges(self, sized, tk_root, key):
+        # The edges are the outer RESIZE_EDGE_PX of the frame's padding; nothing a user
+        # clicks for something else may sit there (the grip is a resize control itself).
+        mgr, _ = sized
+        put_up(mgr, tk_root, cases.case(key))
+        edge = quick_translate.RESIZE_EDGE_PX
+        popup = mgr.popup
+        inner = (popup.winfo_rootx() + edge, popup.winfo_rooty() + edge,
+                 popup.winfo_rootx() + popup.winfo_width() - edge,
+                 popup.winfo_rooty() + popup.winfo_height() - edge)
+        controls = [w for w in gallery.descendants(popup, into_text=False)
+                    if w is not mgr._grip and w.winfo_ismapped()
+                    and w.winfo_class() in ('Text', 'Button', 'TButton', 'Label', 'TLabel',
+                                            'Scrollbar', 'TScrollbar', 'Entry', 'TEntry')]
+        assert controls
+        for control in controls:
+            left, top, right, bottom = rect_of(control)
+            assert (inner[0] <= left and inner[1] <= top and right <= inner[2]
+                    and bottom <= inner[3]), (
+                f"{key}: {control.winfo_class()} {rect_of(control)} reaches the edges "
+                f"(inside is {inner})")
+
+    def test_an_edge_shows_a_resize_cursor_and_the_inside_does_not(self, sized, tk_root):
+        mgr, _ = sized
+        put_up(mgr, tk_root, cases.case('A'))
+        frame = mgr._main_frame
+        width, height = frame.winfo_width(), frame.winfo_height()
+        for (x, y), cursor in (((2, height // 2), 'size_we'),
+                               ((width - 2, 2), 'size_ne_sw'),
+                               ((width // 2, height - 2), 'size_ns'),
+                               ((10, 10), '')):
+            frame.event_generate('<Motion>', x=x, y=y)
+            tk_root.update()
+            assert str(frame.cget('cursor')) == cursor, (x, y)
+        frame.event_generate('<Motion>', x=2, y=height // 2)
+        frame.event_generate('<Leave>')
+        tk_root.update()
+        assert str(frame.cget('cursor')) == ''          # children would inherit it
+
+    def test_pressing_an_edge_resizes_and_inside_it_moves(self, sized, tk_root):
+        mgr, _ = sized
+        put_up(mgr, tk_root, cases.case('A'))
+        frame = mgr._main_frame
+        x, y, width, height = popup_rect(mgr)
+        root_x, root_y = frame.winfo_rootx(), frame.winfo_rooty() + height // 2
+
+        def drag(at_x, dx):
+            frame.event_generate('<ButtonPress-1>', x=at_x, y=height // 2,
+                                 rootx=root_x + at_x, rooty=root_y)
+            frame.event_generate('<B1-Motion>', x=at_x + dx, y=height // 2,
+                                 rootx=root_x + at_x + dx, rooty=root_y)
+            frame.event_generate('<ButtonRelease-1>', x=at_x + dx, y=height // 2,
+                                 rootx=root_x + at_x + dx, rooty=root_y)
+            tk_root.update()
+
+        drag(2, -60)                                    # on the left edge: resized
+        assert popup_rect(mgr) == (x - 60, y, width + 60, height)
+        drag(10, 40)                                    # in the padding: moved
+        assert popup_rect(mgr) == (x - 20, y, width + 60, height)
+
+    def test_the_left_edge_moves_and_the_right_stays(self, sized, tk_root):
+        mgr, config = sized
+        put_up(mgr, tk_root, cases.case('A'))
+        x, y, width, height = popup_rect(mgr)
+        drag_edge(mgr, 'w', -60, 0)
+        tk_root.update()
+        assert popup_rect(mgr) == (x - 60, y, width + 60, height)
+        assert config.saved == (width + 60, height)
+
+    def test_the_top_left_corner_moves_and_the_bottom_right_stays(self, sized, tk_root):
+        mgr, _ = sized
+        put_up(mgr, tk_root, cases.case('A'))
+        x, y, width, height = popup_rect(mgr)
+        drag_edge(mgr, 'nw', -40, -30)
+        tk_root.update()
+        assert popup_rect(mgr) == (x - 40, y - 30, width + 40, height + 30)
+
+    def test_the_outline_follows_an_edge_the_popup_waits(self, sized, tk_root):
+        mgr, _ = sized
+        put_up(mgr, tk_root, cases.case('A'))
+        before = popup_rect(mgr)
+        x, y, width, height = before
+        drag_edge(mgr, 'w', -60, 0, release=False)
+        tk_root.update()
+        outline = mgr._grip_outline
+        assert (outline.winfo_x(), outline.winfo_width()) == (x - 60, width + 60)
+        assert popup_rect(mgr) == before
+        mgr._grip_release()
+
+    def test_it_shrinks_to_a_row_of_text(self, sized, tk_root):
+        mgr, _ = sized
+        put_up(mgr, tk_root, cases.case('C'))
+        three_rows = mgr.popup.winfo_height() - (mgr.popup_text.winfo_height()
+                                                 - mgr._rows_px(mgr.popup_text, 3))
+        drag_edge(mgr, 's', 0, -2000)
+        tk_root.update()
+        one_row = mgr._rows_px(mgr.popup_text, 1)
+        assert gallery.content_box(mgr.popup_text, 'y') >= one_row
+        assert gallery.content_box(mgr.popup_text, 'y') < mgr._rows_px(mgr.popup_text, 2)
+        assert mgr.popup.winfo_height() < three_rows
+        assert mgr._text_scrollbar.winfo_ismapped()
+
+    def test_with_readings_each_box_keeps_a_row(self, sized, tk_root):
+        mgr, _ = sized
+        put_up(mgr, tk_root, cases.case('G'))
+        drag_edge(mgr, 'n', 0, 2000)
+        tk_root.update()
+        for box, scrollbar in ((mgr.popup_text, mgr._text_scrollbar),
+                               (mgr.popup_furigana, mgr._original_scrollbar)):
+            assert gallery.content_box(box, 'y') >= mgr._rows_px(box, 1)
+            assert scrollbar.winfo_ismapped()
+
+    def test_not_narrower_than_its_rows(self, sized, tk_root):
+        mgr, _ = sized
+        put_up(mgr, tk_root, cases.case('C'))
+        drag_edge(mgr, 'e', -2000, 0)
+        tk_root.update()
+        assert mgr.popup.winfo_width() == mgr._required_width()
+        assert gallery.close_button_metrics(mgr.popup)['inside']
+        assert gallery.clipped_controls(mgr.popup) == []
+
+    def test_an_edge_stops_at_the_edge_of_the_screen(self, sized, tk_root):
+        mgr, _ = sized
+        put_up(mgr, tk_root, cases.case('A'))
+        far = (100_000, 400)
+        right = quick_translate.get_monitor_work_area(*far)[2]
+        drag_edge(mgr, 'e', far[0] - 600, 0)
+        tk_root.update()
+        assert mgr.popup.winfo_x() + mgr.popup.winfo_width() == right
+
+    def test_a_popup_moved_to_another_screen_still_resizes(self, sized, tk_root,
+                                                           monkeypatch):
+        # It used to stop at the screen it opened on: dragged onto a second one, any
+        # drag snapped it to its smallest width.
+        mgr, _ = sized
+        put_up(mgr, tk_root, cases.case('A'))
+        real = quick_translate.get_monitor_work_area
+        monkeypatch.setattr(quick_translate, 'get_monitor_work_area',
+                            lambda x, y: (5000, 0, 7000, 1040) if x >= 5000 else real(x, y))
+        mgr.popup.geometry('+5200+200')
+        tk_root.update()
+        _, _, width, height = popup_rect(mgr)
+        drag_edge(mgr, 'se', 80, 60, start=(5200 + width, 200 + height))
+        tk_root.update()
+        assert popup_rect(mgr) == (5200, 200, width + 80, height + 60)
+
+    def test_a_click_on_an_edge_changes_nothing(self, sized, tk_root):
+        # Not even after an earlier drag, the popup moved since and laid out again: the
+        # click must not put it back where that drag left it.
+        mgr, config = sized
+        put_up(mgr, tk_root, cases.case('A'))
+        drag_edge(mgr, 'e', 40, 0)
+        tk_root.update()
+        mgr.popup.geometry('+300+250')
+        tk_root.update()
+        mgr._fit_boxes(reposition=False, size=mgr._user_size)
+        tk_root.update()
+        before, saved = popup_rect(mgr), config.saved
+        mgr._grip_press(SimpleNamespace(x_root=600, y_root=400), 'w')
+        mgr._grip_release()
+        tk_root.update()
+        assert popup_rect(mgr) == before
+        assert config.saved == saved
+
+    def test_a_tiny_remembered_height_still_opens_with_three_rows(self, sized, tk_root):
+        mgr, config = sized
+        config.saved = (None, 60)
+        put_up(mgr, tk_root, cases.case('C'))
+        assert gallery.content_box(mgr.popup_text, 'y') >= mgr._rows_px(mgr.popup_text, 3)
+
+
+def window_handle(widget):
+    return ctypes.windll.user32.GetParent(widget.winfo_id()) or widget.winfo_id()
+
+
+def is_above(upper, lower):
+    """Whether window `upper` is above window `lower` in the z-order."""
+    user32 = ctypes.windll.user32
+    hwnd = user32.GetWindow(lower, 3)            # GW_HWNDPREV: the next window up
+    while hwnd:
+        if hwnd == upper:
+            return True
+        hwnd = user32.GetWindow(hwnd, 3)
+    return False
+
+
+class TestOnTopWhenItAppears:
+    """On top when it appears, for POPUP_FRONT_MS, then free to go behind. It was on top
+    for 100 ms from its creation, which could end while it was still invisible - and the
+    app the text came from rose over it (seen 2026-10-19 under a maximized VS Code)."""
+
+    def test_it_is_on_top_when_it_appears_then_lets_go(self, manager, tk_root, monkeypatch):
+        monkeypatch.setattr(quick_translate, 'POPUP_FRONT_MS', 150)
+        put_up(manager, tk_root, cases.case('C'))
+        assert int(manager.popup.attributes('-topmost')) == 1
+        run_until(tk_root, lambda: int(manager.popup.attributes('-topmost')) == 0)
+        assert int(manager.popup.attributes('-topmost')) == 0
+
+    def test_the_time_on_top_counts_from_when_it_appears(self, manager, tk_root,
+                                                         monkeypatch):
+        monkeypatch.setattr(quick_translate, 'POPUP_REVEAL_DELAY_MS', 300)
+        monkeypatch.setattr(quick_translate, 'POPUP_FRONT_MS', 300)
+        cases.show_case(manager, cases.case('C'))
+        run_until(tk_root, lambda: manager._layout and manager._layout.get('revealed'))
+        assert manager._layout.get('revealed')
+        assert int(manager.popup.attributes('-topmost')) == 1
+
+    def test_a_window_raised_while_it_is_invisible_does_not_cover_it(self, manager, tk_root,
+                                                                     monkeypatch):
+        monkeypatch.setattr(quick_translate, 'POPUP_REVEAL_DELAY_MS', 300)
+        monkeypatch.setattr(quick_translate, 'POPUP_FRONT_MS', 100)
+        other = tk.Toplevel(tk_root)
+        try:
+            other.geometry('1000x700+100+100')
+            tk_root.update()
+            cases.show_case(manager, cases.case('C'))
+            tk_root.after(150, other.lift)       # the source app rising, mid-measuring
+            run_until(tk_root, lambda: manager._layout and manager._layout.get('revealed'))
+            run_until(tk_root, lambda: int(manager.popup.attributes('-topmost')) == 0)
+            tk_root.update()
+            assert int(manager.popup.attributes('-topmost')) == 0
+            assert not is_above(window_handle(other), window_handle(manager.popup))
+        finally:
+            other.destroy()
 
 
 class TestLoadingIndicator:

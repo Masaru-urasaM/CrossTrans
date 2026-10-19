@@ -133,6 +133,80 @@ class TestAllocate:
         assert not L.Heights(1, 1, False, False).any_capped
 
 
+class TestEdgeAt:
+    """Which edge the pointer is on: the outer 6 px, corners 14 px along a side."""
+
+    @pytest.mark.parametrize('point, edge', [
+        ((2, 100), 'w'), ((397, 100), 'e'), ((200, 1), 'n'), ((200, 198), 's'),
+        ((1, 1), 'nw'), ((399, 199), 'se'),
+        ((10, 2), 'nw'), ((2, 190), 'sw'), ((390, 3), 'ne'),     # along a side, near a corner
+        ((20, 2), 'n'), ((6, 100), ''), ((200, 100), ''), ((10, 10), ''),
+    ])
+    def test_where_the_pointer_is(self, point, edge):
+        assert L.edge_at(*point, 400, 200, edge_px=6, corner_px=14) == edge
+
+    def test_every_answer_is_an_edge_or_nothing(self):
+        found = {L.edge_at(x, y, 400, 200, 6, 14) for x in range(0, 400, 3)
+                 for y in range(0, 200, 3)}
+        assert found <= set(L.EDGES) | {''} and found >= set(L.EDGES)
+
+
+class TestResize:
+    """Dragged by any edge or corner, like a window (Decision 35)."""
+
+    RECT = (100, 100, 400, 300)          # left 100, top 100, right 500, bottom 400
+
+    def drag(self, edge, dx, dy, bounds=WORK):
+        return L.resize(self.RECT, edge, dx, dy, min_width=200, min_height=100,
+                        bounds=bounds)
+
+    def test_there_are_four_edges_and_four_corners(self):
+        assert sorted(L.EDGES) == sorted(['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'])
+
+    @pytest.mark.parametrize('edge, expected', [
+        ('e', (100, 100, 430, 300)),
+        ('w', (130, 100, 370, 300)),
+        ('s', (100, 100, 400, 320)),
+        ('n', (100, 120, 400, 280)),
+        ('se', (100, 100, 430, 320)),
+        ('nw', (130, 120, 370, 280)),
+        ('ne', (100, 120, 430, 280)),
+        ('sw', (130, 100, 370, 320)),
+    ])
+    def test_the_dragged_sides_move_and_the_others_stay(self, edge, expected):
+        assert self.drag(edge, 30, 20) == expected
+
+    @pytest.mark.parametrize('edge', L.EDGES)
+    def test_shrunk_from_any_side_it_stops_at_the_minimum(self, edge):
+        # Every dragged side pushed far inwards.
+        dx = -1000 if 'e' in edge else 1000
+        dy = -1000 if 's' in edge else 1000
+        x, y, width, height = self.drag(edge, dx, dy)
+        if 'e' in edge or 'w' in edge:
+            assert width == 200
+        if 'n' in edge or 's' in edge:
+            assert height == 100
+        if 'w' in edge:
+            assert x + width == 500          # the right side stayed
+        if 'n' in edge:
+            assert y + height == 400         # the bottom stayed
+
+    def test_a_moving_side_stops_at_the_edge_of_the_screen(self):
+        x, _, width, _ = self.drag('e', 5000, 0)
+        assert x + width == WORK.right
+        x, y, width, height = self.drag('nw', -5000, -5000)
+        assert (x, y, x + width, y + height) == (WORK.left, WORK.top, 500, 400)
+
+    def test_it_reaches_onto_the_screen_under_the_pointer(self):
+        right_monitor = L.WorkArea(1920, 0, 3840, 1040)
+        x, _, width, _ = self.drag('e', 3000, 0, bounds=right_monitor)
+        assert (x, x + width) == (100, 3500)
+
+    def test_the_minimum_wins_over_the_screen(self):
+        narrow = L.WorkArea(0, 0, 250, 1040)
+        assert self.drag('e', 0, 0, bounds=narrow)[2] == 200
+
+
 class TestPlace:
     ANCHOR = (900, 300)
 

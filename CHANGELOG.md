@@ -37,6 +37,54 @@ was running the `_popup_` build. Both post-build checks pass (`kanwadict4.db`, 1
 the four glyph codecs), and its PYZ carries the new grip code (`_show_grip_outline`,
 `_grip_preview`, `POPUP_GRIP_PREVIEW_MS`; `_grip_pending` gone). Not started here.
 
+### Fix — The popup hidden under its source app; resized from any edge, to any sensible size (2026-10-19)
+
+The user, testing the `_grip` build: after the hotkey the "Translating" box showed, then nothing.
+Inspected read-only in the running process, the popup was there - fully shown, beside the cursor
+on the second monitor - **under** a maximized VS Code and RustDesk. Then: "only one corner can be
+dragged instead of four", and "as small or large as I like, if the trade-off is small to very
+small". The user chose 1a and 2a (Decision 35, "Then, the same day").
+
+**Fixed**
+- **On top from when it appears** (`_reveal`, `_end_front`, `POPUP_FRONT_MS` = 500): the popup was
+  topmost for 100 ms from its creation - written when it was visible from creation. Since Decision
+  34 it is invisible while measured, the 100 ms could run out first, and a window raised meanwhile
+  stayed above it. Now topmost until 500 ms after it appears, then free to go behind as before.
+  Reproduced on the private desktop: with the old timing a window raised mid-measuring ends above
+  the popup; with the new, below.
+- **The popup's timers are on the root** (the watchdog, the reveal): destroying a widget deletes
+  the commands of its timers but not the timers, which then fired into whatever new command reused
+  the name (`id()` + function name) - a resize handler was called with no event. Pre-existing; a
+  first try at the edges, with a `lambda` per edge, made it frequent.
+- **A remembered height shorter than the next popup's chrome** squeezed its box out before it was
+  measured - shown 60 px tall and empty. The provisional height is now at least the automatic cap.
+  Found by the new tests.
+- **A popup dragged onto another monitor** snapped to its smallest width on any resize: the bound
+  was the monitor it opened on. It is now the screen under the pointer.
+
+**Added**
+- **Every edge and corner resizes** (`_bind_edges`; `popup_layout.edge_at`, `popup_layout.resize`):
+  the outer `RESIZE_EDGE_PX` (6) of the main frame's padding, corners `RESIZE_CORNER_PX` (14) along
+  a side, the cursor showing which; the rest of the padding still moves the popup. Same outline and
+  pause preview as the grip. No widgets of their own: eight edge widgets, tried first, made every
+  popup's first layout 27 -> 39 ms; with the padding it is 27 ms, as before.
+- **Sizes, by the user's rule**: down to one row a box (`POPUP_USER_MIN_ROWS`, was three) and out to
+  the edge of the screen under the pointer, any monitor, no margin - both very small trade-offs.
+  Not narrower than the widest row: the buttons, the close button among them, would be cut, or four
+  kinds of row rebuilt to wrap - a big one, dropped. A new popup still opens with three rows a box.
+
+**Tests**: 1723 -> 1780 (+57). `tests/test_popup_layout.py` +34: `TestEdgeAt` (where the pointer
+is), `TestResize` (each side moves alone, the minimum, the screen, the minimum over the screen).
+`tests/test_popup_geometry.py` +23: `TestResizeFromEveryEdge` (no control reaches the edges in seven
+states, the cursor and `<Leave>`, a real press on an edge resizes and inside moves, the left edge and
+the top-left corner, one row, the widest row, the screen's edge, a popup on another monitor, a click
+changes nothing, a tiny remembered height), `TestOnTopWhenItAppears` (on top when shown then lets go,
+timed from the reveal, a window raised mid-measuring stays below) and an early close leaving no timer
+on a deleted command. `test_it_is_shown_only_after_its_final_size_is_drawn` now uses a 500 ms reveal
+delay: at 30 ms a busy machine's first `update()` outlasted it (seen once in a full run). Full suite
+1779 passed, 1 skipped, on the private desktop. 16 mutations, all killed; the original on-top bug
+(the 100 ms timer and no re-assert, both at once) fails all three on-top tests.
+
 ### Fix — The popup's grip drags an outline: smooth at any length (2026-10-19)
 
 The user, testing the rebuilt 1.9.21: dragging the grip "feels very laggy". Every motion laid the

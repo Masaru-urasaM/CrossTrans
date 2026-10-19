@@ -19,10 +19,10 @@ except ImportError:
     from tkinter import ttk
     HAS_TTKBOOTSTRAP = False
 
-from src.constants import (POPUP_COLLAPSED_ORIGINAL_ROWS, POPUP_GRIP_PREVIEW_MS,
-                           POPUP_LAYOUT_WATCHDOG_MS, POPUP_MIN_BOX_ROWS,
-                           POPUP_REVEAL_DELAY_MS, POPUP_SCREEN_MARGIN,
-                           POPUP_TOOLTIP_DELAY_MS)
+from src.constants import (POPUP_COLLAPSED_ORIGINAL_ROWS, POPUP_FRONT_MS,
+                           POPUP_GRIP_PREVIEW_MS, POPUP_LAYOUT_WATCHDOG_MS,
+                           POPUP_MIN_BOX_ROWS, POPUP_REVEAL_DELAY_MS, POPUP_SCREEN_MARGIN,
+                           POPUP_TOOLTIP_DELAY_MS, POPUP_USER_MIN_ROWS)
 from src.core import lang_id
 from src.core.furigana import RubySegment
 from src.core.nlp_manager import nlp_manager
@@ -77,6 +77,16 @@ TOOLTIP_BG = '#111111'
 GRIP_OUTLINE_COLOR = '#3498db'
 GRIP_OUTLINE_PX = 2
 GRIP_OUTLINE_KEY = '#000001'
+
+# The popup resizes from every edge and corner, like a window (Decision 35): the outer
+# RESIZE_EDGE_PX of the main frame's padding (POPUP_FRAME_PADDING), so no text and no
+# button is in the way; along a side, RESIZE_CORNER_PX from a corner is the corner. The
+# grip (GRIP_GLYPH) stays as the visible hint; its double-click resets.
+RESIZE_EDGE_PX = 6
+RESIZE_CORNER_PX = 14
+RESIZE_CURSORS = {'n': 'size_ns', 's': 'size_ns', 'e': 'size_we', 'w': 'size_we',
+                  'nw': 'size_nw_se', 'se': 'size_nw_se', 'ne': 'size_ne_sw',
+                  'sw': 'size_ne_sw'}
 
 # The small header that names the original block, and its "Show all" toggle.
 ORIGINAL_HEADER_FONT = ('Segoe UI', 8)
@@ -475,10 +485,11 @@ class QuickTranslateManager:
         self._tooltips = []
         self._icon_family_cache = None     # (family or None,), looked up once
         self._grip: Optional[tk.Label] = None
-        self._grip_start = None
+        self._grip_start: Optional[dict] = None
         self._grip_outline: Optional[tk.Toplevel] = None
         self._grip_preview_after = None
         self._user_size: Optional[Tuple[int, int]] = None
+        self._user_rect: Optional[Tuple[int, int, int, int]] = None
 
     def configure_callbacks(self,
                             on_copy: Optional[Callable[[], None]] = None,
@@ -751,16 +762,18 @@ class QuickTranslateManager:
             pass
         self.popup.protocol("WM_DELETE_WINDOW", self.close)
 
-        # Set topmost initially, then remove so it can go behind other windows
+        # On top while it is measured and for POPUP_FRONT_MS once it appears (`_reveal`),
+        # then free to go behind other windows. Counted from here, the 100 ms it used to
+        # be could run out before the invisible popup appeared, and the app the text came
+        # from rose over it meanwhile (seen 2026-10-19: under a maximized VS Code).
         self.popup.attributes('-topmost', True)
-        self.popup.after(100, lambda: self.popup.attributes('-topmost', False) if self.popup else None)
         self._apply_noactivate()
 
         # Main frame
         main_frame = ttk.Frame(self.popup, padding=POPUP_FRAME_PADDING)
         main_frame.pack(fill=BOTH, expand=True)
         self._main_frame = main_frame
-        self._bind_drag(main_frame)
+        self._bind_edges(main_frame)
 
         # The header: the credit, and the close button - shown at every width
         self._build_header(main_frame, None if is_error else model_info, is_grammar)
@@ -820,6 +833,55 @@ class QuickTranslateManager:
         """Drag the popup by `widget`."""
         widget.bind("<Button-1>", self._start_move)
         widget.bind("<B1-Motion>", self._on_drag)
+
+    def _bind_edges(self, frame) -> None:
+        """The main frame's padding is the popup's border: within RESIZE_EDGE_PX of a side
+        it resizes the popup (Decision 35), anywhere else it moves it, as it always did.
+        No widgets of their own: eight edge widgets made every popup ~11 ms slower to
+        build (measured 2026-10-19)."""
+        frame.bind('<Motion>', self._edge_hover)
+        frame.bind('<Leave>', self._edge_leave)
+        frame.bind('<Button-1>', self._frame_press)
+        frame.bind('<B1-Motion>', self._frame_drag)
+        frame.bind('<ButtonRelease-1>', self._frame_release)
+
+    @staticmethod
+    def _edge_under(event) -> str:
+        frame = event.widget
+        return popup_layout.edge_at(event.x, event.y, frame.winfo_width(),
+                                    frame.winfo_height(), RESIZE_EDGE_PX, RESIZE_CORNER_PX)
+
+    @staticmethod
+    def _set_cursor(frame, cursor: str) -> None:
+        # Set only when it changes: <Motion> comes many times a second.
+        if str(frame.cget('cursor')) != cursor:
+            frame.configure(cursor=cursor)
+
+    def _edge_hover(self, event) -> None:
+        if self._grip_start is None:
+            self._set_cursor(event.widget, RESIZE_CURSORS.get(self._edge_under(event), ''))
+
+    def _edge_leave(self, event) -> None:
+        # Children inherit a frame's cursor: left set, it would show over the text.
+        if self._grip_start is None:
+            self._set_cursor(event.widget, '')
+
+    def _frame_press(self, event):
+        edge = self._edge_under(event)
+        if edge:
+            return self._grip_press(event, edge)
+        self._start_move(event)
+
+    def _frame_drag(self, event):
+        if self._grip_start is not None:
+            return self._grip_drag(event)
+        self._on_drag(event)
+
+    def _frame_release(self, event):
+        if self._grip_start is not None:
+            self._grip_release(event)
+            self._set_cursor(event.widget, '')
+            return 'break'
 
     def _frame_bg(self) -> str:
         """The theme's frame background - what a plain tk widget on it must match."""
@@ -1017,7 +1079,8 @@ class QuickTranslateManager:
         """A resize grip in the bottom-right corner (Decision 34, TODO.md P4). The size
         the user drags the popup to is remembered and becomes the next popup's reading
         width and height cap; a double-click returns to automatic sizing. A drag moves
-        an outline, not the popup (Decision 35)."""
+        an outline, not the popup, and every edge and corner can be dragged
+        (`_bind_edges`, Decision 35)."""
         grip = tk.Label(self.popup, text=GRIP_GLYPH, font=('Segoe UI', 8), fg='#6c757d',
                         bg=self._frame_bg(), cursor='size_nw_se', padx=0, pady=0,
                         autostyle=False)
@@ -1143,22 +1206,28 @@ class QuickTranslateManager:
 
         The cap, not a guess: a guess shorter than the chrome had the packer squeeze the
         translation box out altogether, so it never got its width and step 2 never came
-        (measured on the trial line + chooser row case). Nobody sees this height."""
+        (measured on the trial line + chooser row case). Never less than the automatic
+        cap either: a height the user dragged a popup down to can be shorter than the
+        next popup's chrome - the same squeeze. Nobody sees this height."""
         saved_width, saved_height = self._saved_size()
         work = self._work_area()
         width = self._automatic_width(saved_width)
         self._fit_header(width)
         cap = popup_layout.height_cap(work, saved_height)
-        x, y, height = popup_layout.place(self._anchor(), width, cap, work,
-                                          min_height=min(cap, 120))
+        provisional = max(cap, popup_layout.height_cap(work))
+        x, y, height = popup_layout.place(self._anchor(), width, provisional, work,
+                                          min_height=min(provisional, 120))
         self.popup.geometry(f"{width}x{height}+{x}+{y}")
         generation = self._generation
         self._layout = {'generation': generation, 'width': width, 'work': work,
                         'cap': cap, 'done': False}
         self.popup_text.bind('<Configure>',
                              lambda _event, g=generation: self._finish_layout(g), add='+')
-        self.popup.after(POPUP_LAYOUT_WATCHDOG_MS,
-                         lambda g=generation: self._finish_layout(g, forced=True))
+        # On the root, not the popup: destroying the popup deletes the commands of its
+        # timers but not the timers, which later fire into whatever command reuses the
+        # name (seen 2026-10-19: a resize handler called with no event).
+        self.root.after(POPUP_LAYOUT_WATCHDOG_MS,
+                        lambda g=generation: self._finish_layout(g, forced=True))
 
     def _finish_layout(self, generation: int, forced: bool = False) -> None:
         """Step 2: measure each box, give it exactly what it needs up to the cap, place
@@ -1179,8 +1248,8 @@ class QuickTranslateManager:
                 # Seen only once Tk has redrawn it at its final size: revealed in the same
                 # breath, the first frame still carried the drawing at the provisional
                 # size, cut to the new one (caught by the gallery's screenshots).
-                self.popup.after(POPUP_REVEAL_DELAY_MS,
-                                 lambda g=generation: self._reveal(g))
+                self.root.after(POPUP_REVEAL_DELAY_MS,
+                                lambda g=generation: self._reveal(g))
                 return
             logging.warning("[Popup] not laid out in time - shown at its estimated size")
         except Exception as e:
@@ -1194,46 +1263,65 @@ class QuickTranslateManager:
         try:
             self.popup.update_idletasks()
             self.popup.attributes('-alpha', 1.0)
+            self.popup.attributes('-topmost', True)
+            self.root.after(POPUP_FRONT_MS, lambda popup=self.popup: self._end_front(popup))
         except tk.TclError:
             pass
         if self._layout is not None:
             self._layout['revealed'] = True
 
+    def _end_front(self, popup) -> None:
+        """POPUP_FRONT_MS after it appeared: the popup may go behind other windows."""
+        if popup is self.popup and popup is not None:
+            try:
+                popup.attributes('-topmost', False)
+            except tk.TclError:
+                pass
+
     def _fit_boxes(self, reposition: bool = True,
-                   size: Optional[Tuple[int, int]] = None) -> None:
+                   size: Optional[Tuple[int, int]] = None,
+                   position: Optional[Tuple[int, int]] = None) -> None:
         """Measure the boxes and give each its height; place the popup or keep it.
 
         `reposition`: place the popup beside the cursor (a new popup); otherwise its
         corner stays (the replace preview, the original's toggle) unless that would
         run off the screen. `size`: the (width, height) the user dragged the popup to;
-        the boxes then share that height, the translation taking the rest.
+        the boxes then share that height, the translation taking the rest, and keep
+        POPUP_USER_MIN_ROWS each. `position`: where the user's drag put its corner (a
+        drag by the left or top edge moves it); without it the corner stays.
         """
         layout = self._layout
         work = layout['work']
         if size is not None:
-            self.popup.geometry(f"{size[0]}x{size[1]}")
+            corner = f"+{position[0]}+{position[1]}" if position is not None else ""
+            self.popup.geometry(f"{size[0]}x{size[1]}{corner}")
         self.popup.update_idletasks()
 
+        rows = POPUP_MIN_BOX_ROWS if size is None else POPUP_USER_MIN_ROWS
         text_insets = self._insets(self.popup_text, 'y')
         need_t = self._content_px(self.popup_text) + text_insets
-        min_t = min(need_t, self._rows_px(self.popup_text, POPUP_MIN_BOX_ROWS) + text_insets)
+        min_t = min(need_t, self._rows_px(self.popup_text, rows) + text_insets)
         need_o = min_o = 0
         limit_o = None
         original_share = popup_layout.ORIGINAL_SHARE
         if self.popup_furigana is not None:
             original_insets = self._insets(self.popup_furigana, 'y')
             need_o = self._content_px(self.popup_furigana) + original_insets
-            min_o = min(need_o, self._rows_px(self.popup_furigana,
-                                              POPUP_COLLAPSED_ORIGINAL_ROWS) + original_insets)
-            collapsible = need_o > min_o
+            collapsed_o = min(need_o, self._rows_px(self.popup_furigana,
+                                                    POPUP_COLLAPSED_ORIGINAL_ROWS)
+                              + original_insets)
+            collapsible = need_o > collapsed_o
             self._show_original_toggle(collapsible)
             if collapsible and self._original_collapsed:
-                limit_o = min_o
+                limit_o = collapsed_o
             elif collapsible:
                 # "Show all": all the room but the translation's first rows. The default
                 # share (40%) was smaller than the collapsed rows on a 1024x768 screen, so
                 # the button changed nothing (CI, 2026-10-19).
                 original_share = 1.0
+            # The least it keeps: its collapsed rows - at a size the user chose, `rows`.
+            min_o = collapsed_o if size is None else min(
+                need_o, self._rows_px(self.popup_furigana, rows) + original_insets)
             self.popup.update_idletasks()
         shown_o = need_o if limit_o is None else min(need_o, limit_o)
         chrome = (self._main_frame.winfo_reqheight() - self._text_holder.winfo_reqheight()
@@ -1242,7 +1330,8 @@ class QuickTranslateManager:
 
         if size is not None:
             width, height = size
-            x, y = self.popup.winfo_x(), self.popup.winfo_y()
+            x, y = position if position is not None else (self.popup.winfo_x(),
+                                                          self.popup.winfo_y())
         else:
             width = layout['width']
             desired = min(chrome + need_t + shown_o, layout['cap'])
@@ -1286,8 +1375,7 @@ class QuickTranslateManager:
                 x = popup_layout.place(self._anchor(), width, height, work,
                                        min_height=height)[0]
         self.popup.geometry(f"{width}x{height}+{x}+{y}")
-        layout.update(chrome=chrome, heights=heights, min_boxes=min_t + min_o,
-                      size=(width, height))
+        layout.update(chrome=chrome, heights=heights, size=(width, height), position=(x, y))
 
     def _fit_box(self, holder, box, scrollbar, height: int, capped: bool,
                  gutter: int) -> None:
@@ -1316,31 +1404,46 @@ class QuickTranslateManager:
     # ------------------------------------------------------------------ #
     # The grip: a size the user chooses (Decision 34, TODO.md P4)
     # ------------------------------------------------------------------ #
-    def _grip_press(self, event) -> str:
-        if self.popup is not None:
-            self._grip_start = (event.x_root, event.y_root,
-                                self.popup.winfo_width(), self.popup.winfo_height())
+    def _grip_press(self, event, edge: str = 'se') -> str:
+        """A drag starts on `edge` (popup_layout.EDGES). The least it may shrink to is
+        read now: the rows that must fit whole across, and a row of each box down."""
+        self._user_rect = None              # set by this drag's motions, if it has any
+        if self.popup is not None and self._layout is not None:
+            least = self._layout.get('chrome', 0)
+            for box in (self.popup_text, self.popup_furigana):
+                if box is not None:
+                    least += (self._rows_px(box, POPUP_USER_MIN_ROWS)
+                              + self._insets(box, 'y'))
+            self._grip_start = {
+                'pointer': (event.x_root, event.y_root), 'edge': edge,
+                'rect': (self.popup.winfo_x(), self.popup.winfo_y(),
+                         self.popup.winfo_width(), self.popup.winfo_height()),
+                'min_width': self._required_width(), 'min_height': least}
         return 'break'
 
+    def _screen_at(self, x: int, y: int) -> popup_layout.WorkArea:
+        """The work area of the monitor under (x, y), or the nearest one."""
+        area = get_monitor_work_area(x, y)
+        return popup_layout.WorkArea(*area) if area else self._layout['work']
+
     def _grip_drag(self, event) -> str:
-        """Move the outline to the size being dragged to. The popup itself is laid out
-        only when the drag pauses (POPUP_GRIP_PREVIEW_MS) and on release: laying it out
-        on every motion cost 14-190 ms a step, so a long text followed the mouse at a
-        few frames a second (Decision 35)."""
+        """Move the outline to the rectangle being dragged to. The popup itself is laid
+        out only when the drag pauses (POPUP_GRIP_PREVIEW_MS) and on release: laying it
+        out on every motion cost 14-190 ms a step, so a long text followed the mouse at
+        a few frames a second (Decision 35). A moving edge stops at the screen under the
+        pointer - not the one the popup opened on, which it may have been dragged off."""
         if self.popup is None or self._grip_start is None or self._layout is None:
             return 'break'
-        start_x, start_y, start_width, start_height = self._grip_start
-        work = self._layout['work']
-        x, y = self.popup.winfo_x(), self.popup.winfo_y()
-        least = self._layout.get('chrome', 0) + self._layout.get('min_boxes', 0)
-        width = max(self._required_width(),
-                    min(start_width + event.x_root - start_x,
-                        work.right - POPUP_SCREEN_MARGIN - x))
-        height = max(least, min(start_height + event.y_root - start_y,
-                                work.bottom - POPUP_SCREEN_MARGIN - y))
-        self._user_size = (int(width), int(height))
+        start = self._grip_start
+        start_x, start_y = start['pointer']
+        rect = popup_layout.resize(start['rect'], start['edge'], event.x_root - start_x,
+                                   event.y_root - start_y, min_width=start['min_width'],
+                                   min_height=start['min_height'],
+                                   bounds=self._screen_at(event.x_root, event.y_root))
+        self._user_rect = tuple(int(value) for value in rect)
+        self._user_size = self._user_rect[2:]
         try:
-            self._show_grip_outline(x, y, *self._user_size)
+            self._show_grip_outline(*self._user_rect)
         except tk.TclError:
             pass
         self._cancel_grip_preview()
@@ -1392,19 +1495,21 @@ class QuickTranslateManager:
             self._apply_user_size()
 
     def _apply_user_size(self) -> None:
-        """Lay the popup out at the size the user dragged it to - unless it already is
-        (a pause laid it out, and the release came at the same size)."""
-        if (self.popup is None or self._layout is None or not self._user_size
-                or self._layout.get('size') == self._user_size):
+        """Lay the popup out at the rectangle the user dragged it to - unless it already
+        is (a pause laid it out, and the release came at the same place and size)."""
+        rect = self._user_rect
+        if (self.popup is None or self._layout is None or not rect
+                or (self._layout.get('position'), self._layout.get('size'))
+                == (rect[:2], rect[2:])):
             return
         try:
-            self._fit_boxes(reposition=False, size=self._user_size)
+            self._fit_boxes(reposition=False, size=rect[2:], position=rect[:2])
         except tk.TclError:
             pass
 
     def _grip_release(self, _event=None) -> str:
         self._cancel_grip_preview()
-        if self._grip_start is not None and self._user_size:
+        if self._grip_start is not None and self._user_rect:
             # Laid out before the outline goes, so the popup is never seen at neither.
             self._apply_user_size()
             self._remember_size(*self._user_size)
@@ -1417,6 +1522,7 @@ class QuickTranslateManager:
         self._cancel_grip_preview()
         self._hide_grip_outline()
         self._user_size = None
+        self._user_rect = None
         self._grip_start = None
         self._remember_size(None, None)
         if self.popup is not None and self._layout is not None:
@@ -1912,6 +2018,7 @@ class QuickTranslateManager:
         self._layout = None
         self._grip_start = None
         self._user_size = None
+        self._user_rect = None
 
     @property
     def is_open(self) -> bool:

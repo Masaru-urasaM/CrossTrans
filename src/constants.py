@@ -71,6 +71,7 @@ POPUP_HEIGHT_CAP_SHARE = 0.60       # of the monitor's work area; beyond it a bo
 POPUP_MAX_WIDTH_SHARE = 0.90        # of the monitor's work area
 POPUP_ORIGINAL_SHARE = 0.40         # of the text room the original may keep when both overflow
 POPUP_MIN_BOX_ROWS = 3              # a box squeezed by the cap still shows this many rows
+POPUP_USER_MIN_ROWS = 1             # ...and by the user's own drag, this many
 POPUP_COLLAPSED_ORIGINAL_ROWS = 3   # the original block (with readings) when collapsed
 POPUP_ANCHOR_OFFSET = (15, 20)      # from the cursor to the popup's nearest corner
 POPUP_SCREEN_MARGIN = 10            # kept clear along the work area's edges
@@ -78,6 +79,7 @@ POPUP_TOOLTIP_DELAY_MS = 500        # before an icon button names itself
 POPUP_LAYOUT_WATCHDOG_MS = 300      # the popup is shown by then even if measuring never ran
 POPUP_REVEAL_DELAY_MS = 30          # after the final size, for Tk to redraw before it is seen
 POPUP_GRIP_PREVIEW_MS = 150         # a grip drag paused this long lays the popup out at its size
+POPUP_FRONT_MS = 500                # on top this long after it appears, then free to go behind
 
 # ============== AVAILABLE LANGUAGES ==============
 # Format: (English name, ISO code, Native name)
