@@ -5,7 +5,7 @@
 
 ---
 
-## P — The quick-translate popup: sized by measuring, laid out for reading — ✅ Done (2026-10-19) [unreleased, branch `feature/popup-sizing`, for 1.9.21]
+## P — The quick-translate popup: sized by measuring, laid out for reading — ✅ Done (2026-10-19) [on `main`, for 1.9.21]
 
 **Goal (user, 2026-10-19, restated in English):** the quick-translate box "does not size itself
 well - a better way, or a new way of deciding its size; the end goal is an interface much easier to
@@ -41,8 +41,12 @@ full suite on the private desktop (1711 passed, 1 skipped); 19 mutations, all ki
 never been in effect; left for the user (it decides whether Ctrl+C on a selection in the popup
 keeps working).
 
-**Still the user's**: merging into `main`, the rebuild, the tag - and the manual checks, with the
-running CrossTrans closed first (a second instance only brings the first one forward):
+**Since**: merged and pushed (`b64cd92`, then the fixes `51435a3`, `4f926b4`, `f4781dc` - Decision
+35), rebuilt as `dist\CrossTrans_v1.9.21_edges_2026-10-19.exe`, and the manual checks below passed
+on it - the user, 2026-10-19: "a complete success". **Still the user's**: the tag and the release.
+
+The manual checks, with the running CrossTrans closed first (a second instance only brings the
+first one forward):
 1. In Notepad select `Hello` and press your translate hotkey: a small popup beside the cursor, the
    close button at the top right, no empty band under the text; the close button closes it.
 2. A paragraph of about five lines: about 70 characters a line, the box ending where the text ends.
@@ -69,7 +73,7 @@ running CrossTrans closed first (a second instance only brings the first one for
 
 ---
 
-## K — Follow-ups to the language-identity work, then quiet tests — ✅ Done (2026-10-16) [unreleased, branch `feature/japanese-language-identity`]
+## K — Follow-ups to the language-identity work, then quiet tests — ✅ Done (2026-10-16) [on `main`, for 1.9.21]
 
 **Goal (user, 2026-10-16):** do all fifteen items proposed after J12 - the suite on a clean machine,
 the EXE and D16 before a release (items 1-3), the new feature's gaps (4-8), History and the old
@@ -105,9 +109,10 @@ fugashi + UniDic, one a built EXE, one the real clipboard), 0 failed.
 and K12's options were built before the user chose between them; the user approved all five on
 2026-10-16.
 
-**Still the user's**: merging into `main`, pushing, the version (1.9.21 or 1.9.22) and the tag;
-D19's option (bundle unidic-lite, ~249 MB, or not); keys for D11's eight providers; deploying the
-Worker; and the manual checks:
+**Since**: merged into `main` and pushed, the version chosen (1.9.21) - all 2026-10-16; D19 decided
+(a download, K14); the Worker deployed (2026-10-19). **Still the user's**: the tag, keys for D11's
+eight providers, and the manual checks (item 7's EXE is now
+`dist\CrossTrans_v1.9.21_edges_2026-10-19.exe`):
 1. Popup, a term a model places: select 汽車 and press Win+Alt+E - a row "Kanji-only text - read as
    Chinese. [Read as Japanese]"; the button re-translates it as Japanese, with readings.
 2. Popup, a Chinese sentence: 這是我的書。 - no row (its grammar settles it), translated as Chinese.
@@ -125,7 +130,7 @@ Worker; and the manual checks:
 
 ---
 
-## J — Japanese Language Identity: furigana on every Japanese surface, a Dictionary that knows its languages — ✅ Done (2026-10-15) [unreleased, branch `feature/japanese-language-identity`]
+## J — Japanese Language Identity: furigana on every Japanese surface, a Dictionary that knows its languages — ✅ Done (2026-10-15) [on `main`, for 1.9.21]
 
 **Goal (user, 2026-10-15):** show furigana wherever Japanese appears, the Dictionary included,
 and stop the Dictionary taking a Japanese word written only in kanji for Chinese - its prompt
@@ -195,7 +200,7 @@ language pack, row 8 also Chinese (Simplified)):
 
 ---
 
-## H1 — Health Review: the notice, the log, the vision strip — ✅ Done (2026-09-07) [unreleased]
+## H1 — Health Review: the notice, the log, the vision strip — ✅ Done (2026-09-07) [on `main`, for 1.9.21]
 
 **Goal:** answer "is the project in good shape?" with measurements rather than documents, and fix
 whatever the measuring turned up. The suite, the tags, the release and the worker were all

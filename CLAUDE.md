@@ -926,8 +926,8 @@ display rather than receiving pre-annotated strings through the queue.
   `wrap='char'` layout and the pixel requirement is converted to `height` units. Row heights
   are derived from `font.metrics`, matching `Text.count(..., 'ypixels')` exactly.
 - `estimate_notation_px()` sizes a window *before* the widget exists. The popup sized its
-  `overrideredirect` Toplevel with it until Decision 34; it now measures its laid-out boxes and
-  uses this only for a provisional height.
+  `overrideredirect` Toplevel with it until Decision 34; it now measures its laid-out boxes, and
+  nothing but the tests calls this or `estimate_ruby_overhead_px()` (DEFERRED D21).
 - `MAX_ANNOTATE_CHARS = 3000`: longer text inserts plain, because annotation and frame
   construction run on the UI thread.
 - Every ruby frame and label is bound to the wheel handler; an embedded window otherwise
@@ -1101,7 +1101,7 @@ had, which is why non-Japanese Dictionary mode is unchanged.
   `field_policy()`, `source_language_hint()`, `overhead_px()`
 - `src/core/translation.py` - `generate_furigana()` / `_is_japanese_text()` delegate to the
   engine; queue integration in `do_translate_or_fix()` (5-item tuple)
-- `src/ui/quick_translate.py` - `_render_furigana()` (delegate), `show()` height budget,
+- `src/ui/quick_translate.py` - `_render_furigana()` (delegate), the measured layout (Decision 34),
   `_ruby_enabled()` / `_ruby_hint()`, replace preview, custom-prompt flattening,
   `show_dictionary_result()` (RubyText + run insertion), `DICT_RESULT_FONT`
 - `src/app.py` - `_create_translation_box()`, `_ruby_enabled()`, `_update_grammar_result()`,

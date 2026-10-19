@@ -60,6 +60,8 @@ backup/
 .claude/
 .CLAUDE.md
 CLAUDE.md
+# A local copy of CLAUDE.md for other AI agents (K13) - not part of the project
+AGENTS.md
 
 # Cloudflare (contains proxy logic, provider config, account data - private)
 cloudflare_worker.js

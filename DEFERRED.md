@@ -179,3 +179,20 @@ after mapping, as the tooltips now are (`<Map>`) - the popup never takes the foc
 Esc go to the user's app; (3) effective, plus a way to copy part of a translation without the
 keyboard. **The user's call.** **Trigger**: a user reporting that a click on the popup takes the
 focus from their app - or one wanting Ctrl+C there; either way the trade-off above.
+
+---
+
+### D21 - Two furigana estimators are called only by their tests
+
+**Found**: 2026-10-19, tidying the documents after the popup work (Decision 34).
+**Effort**: Small.
+
+`ruby_text.estimate_notation_px()` and `estimate_ruby_overhead_px()` estimated the height
+readings add to a window before it exists. The quick-translate popup was their last caller; since
+Decision 34 it measures its laid-out boxes instead (its provisional height is the cap), so only
+`tests/test_ruby_text.py` calls them - nine tests. Left in place: removing them takes the tests
+with them, and the suite's count never goes down without the user's word.
+
+**Options**: (1) remove both and their nine tests; (2) keep them for a future surface that must
+be sized before it is built. **Trigger**: the next change to `ruby_text.py`'s sizing code, or the
+user's word.

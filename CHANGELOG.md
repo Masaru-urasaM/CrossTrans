@@ -5,43 +5,46 @@ All notable changes to CrossTrans are documented here.
 ## [Unreleased]
 
 Everything below `[1.9.20]` ships as **1.9.21**: the user chose the number on 2026-10-16, and
-`VERSION` says so. Not tagged and not published.
+`VERSION` says so. Not tagged and not published - the user, 2026-10-19: not yet.
 
-**The 1.9.21 build** (2026-10-16, from `39419c5`): `dist\CrossTrans_v1.9.21.exe`, 66 026 238 bytes,
-built by hand into a scratch directory (`build_exe.bat` deletes `dist\`) and copied in. The
-post-build checks pass: `kanwadict4.db` bundled (1158 archive entries) and the four glyph-evidence
-codecs bundled. And, run rather than inspected: an interpreter whose only standard library is the
-EXE's own `base_library.zip` looks up and encodes with all four codecs - the exact condition
-under which `lang_id` would log "[LangID] glyph evidence disabled" - so the EXE cannot log it.
-Then the EXE's own code, run: every module of its PYZ (954), its bootstrap modules, binaries and
-data extracted, and `lang_id` and `furigana` executed from them in an interpreter whose only
-standard library is the EXE's - glyph evidence on, no "disabled" line in the captured log,
-営業時間 Japanese by its glyph, 我们明天去北京。 and 這是我的書。 Chinese (by glyph, by grammar),
-東京大学 left to the model as designed, and 東京大学 read とうきょうだいがく by the bundled
-pykakasi dictionary. (One warning, `win32crypt not available`, belongs to that harness: in the
-real EXE the bootloader's pywin32 hook sets up those DLLs first.) Not done here: starting the EXE
-- the user's CrossTrans holds the single-instance lock, so a second one would ask it to show
-itself, and a real run takes the user's hotkeys and spends an API call. The manual checks are the
-user's (the user, 2026-10-19: test first, then release).
+**The build to release**: `dist\CrossTrans_v1.9.21_edges_2026-10-19.exe`, 66 057 472 bytes, from
+`f4781dc`, built by hand into a scratch directory (`build_exe.bat` deletes `dist\`) and copied
+in. Both post-build checks pass - `kanwadict4.db` bundled (1158 archive entries) and the four
+glyph-evidence codecs - and its PYZ carries the last popup code (`_bind_edges`, `_end_front`,
+`popup_layout.edge_at` / `resize`, `POPUP_FRONT_MS`). The user tested the popup work on it:
+"a complete success" (2026-10-19).
 
-**Rebuilt 2026-10-19 with the quick-translate popup work** (from `51435a3`, the "Show all" fix
-on top of the merge `b64cd92`): `dist\CrossTrans_v1.9.21_popup_2026-10-19.exe`, 66 052 404 bytes -
-under its own name, because the
-user was running `CrossTrans_v1.9.21.exe` to test it. Both post-build checks pass (`kanwadict4.db`,
-1158 archive entries; the four glyph codecs) and `src.ui.popup_layout` is in its PYZ. Not started
-here, for the same reasons.
+Earlier 1.9.21 builds, each superseded by the next and named apart because the user was running
+the one before: `CrossTrans_v1.9.21.exe` (2026-10-16, `39419c5`), `_popup_2026-10-19` (`51435a3`),
+`_grip_2026-10-19` (`4f926b4`). The first was also run rather than inspected: an interpreter whose
+only standard library is the EXE's own `base_library.zip` looks up and encodes with all four
+codecs - the exact condition under which `lang_id` would log "[LangID] glyph evidence disabled" -
+and the EXE's own code (every module of its PYZ, 954, with its bootstrap modules, binaries and
+data) ran `lang_id` and `furigana` in such an interpreter: glyph evidence on, 営業時間 Japanese by
+its glyph, 我们明天去北京。 and 這是我的書。 Chinese (by glyph, by grammar), 東京大学 left to the
+model as designed and read とうきょうだいがく by the bundled pykakasi dictionary. None was started
+here: the user's CrossTrans holds the single-instance lock, and a real run takes the user's
+hotkeys and spends an API call.
 
-**Rebuilt again 2026-10-19 with the grip outline** (from `4f926b4`, the merge of Decision 35):
-`dist\CrossTrans_v1.9.21_grip_2026-10-19.exe`, 66 053 941 bytes - under its own name again, the user
-was running the `_popup_` build. Both post-build checks pass (`kanwadict4.db`, 1158 archive entries;
-the four glyph codecs), and its PYZ carries the new grip code (`_show_grip_outline`,
-`_grip_preview`, `POPUP_GRIP_PREVIEW_MS`; `_grip_pending` gone). Not started here.
+### Docs — tidied for 1.9.21 (2026-10-19)
 
-**Rebuilt again 2026-10-19 with the edges and the on-top fix** (from `f4781dc`):
-`dist\CrossTrans_v1.9.21_edges_2026-10-19.exe`, 66 057 472 bytes - its own name again, the user
-was running the `_grip_` build. Both post-build checks pass (`kanwadict4.db`, 1158 archive
-entries; the four glyph codecs), and its PYZ carries the new code (`_bind_edges`, `_end_front`,
-`popup_layout.edge_at` / `resize`, `POPUP_FRONT_MS`; no `_resize_handles`). Not started here.
+The user, after testing the `_edges_` build: tidy the documents and leave a clean working tree;
+commit only, no release yet.
+
+**Changed**
+- `ROADMAP.md`: "Where things stand" still called the H1, J and K work unmerged and unpushed. Now
+  one table of what 1.9.21 carries, the current build and the one open item, the release; the
+  backlog lists the open deferred items and one line for the closed ones instead of their history.
+- `ROADMAP_DONE.md`: H1, J, K and P marked as on `main`; P's and K's "still the user's" brought
+  up to date (merged, pushed, D19 decided, the Worker deployed, the popup checks passed).
+- `CHANGELOG.md`: the four 1.9.21 build notes merged into the one above.
+- `CLAUDE.md`: two furigana lines still described the popup's estimated height.
+- `DEFERRED.md`: **D21** - `estimate_notation_px()` and `estimate_ruby_overhead_px()` are called
+  only by their tests since Decision 34.
+- `.gitignore`: `AGENTS.md` - a local copy of `CLAUDE.md` for other AI agents, untracked since K13
+  and the one file left in `git status`; refreshed from the current `CLAUDE.md`.
+
+**Tests**: 1780 (no change).
 
 ### Fix — The popup hidden under its source app; resized from any edge, to any sensible size (2026-10-19)
 

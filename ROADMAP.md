@@ -9,35 +9,25 @@
 ## Where things stand
 
 **Current release: 1.9.20** — tag `v1.9.20`, published 2026-09-02 with
-`CrossTrans_v1.9.20.exe` attached. It carries the Word-like furigana work (copy the bases, one
-shared baseline, no plate, 均等割り付け), the History window fix, "Open Translator" on a failed
-quick translate, the dictionary window's empty band, the build script's false SUCCESS, and the
-popup's model credit. Suite at that commit: 551 passed / 0 failed.
+`CrossTrans_v1.9.20.exe` attached: the Word-like furigana work, the History window fix, "Open
+Translator" on a failed quick translate, the dictionary window's empty band, the build script's
+false SUCCESS, and the popup's model credit.
 
-The previous public release was 1.9.19 (2026-08-18, furigana everywhere).
+**Next: 1.9.21** — the number the user chose on 2026-10-16; `VERSION` says so. Everything for it is
+on `main`, pushed, CI green (1780 tests: 1770 passed, 10 skipped by design). Not tagged, not
+released. What it carries, each archived in `ROADMAP_DONE.md` and detailed in `CHANGELOG.md` →
+Unreleased:
 
-Every roadmap item up to and including 1.9.20 is complete and archived — nothing is
-half-finished, and there is no work in progress.
+| Work | ROADMAP_DONE | Decisions |
+|---|---|---|
+| Health review: the "already running" notice, the JSON Lines log, CI | H1 | 12–20 |
+| Japanese language identity: furigana on every Japanese surface, a Dictionary that knows its languages | J | 21–27 |
+| Follow-ups and quiet tests; accurate furigana as a download (D19) | K | 28–33 |
+| D11's default models, deployed to the Worker (2026-10-19) | — (CHANGELOG "Worker deploy") | 19, 20, 31 |
+| The quick-translate popup: sized by measuring, laid out for reading; the grip, every edge, on top when shown | P | 34, 35 |
 
-**Unreleased work on `main`**: the H1 health-review fixes (2026-09-07/08) — archived in
-`ROADMAP_DONE.md`, detailed in `CHANGELOG.md` → Unreleased, reasoned in Decisions 12–20. They sat
-on the unmerged branch `h1-health-review` until **2026-10-15**, when it was merged into `main`
-(`f28a276`, `--no-ff`, not pushed). Suite 551 → 676. **Not yet released**: no version bump, no
-tag, no build.
-
-**Unreleased work on branch `feature/japanese-language-identity`** (2026-10-15): Japanese
-language identity — furigana on every Japanese surface and a Dictionary that knows which
-language it looks up, plus one Dictionary mode for both buttons (D13–D15). Archived in
-`ROADMAP_DONE.md` ("J"), detailed in `CHANGELOG.md` → Unreleased, reasoned in Decisions 21–27.
-Branched from `main` after the H1 merge; **not merged into `main`, not pushed**. Suite 676 → 1183.
-
-**Follow-ups on the same branch (2026-10-16, phases K1–K13)**: the fifteen items proposed after
-J12, which the user asked for in full - the suite on a clean machine, the EXE, D16, the verdict
-gaps of the new feature, History, the old deferred items, AGENTS.md, tooling and measurements -
-and quiet tests (K12), after the user reported that test runs threw windows over the screen and
-the measurements used up the translation quota. Archived in `ROADMAP_DONE.md` ("K"), detailed in
-`CHANGELOG.md` → Unreleased, reasoned in Decisions 28–32. Suite 1183 → 1502. **Not merged into
-`main`, not pushed.**
+**Current build**: `dist\CrossTrans_v1.9.21_edges_2026-10-19.exe`, from `f4781dc`. The user tested
+the popup work on it on 2026-10-19 - "a complete success".
 
 ---
 
@@ -45,37 +35,22 @@ the measurements used up the translation quota. Archived in `ROADMAP_DONE.md` ("
 
 | Item | Status | Notes |
 |------|--------|-------|
-| Cut 1.9.21 | 🔨 In progress | Chosen by the user on 2026-10-16: `VERSION` bumped, the branch merged into `main` and pushed (CI green), and built by hand as `dist\CrossTrans_v1.9.21.exe` (`build_exe.bat` deletes `dist\` first, released EXEs included). The quick-translate popup work (ROADMAP_DONE "P", Decision 34) - the user, 2026-10-19: everything in that session goes into 1.9.21 - is merged (`b64cd92`, then the "Show all" fix `51435a3`) and pushed, and 1.9.21 rebuilt as `dist\CrossTrans_v1.9.21_popup_2026-10-19.exe` (the earlier file was in use). Then the user found the grip drag laggy: it now drags an outline (Decision 35, merged `4f926b4`, pushed), rebuilt as `dist\CrossTrans_v1.9.21_grip_2026-10-19.exe`. Testing it, the user found the popup hidden under a maximized VS Code and asked for every edge and any size: fixed (Decision 35, merged `f4781dc`, pushed), rebuilt as `dist\CrossTrans_v1.9.21_edges_2026-10-19.exe`. Still to do: the user's manual checks on that EXE (ROADMAP_DONE "P" and "K"; test first, then release), then tag, write release notes. The H1 work is on `main` and tested; the language-identity work is on its branch - merge it first if it ships in 1.9.21 rather than 1.9.22 (the user's call) |
+| Release 1.9.21 | 📋 Waiting for the user | Tag `v1.9.21`, write the release notes, publish the GitHub release with the EXE. The user, 2026-10-19: not yet - commit only. A release reaches every user through the auto-updater, so it goes out only on the user's word. |
 
 ---
 
 ## Backlog — identified, not scheduled
 
-D1–D3 were closed on 2026-08-28. The 2026-09-07 health review reopened the file with D4–D10;
-**D6–D9 were closed on 2026-09-07** (Groq had decommissioned every model D6/D7 named — see
-Decision 15 — the two pieces of dead code went with them, and the clipboard tests were made
-hermetic), **D4, D5 and D10 on 2026-09-08** (a second instance now asks the running one for its window, the
-file log is JSON Lines, and the suite runs on `windows-latest` for every push; see Decisions 16
-to 18), and closing them surfaced **D11**. `DEFERRED.md` now holds **D11** and **D12**. D11 was
-narrowed three times on 2026-09-08: Google's three defaults were dead and were replaced and made
-self-maintaining (Decision 19); OpenRouter's two were dead *and* mis-routed to Together
-(Decision 20); then keys arrived for Cerebras and SambaNova, whose lists were 6/6 and 11/12 dead.
-Five providers checked, not one table clean - eight remain, each needing its own key (desk-checked
-against the providers' own deprecation pages on 2026-10-16, K8: Anthropic, xAI and DeepSeek are
-entirely gone, Together and OpenAI going this month; **replaced the same day from the providers'
-docs**, K15 - listed, not yet called; **deployed to the Worker on 2026-10-19**, together with the
-September Cerebras, SambaNova and OpenRouter fixes that had never reached it). **D12** is the cross-provider model-name clash
-that surfaced from the same work (**closed 2026-10-16**, K8: the key decides). **D13–D15** came out of the
-language-identity work on 2026-10-15 (Dictionary mode implemented twice, a failed lookup's toast
-that raised `NameError`, the main-window dialogs' `grab_set()`) and were **closed the same day**.
-Closing D15 surfaced **D16**: `UpdateFailedDialog` is a `grab_set()` + `transient()` +
-`wait_window()` dialog on the withdrawn root - the documented freeze trap, on the failed-update
-path (**closed 2026-10-16**, K2). The language-identity work then added **D17** (the History dialog takes ~1 s to open with
-100 entries, before any readings; **closed 2026-10-16**, K7) and **D18** (two pieces of dead code; **removed 2026-10-16**, K8). None is scheduled; each
-carries its own trigger condition. **D19** (2026-10-16, K1): pykakasi - the one reading provider
-every install has - reads a word differently from fugashi in 30% of real sentences (**closed
-2026-10-16**, K14: the user chose a download over bundling - the Japanese pack in Settings ->
-Dictionary now applies to furigana at once, and the tab says which reader is in use). **D20** (2026-10-19, found in the popup work): the
-quick-translate popup's `WS_EX_NOACTIVATE` has never been in effect - set before Tk creates the
-window that would carry it; left for the user, since making it effective would send Ctrl+C on a
-selection in the popup to the user's app.
+Open in `DEFERRED.md`, each with its trigger:
+- **D11** - the default models of eight providers are listed from the providers' own docs and
+  deployed, but not yet called (each needs its own key); a possible `'AIza'` key prefix for Google
+  is the user's call.
+- **D20** - the popup's `WS_EX_NOACTIVATE` has never been in effect; making it effective would send
+  Ctrl+C on a selection in the popup to the user's app. The user's call (recommended: leave it).
+- **D21** - `estimate_notation_px()` and `estimate_ruby_overhead_px()` in `ruby_text.py` are
+  called only by their tests since Decision 34.
+
+Closed, with the details in `CHANGELOG.md` and the decisions: D1–D3 (2026-08-28); D4–D10
+(2026-09-07/08, Decisions 15–18); D12–D19 (2026-10-15/16 - the key decides between providers,
+one Dictionary mode, a failed lookup's message, no `grab_set()` dialogs, History in batches, dead
+code, UniDic as a download).
