@@ -4,6 +4,17 @@ Newest first. Stable decision IDs are retained; historical details remain in Git
 
 ---
 
+### Decision 44 - Linked reading defaults ON, preserving saved choices
+
+**Date:** 2026-10-20. **Status:** Implemented; v1.9.21 asset refresh requested by the user.
+Set the canonical configuration default to ON. Both the getter and translation-service
+fallback read that default, including configurations written before the preference existed.
+Preserve saved OFF values and existing toggles. Request count, eligibility guards,
+alignment validation and the 20-second deadline are unchanged. This supersedes only
+Decision 37's default OFF; the feature remains experimental.
+
+---
+
 ### Decision 43 - Quiet, persistent update offers with explicit installation
 
 **Date:** 2026-10-20. **Status:** Implemented; included in the v1.9.21 asset refresh.

@@ -9,7 +9,7 @@ No pending changes.
 ### Added
 
 - Background update offers at startup and every 24 hours, with Update / Later / Skip this version, persistent choices and Settings/tray entry points. Auto-check defaults ON and preserves explicit opt-outs (2026-10-20 asset refresh).
-- Optional Linked reading across quick popup, main translator, cache and History; shared toggles and subtle sentence highlights. Experimental, default OFF.
+- Linked reading across quick popup, main translator, cache and History; shared toggles and subtle sentence highlights. Experimental, default ON for new/missing preferences; saved OFF is retained (2026-10-20 asset refresh).
 - Evidence-based Japanese/Chinese source choices, Japanese OCR originals and readings, and an optional accurate-furigana language pack.
 
 ### Changed
@@ -28,7 +28,7 @@ No pending changes.
 
 ### Verification and limits
 
-- Refreshed asset: 1989 local tests passed, one intentional clipboard skip; 43 focused update tests and seven update mutation checks passed. All 71 packaged project modules match source. CI collection floor: 1950.
+- Refreshed asset: 1993 local tests passed, two expected skips (clipboard and root-dist build discovery); the released EXE's bundle was verified directly. All 89 focused linked-reading/update tests passed; prior update mutation checks remain documented. All 71 packaged project modules match source. CI collection floor: 1950.
 - Existing v1.9.21 installations must download the refreshed EXE manually: the version number is unchanged.
 - Linked reading quality/overhead varies by model. Local cancellation cannot guarantee provider cancellation or refunded quota. Details: DEFERRED D22 and docs/linked_reading_evaluation.md.
 

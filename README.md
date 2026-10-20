@@ -33,7 +33,7 @@
 - **Zero Context Switching** — Translation popup appears right at your cursor, in-place. No need to open a browser tab, copy-paste, or switch windows
 - **Replace in Source** — One-click replace selected text with the translation, right in the source app
 - **Dictionary Mode** — Click words for definitions, pronunciation, synonyms, antonyms, examples
-- **Linked Reading (Experimental)** - Optional sentence highlights between source and translation, including cached results and History. Enable in Settings -> Hotkeys or with the chain button.
+- **Linked Reading (Experimental)** - Sentence highlights between source and translation, including cached results and History. Enabled by default; toggle in Settings -> Hotkeys or with the chain button. Saved OFF preferences are retained.
 - **Furigana Everywhere** — Japanese reading guides: hiragana above kanji on every surface that shows Japanese, generated offline
 - **Free Trial Mode** — Daily free translations without API key
 - **15 AI Providers** — Google, OpenAI, Anthropic, DeepSeek, Groq, and more (many offer free tiers)

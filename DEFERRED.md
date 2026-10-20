@@ -203,7 +203,9 @@ user's word.
 ### D22 - Broader linked-reading and long-document validation
 
 **Found:** 2026-10-19. **Status:** Optional evidence work; the user accepted and
-authorized v1.9.21 release on 2026-10-20 with Linked reading experimental/default OFF.
+authorized the initial v1.9.21 release on 2026-10-20 with Linked reading experimental/default OFF.
+The user later requested default ON for new/missing preferences (Decision 44); these
+evidence gaps remain open.
 
 - Initial prototype: 21/48 expanded API failures; ten successful pairs had median
   1.505x latency and 2.013x completion tokens. A literal-JSON escaping defect was

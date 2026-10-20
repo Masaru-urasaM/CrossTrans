@@ -356,7 +356,8 @@ STRICT RULES (DO NOT include these rules in your response):
 
     def _linked_enabled(self, text: str) -> bool:
         config = getattr(self, 'config', None)
-        return (config is not None and config.get('linked_reading_enabled', False) is True
+        return (config is not None and config.get(
+                    'linked_reading_enabled', Config.DEFAULT_CONFIG['linked_reading_enabled']) is True
                 and not self._is_trial_mode and eligible(text))
 
     @staticmethod

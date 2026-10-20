@@ -54,7 +54,7 @@ jobs:
 
       - name: Check the run actually ran
         if: always()
-        # --min-total sits a little under the suite's size (1,990 on 2026-10-20),
+        # --min-total sits a little under the suite's size (1,995 on 2026-10-20),
         # so a test file that quietly stops being collected fails the build.
         # Raise it as the suite grows; never lower it to make a run pass.
         # Skips expected here: nine tests need fugashi + UniDic, which

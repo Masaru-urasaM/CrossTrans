@@ -76,7 +76,7 @@ class Config:
         "model_rotation": False,  # Try other models before switching keys on failure
         "furigana_enabled": True,  # Show furigana (reading guides) for Japanese source text
         "furigana_reading_pane": True,  # Reading pane under the main-window input box
-        "linked_reading_enabled": False,
+        "linked_reading_enabled": True,
         "quick_popup_width": None,   # quick-translate popup size the user dragged it to;
         "quick_popup_height": None,  # None = automatic (Decision 34)
     }
@@ -356,7 +356,7 @@ class Config:
 
     def get_linked_reading_enabled(self) -> bool:
         """Whether experimental single-request sentence linking is enabled."""
-        return self._config.get('linked_reading_enabled', False)
+        return self._config.get('linked_reading_enabled', self.DEFAULT_CONFIG['linked_reading_enabled'])
 
     def set_linked_reading_enabled(self, enabled: bool):
         self._config['linked_reading_enabled'] = bool(enabled)

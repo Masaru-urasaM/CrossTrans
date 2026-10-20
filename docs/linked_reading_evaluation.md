@@ -1,7 +1,8 @@
 # Linked reading - Release evidence
 
 **Status:** v1.9.21 accepted and release authorized by the user on 2026-10-20.
-Linked reading remains experimental/default OFF. No active implementation tasks.
+Linked reading remains experimental. The 2026-10-20 asset refresh defaults it ON for
+new/missing preferences, retaining saved OFF choices (Decision 44). No active implementation tasks.
 
 ## Delivered
 

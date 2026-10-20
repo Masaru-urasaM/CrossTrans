@@ -3,6 +3,14 @@
 Completed work only. Active tasks: [ROADMAP.md](ROADMAP.md).
 Implementation rules: [CLAUDE.md](CLAUDE.md) and [DESIGN_DECISIONS.md](DESIGN_DECISIONS.md).
 
+## v1.9.21 asset refresh - Linked reading default ON (2026-10-20)
+
+New/missing preferences enable Linked reading; saved OFF remains OFF. Configuration
+and translation-service fallbacks share the canonical default. Decision 44 records the
+change; EXE/checksum are refreshed in the existing release without a version bump.
+Verification: 1993 full-suite passes, two expected skips (clipboard/root-dist discovery),
+89 focused passes, and direct bundle/source verification of the release EXE (71 modules).
+
 ## v1.9.21 asset refresh - Update offers (2026-10-20)
 
 Repaired automatic notifications; added daily checks, persisted Later/Skip, Settings/tray
@@ -29,7 +37,7 @@ Delivery: refreshed `CrossTrans_v1.9.21.exe` and `SHA256SUMS.txt` in the existin
 Native layout/hover/cancellation checks, phase mutation checks and bundle/code
 verification passed. The user approved the final word-wrap EXE for release.
 CI requires at least 1900 tests. Decisions 12-42 preserve the technical rationale.
-Linked reading stays experimental/default OFF; remaining evidence gaps are D22.
+Linked reading stays experimental; the latest asset defaults ON (Decision 44). Evidence gaps are D22.
 See [the concise evaluation](docs/linked_reading_evaluation.md) for limits and measurements.
 
 ## Earlier completed work

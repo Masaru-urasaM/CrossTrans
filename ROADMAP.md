@@ -5,7 +5,8 @@
 **1.9.21** - accepted by the user on 2026-10-20.
 [GitHub release](https://github.com/Masaru-urasaM/CrossTrans/releases/tag/v1.9.21)
 with `CrossTrans_v1.9.21.exe` and `SHA256SUMS.txt`.
-The 2026-10-20 asset refresh includes automatic update offers; same-version
+The 2026-10-20 asset refresh includes automatic update offers and Linked reading
+default ON for new/missing preferences, preserving saved OFF choices; same-version
 installations must download it manually.
 
 ## Active work

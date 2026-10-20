@@ -587,8 +587,10 @@ before reading the geometry: `update_idletasks()` alone does not lay out a newly
 
 ## Linked Reading and Translation Tasks (v1.9.21)
 
-- **Default OFF / experimental:** Settings -> Hotkeys and popup/main toggles share
+- **Default ON / experimental:** Settings -> Hotkeys and popup/main toggles share
   `linked_reading_enabled`. Eligible text uses source IDs in the same generation;
+  new/missing preferences enable linking; an explicitly saved OFF stays OFF. The
+  getter and service fallback read the canonical `Config.DEFAULT_CONFIG` default.
   never add a repair/alignment request. The 6000-character/120-unit guards limit
   structured links, not translation input. Code/JSON-like, trial, OCR, files and
   freeform paths retain their ordinary prompts.

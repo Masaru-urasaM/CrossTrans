@@ -149,7 +149,7 @@ def test_corrupt_metadata_and_off_setting_do_not_link(manager, tk_root):
     assert getattr(manager, '_linked_controller', None) is None
 
 
-def test_settings_checkbox_really_persists_the_opt_in(tk_root):
+def test_settings_checkbox_starts_enabled_and_persists_both_toggles(tk_root):
     import tkinter as tk
     from config import Config
     from src.ui.settings.hotkey_tab import HotkeyTabMixin
@@ -163,11 +163,11 @@ def test_settings_checkbox_really_persists_the_opt_in(tk_root):
         tab._create_linked_reading_section(window)
         button = next(child for child in window.winfo_children()
                       if child.winfo_class() == 'TCheckbutton')
-        assert cfg.get_linked_reading_enabled() is False
-        button.invoke()
         assert cfg.get_linked_reading_enabled() is True
         button.invoke()
         assert cfg.get_linked_reading_enabled() is False
+        button.invoke()
+        assert cfg.get_linked_reading_enabled() is True
         assert cfg.save.call_count == 2
     finally:
         window.destroy()

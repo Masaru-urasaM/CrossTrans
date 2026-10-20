@@ -115,11 +115,38 @@ def test_setting_default_and_toggle_do_not_change_other_options():
     cfg = Config.__new__(Config)
     cfg._config = {'furigana_enabled': False}
     cfg.save = Mock()
-    assert cfg.get_linked_reading_enabled() is False
-    cfg.set_linked_reading_enabled(True)
     assert cfg.get_linked_reading_enabled() is True
+    cfg.set_linked_reading_enabled(False)
+    assert cfg.get_linked_reading_enabled() is False
     assert cfg._config['furigana_enabled'] is False
     cfg.save.assert_called_once()
+
+
+@pytest.mark.parametrize('saved, enabled', [
+    (None, True), ({}, True),
+    ({'linked_reading_enabled': True}, True),
+    ({'linked_reading_enabled': False}, False),
+])
+def test_linked_default_for_new_legacy_and_saved_preferences(tmp_path, monkeypatch, saved, enabled):
+    path = tmp_path / 'config.json'
+    if saved is not None:
+        path.write_text(json.dumps(saved), encoding='utf-8')
+    monkeypatch.setattr(Config, 'CONFIG_DIR', str(tmp_path))
+    monkeypatch.setattr(Config, 'CONFIG_FILE', str(path))
+    cfg = Config()
+    service = make_service()
+    service.config = cfg
+    assert cfg.get_linked_reading_enabled() is enabled
+    assert service._linked_enabled(SOURCE) is enabled
+
+
+def test_missing_preference_uses_linked_prompt_without_an_extra_request():
+    service = make_service()
+    del service.config.data['linked_reading_enabled']
+    result = service.translate_or_fix(SOURCE, 'English')
+    assert isinstance(result, AlignedText)
+    assert result == 'One. Two.'
+    service._call_model.assert_called_once()
 
 
 def test_off_mode_retains_cached_carrier_for_later_display_toggle():
