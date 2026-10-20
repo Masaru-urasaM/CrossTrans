@@ -165,6 +165,43 @@ def allocate(room: int, translation: int, original: int = 0, *, min_translation:
     return Heights(given, kept, given < translation, kept < original)
 
 
+def allocate_expanded(room: int, translation: int, original: int, *,
+                      min_translation: int, min_original: int) -> Heights:
+    """Grow both panes fairly; a short pane returns its unused room."""
+    if translation + original <= room:
+        return Heights(translation, original, False, False)
+    base_t, base_o = min(translation, min_translation), min(original, min_original)
+    extra = max(0, room - base_t - base_o)
+    missing_t, missing_o = translation - base_t, original - base_o
+    total = missing_t + missing_o
+    given_t = base_t + min(missing_t, round(extra * missing_t / total)) if total else base_t
+    given_o = base_o + min(missing_o, max(0, room - given_t - base_o))
+    return Heights(given_t, given_o, given_t < translation, given_o < original)
+
+
+def expansion_widths(current: int, minimum: int, work: WorkArea) -> tuple[int, ...]:
+    """A bounded search: readable widths first, the monitor limit last."""
+    maximum = max(minimum, min(round(work.width * 0.9), work.width - 2 * SCREEN_MARGIN))
+    current = min(maximum, max(minimum, current))
+    return tuple(sorted({current, *(min(maximum, round(current * scale))
+                                   for scale in (1.25, 1.6, 2.0)), maximum}))
+
+
+def choose_expansion(measurements, height_cap: int, chrome: int, readable_limit: int):
+    """Smallest width showing everything; otherwise favor readable line lengths.
+
+    Measurements are (width, translated_pixels, original_pixels) from real Tk
+    wrapping. If no width fits, wider-than-readable lines offer little benefit
+    to a reader; choose the widest measured width within the soft limit.
+    """
+    for width, translation, original in measurements:
+        if chrome + translation + original <= height_cap:
+            return width, chrome + translation + original
+    readable = [row for row in measurements if row[0] <= readable_limit]
+    chosen = readable[-1] if readable else measurements[0]
+    return chosen[0], height_cap
+
+
 # --------------------------------------------------------------------------- #
 # Position
 # --------------------------------------------------------------------------- #

@@ -4,9 +4,11 @@ Handles saving, retrieving, and managing translation history.
 """
 import time
 import uuid
+from copy import deepcopy
 from typing import List, Dict, Any, Optional
 
 from src.core import lang_id
+from src.core.translation_task import active_write
 
 
 class HistoryManager:
@@ -17,9 +19,10 @@ class HistoryManager:
     def __init__(self, config):
         self.config = config
 
+    @active_write
     def add_entry(self, original: str, translated: str, target_lang: str,
                   source_type: str = "text", model_used: str = "Auto",
-                  source_lang: str = "", source_verdict: str = ""):
+                  source_lang: str = "", source_verdict: str = "", alignment=None):
         """Add a new translation entry to history.
 
         Args:
@@ -44,7 +47,7 @@ class HistoryManager:
             'id': str(uuid.uuid4()),
             'timestamp': time.time(),
             'original': original,
-            'translated': translated,
+            'translated': str(translated),
             'target_lang': target_lang,
             'source_lang': source_lang,
             'source_type': source_type,
@@ -52,6 +55,11 @@ class HistoryManager:
         }
         if source_verdict:
             entry['source_verdict'] = source_verdict
+        if alignment is not None:
+            from src.core.translation_alignment import validate_metadata
+            valid = validate_metadata(alignment, original, translated, target_lang, source_type)
+            if valid:
+                entry['alignment'] = deepcopy(valid)
 
         history = self.config.get('history', [])
         history.insert(0, entry)
@@ -65,6 +73,27 @@ class HistoryManager:
     def get_history(self) -> List[Dict[str, Any]]:
         """Get full history list."""
         return self.config.get('history', [])
+
+    def reading_result(self, entry: Dict) -> str:
+        """Restore links and lazily retain a structural map for legacy entries."""
+        from src.core.translation_alignment import reading_result
+        source, text = entry.get('original', ''), entry.get('translated', '')
+        mode = entry.get('source_type', 'text')
+        mode = mode if mode in ('text', 'merged') else 'text'
+        if source.startswith('[') and 'attachment(s)]' in source:
+            return text
+        value = reading_result(text, entry.get('alignment'), source,
+                               entry.get('target_lang', ''), mode)
+        data = getattr(value, 'alignment', None)
+        if data and data != entry.get('alignment'):
+            history = self.get_history()
+            for stored in history:
+                if (stored.get('id') == entry.get('id') and stored.get('original') == source
+                        and stored.get('translated') == text and stored.get('target_lang') == entry.get('target_lang')):
+                    stored['alignment'] = deepcopy(data)
+                    self.config.set('history', history)
+                    break
+        return value
 
     def find_cached_entry(self, original: str, target_lang: str,
                           source_type: str = 'text') -> Optional[Dict]:
@@ -135,6 +164,7 @@ class HistoryManager:
                     or entry.get('source_lang') != verdict):
                 entry['source_verdict'] = verdict
                 entry['source_lang'] = verdict
+                entry.pop('alignment', None)
                 changed += 1
         if changed:
             self.config.set('history', history)

@@ -18,6 +18,7 @@ from src.constants import (
     TRIAL_MODE_ENABLED
 )
 from src.core.runtime_utils import get_runtime_context
+from src.core.translation_task import TranslationStopped, bounded_io, current_task, request_budget
 
 
 class TrialAPIError(Exception):
@@ -50,6 +51,7 @@ class TrialAPIClient:
         """
         return bool(TRIAL_MODE_ENABLED and self.proxy_url)
 
+    @request_budget
     def translate(self, prompt: str) -> str:
         """Translate text using trial mode API.
 
@@ -69,7 +71,9 @@ class TrialAPIClient:
             )
 
         try:
-            return self._make_request(prompt)
+            return bounded_io(lambda: self._make_request(prompt))
+        except TranslationStopped:
+            raise
         except urllib.error.HTTPError as e:
             error_body = ""
             try:
@@ -147,7 +151,9 @@ class TrialAPIClient:
         )
 
         # Make request
-        with urllib.request.urlopen(request, timeout=self.REQUEST_TIMEOUT) as response:
+        task = current_task()
+        timeout = min(self.REQUEST_TIMEOUT, task.remaining()) if task else self.REQUEST_TIMEOUT
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             response_data = response.read().decode('utf-8')
 
             # DEBUG: Log raw response for troubleshooting
@@ -178,6 +184,8 @@ class TrialAPIClient:
         """
         try:
             # Standard OpenAI-compatible response format
+            from src.core.generation_result import check_generation_result
+            check_generation_result(result)
             if 'choices' in result:
                 return result['choices'][0]['message']['content'].strip()
 

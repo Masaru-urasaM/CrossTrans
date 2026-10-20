@@ -30,7 +30,9 @@ from src.core.source_marker import (ROW_CHANGE, language_label, other_language,
                                     source_row)
 from src.ui import popup_layout
 from src.ui.dictionary_render import overhead_px, split_dictionary_text
-from src.ui.ruby_text import RubyText, insert_output
+from src.ui.ruby_text import NO_AUTOSTYLE, RubyText, insert_output
+from src.ui.linked_reading import LinkedReadingController
+from src.core.translation_alignment import validate_metadata, reading_result
 
 # The dictionary result window's padding, which calculate_size() still sizes it with.
 # The quick-translate popup measures itself instead (Decision 34).
@@ -66,6 +68,7 @@ ICON_GLYPHS = {
     'dictionary': chr(0xE82D),    # Dictionary
     'open': chr(0xE8A7),          # OpenInNewWindow
     'prompt': chr(0xE70F),        # Edit
+    'linked': chr(0xE71B),        # Link
 }
 ICON_BG = '#3a3f44'               # neutral; an icon takes its action's colour on hover
 TOOLTIP_FONT = ('Segoe UI', 9)
@@ -420,6 +423,12 @@ class QuickTranslateManager:
         self.popup_copy_btn: Optional[ttk.Button] = None
         self.popup_dict_btn: Optional[ttk.Button] = None
         self.popup_source_chooser: Optional[ttk.Frame] = None  # Japanese / Chinese row
+        self.popup_linked_btn = None
+        self._linked_status = None
+        self._linked_setting_binding = None
+        self._linked_tooltip = None
+        self._linked_paused = False
+        self._linked_controller = None
 
         # Mouse position captured when hotkey was pressed
         self._last_mouse_x = 0
@@ -478,6 +487,7 @@ class QuickTranslateManager:
         self._original_holder: Optional[tk.Frame] = None
         self._original_scrollbar = None
         self._original_collapsed = True
+        self._expanded_restore = None
         self._text_holder: Optional[tk.Frame] = None
         self._text_scrollbar = None
         self._trial_frame: Optional[ttk.Frame] = None
@@ -500,7 +510,8 @@ class QuickTranslateManager:
                             on_open_settings_hotkeys_tab: Optional[Callable[[], None]] = None,
                             on_re_translate: Optional[Callable[[], None]] = None,
                             on_custom_prompt_send: Optional[Callable[[str], None]] = None,
-                            on_choose_source: Optional[Callable[[str], None]] = None):
+                            on_choose_source: Optional[Callable[[str], None]] = None,
+                            on_dismiss: Optional[Callable[[], None]] = None):
         """Configure callback functions for quick translate actions.
 
         Args:
@@ -526,6 +537,7 @@ class QuickTranslateManager:
         self._on_re_translate = on_re_translate
         self._on_custom_prompt_send = on_custom_prompt_send
         self._on_choose_source = on_choose_source
+        self._on_dismiss = on_dismiss
 
     def _apply_noactivate(self):
         """Apply WS_EX_NOACTIVATE to popup window so it doesn't steal focus from source app."""
@@ -569,11 +581,18 @@ class QuickTranslateManager:
             padx=8,
             pady=4
         )
-        self._loading_label.pack()
+        self._loading_label.pack(side=LEFT)
+        cancel_button = tk.Button(frame, text=CLOSE_GLYPH, command=self.dismiss,
+                                  relief='flat', bd=0, padx=6, bg='#2b2b2b', fg=CLOSE_FG,
+                                  activebackground=CLOSE_ACTIVE_BG, activeforeground='#ffffff',
+                                  **NO_AUTOSTYLE)
+        cancel_button.pack(side=RIGHT)
+        self.popup.bind('<Escape>', lambda _event: self.dismiss())
+        self.popup.protocol('WM_DELETE_WINDOW', self.dismiss)
 
         # Placed by the result's rules (Decision 34): beside the cursor and on the
         # screen, so the result then opens at the same corner.
-        width = self._loading_label.winfo_reqwidth() + 2 * 12
+        width = self._loading_label.winfo_reqwidth() + cancel_button.winfo_reqwidth() + 2 * 12
         height = self._loading_label.winfo_reqheight() + 2 * 12
         x, y, _ = popup_layout.place(self._anchor(), width, height, self._work_area(),
                                      min_height=height)
@@ -594,8 +613,9 @@ class QuickTranslateManager:
             self._loading_animation_running = False
             return
 
-        # Safety timeout: auto-close after 15s to prevent infinite animation
-        LOADING_TIMEOUT_SECONDS = 15
+        # The request runner owns the error message at the shared deadline.
+        from src.constants import TRANSLATION_TIMEOUT_SECONDS
+        LOADING_TIMEOUT_SECONDS = TRANSLATION_TIMEOUT_SECONDS
         if self._loading_start_time and time.time() - self._loading_start_time > LOADING_TIMEOUT_SECONDS:
             logging.warning(f"Loading animation timed out after {LOADING_TIMEOUT_SECONDS}s, auto-closing")
             self._loading_animation_running = False
@@ -623,7 +643,7 @@ class QuickTranslateManager:
 
             # Schedule next frame (400ms)
             if self.popup and self.popup.winfo_exists():
-                self.popup.after(400, self._animate_loading)
+                self._loading_job = self.popup.after(400, self._animate_loading)
 
         except tk.TclError:
             # Widget destroyed
@@ -748,7 +768,11 @@ class QuickTranslateManager:
         self._current_trial_info = trial_info  # Store for restoring after custom-prompt cancel
         self._current_furigana = furigana_text  # Store for restoring after custom-prompt cancel
         self._current_source_lang = source_lang
+        self._current_alignment = (validate_metadata(getattr(translated, 'alignment', None),
+                                   original, translated, target_lang)
+                                   if not is_error and not is_grammar else None)
         self._is_grammar = is_grammar  # Grammar-fix result: hide translation-only buttons
+        self._linked_paused = False
         self._original_collapsed = True
         self._generation += 1
 
@@ -760,7 +784,7 @@ class QuickTranslateManager:
             self.popup.attributes('-alpha', 0.0)
         except tk.TclError:
             pass
-        self.popup.protocol("WM_DELETE_WINDOW", self.close)
+        self.popup.protocol("WM_DELETE_WINDOW", self.dismiss)
 
         # On top while it is measured and for POPUP_FRONT_MS once it appears (`_reveal`),
         # then free to go behind other windows. Counted from here, the 100 ms it used to
@@ -796,8 +820,8 @@ class QuickTranslateManager:
         if source_mode:
             self._build_source_chooser(main_frame, source_mode, source_lang)
 
-        # The original with its readings (if available), collapsible
-        if furigana_text and not is_error:
+        # Source visibility is independent of optional readings and sentence links.
+        if (furigana_text or (original and not is_grammar)) and not is_error:
             self._render_furigana(main_frame, furigana_text)
             # Separator between furigana and translation
             sep_frame = tk.Frame(main_frame, bg='#555555', height=1)
@@ -817,6 +841,11 @@ class QuickTranslateManager:
                       lang_hint=ruby_hint,
                       enabled=self._ruby_enabled() and not is_error)
         self.popup_text.config(state='disabled')
+        self._sync_linked_reading()
+        self._linked_setting_binding = self.root.bind(
+            '<<LinkedReadingChanged>>', self._sync_linked_reading, add='+')
+        self.popup.bind('<Destroy>', lambda event:
+                        self._unbind_linked_setting() if event.widget is self.popup else None, add='+')
 
         # Mouse wheel scroll is bound by RubyText, including over ruby frames
 
@@ -824,7 +853,7 @@ class QuickTranslateManager:
         self._start_layout()
 
         # Bindings
-        self.popup.bind('<Escape>', lambda e: self.close())
+        self.popup.bind('<Escape>', lambda e: self.dismiss())
 
     # ------------------------------------------------------------------ #
     # Building the popup (Decision 34)
@@ -909,7 +938,7 @@ class QuickTranslateManager:
         header.pack(side=TOP, fill=X, pady=(0, 6))
         self._bind_drag(header)
         self.popup_close_btn = tk.Button(
-            header, text=CLOSE_GLYPH, command=self.close, autostyle=False,
+            header, text=CLOSE_GLYPH, command=self.dismiss, autostyle=False,
             bg=self._frame_bg(), fg=CLOSE_FG, activebackground=CLOSE_ACTIVE_BG,
             activeforeground='#ffffff', font=('Segoe UI', 9), relief='flat', bd=0,
             padx=6, pady=0, cursor='hand2')
@@ -976,7 +1005,7 @@ class QuickTranslateManager:
             button = tk.Button(parent, text=ICON_GLYPHS[key], command=command,
                                autostyle=False, bg=ICON_BG, fg='#ffffff',
                                activebackground=color, activeforeground='#ffffff',
-                               font=(family, ICON_SIZE), relief='flat', padx=8, pady=4,
+                               font=(family, ICON_SIZE), relief='flat', borderwidth=0, padx=8, pady=4,
                                cursor='hand2')
             if tooltip:
                 self._tooltips.append(Tooltip(button, name))
@@ -1031,7 +1060,7 @@ class QuickTranslateManager:
         # Open Translator
         self.popup_open_btn = self._icon_button(
             bar, 'open', "Open Translator", self._handle_open_translator, '#198754')
-        self.popup_open_btn.pack(side=LEFT, fill=Y, padx=(4, 0))
+        self.popup_open_btn.pack(side=RIGHT, fill=Y, padx=(16, 0))
 
         # Custom Prompt - make the box editable and ask the AI a freeform question
         # (translation-only; skipped for grammar results)
@@ -1039,6 +1068,12 @@ class QuickTranslateManager:
             self.popup_custom_prompt_btn = self._icon_button(
                 bar, 'prompt', "Custom Prompt", self._handle_custom_prompt, '#20c997')
             self.popup_custom_prompt_btn.pack(side=LEFT, fill=Y, padx=(4, 0))
+            self.popup_linked_btn = self._icon_button(
+                bar, 'linked', 'Linked reading', self._toggle_linked_reading,
+                '#3a5557', tooltip=False)
+            self.popup_linked_btn.pack(side=LEFT, fill=Y, padx=(4, 0))
+            self._linked_tooltip = Tooltip(self.popup_linked_btn, '')
+            self._tooltips.append(self._linked_tooltip)
 
     def _build_error_bar(self) -> None:
         """A failure notice's bar: the way to the keys, and a way out."""
@@ -1057,7 +1092,7 @@ class QuickTranslateManager:
                            "command": self._handle_open_translator, "width": 16}
         if HAS_TTKBOOTSTRAP:
             open_btn_kwargs["bootstyle"] = "success"
-        ttk.Button(self._btn_frame, **open_btn_kwargs).pack(side=LEFT, padx=8)
+        ttk.Button(self._btn_frame, **open_btn_kwargs).pack(side=RIGHT, padx=8)
 
     def _make_box(self, parent, expand: bool, **text_options):
         """A text box in a holder of its own. The holder's height is set in pixels
@@ -1146,9 +1181,8 @@ class QuickTranslateManager:
 
     def _rows_px(self, box, rows: int) -> int:
         """Pixels of the first `rows` display lines - all of it when there are fewer."""
-        lines = self._count(box, '1.0', 'end -1c', 'update', 'displaylines') + 1
-        if lines <= rows:
-            return self._content_px(box)
+        # Tk clamps a display-line index past the content to end. Counting all
+        # wrapped lines first is quadratic on very long logical paragraphs.
         return self._count(box, '1.0', f'1.0 + {rows} display lines', 'update', 'ypixels')
 
     def _required_width(self) -> int:
@@ -1314,11 +1348,6 @@ class QuickTranslateManager:
             self._show_original_toggle(collapsible)
             if collapsible and self._original_collapsed:
                 limit_o = collapsed_o
-            elif collapsible:
-                # "Show all": all the room but the translation's first rows. The default
-                # share (40%) was smaller than the collapsed rows on a 1024x768 screen, so
-                # the button changed nothing (CI, 2026-10-19).
-                original_share = 1.0
             # The least it keeps: its collapsed rows - at a size the user chose, `rows`.
             min_o = collapsed_o if size is None else min(
                 need_o, self._rows_px(self.popup_furigana, rows) + original_insets)
@@ -1351,15 +1380,21 @@ class QuickTranslateManager:
                 height = max(height, chrome + min_t + min(min_o, shown_o))
 
         room = height - chrome
-        heights = popup_layout.allocate(room, need_t, need_o, min_translation=min_t,
-                                        min_original=min_o, original_limit=limit_o,
-                                        original_share=original_share)
+        if not self._original_collapsed:
+            heights = popup_layout.allocate_expanded(room, need_t, need_o,
+                                                    min_translation=min_t, min_original=min_o)
+        else:
+            heights = popup_layout.allocate(room, need_t, need_o, min_translation=min_t,
+                                            min_original=min_o, original_limit=limit_o,
+                                            original_share=original_share)
+        self._show_original_toggle(bool(limit_o is not None or need_o > min_o
+                                        or heights.translation_capped or not self._original_collapsed))
         if size is not None:
             # The user's size: the translation takes whatever the original leaves.
             translation = max(heights.translation, room - heights.original)
             heights = popup_layout.Heights(translation, heights.original,
                                            need_t > translation, heights.original_capped)
-        gutter = self._text_scrollbar.winfo_reqwidth() if heights.any_capped else 0
+        gutter = self._text_scrollbar.winfo_reqwidth() if heights.any_capped or not self._original_collapsed else 0
         self._fit_box(self._text_holder, self.popup_text, self._text_scrollbar,
                       heights.translation, heights.translation_capped, gutter)
         if self._original_holder is not None:
@@ -1389,9 +1424,13 @@ class QuickTranslateManager:
                 spacer.pack_forget()
             scrollbar.pack(side=RIGHT, fill=Y, before=box)
             box.configure(yscrollcommand=scrollbar.set)
+            if getattr(self, '_linked_controller', None):
+                self._linked_controller.watch_scroll(box)
             return
         scrollbar.pack_forget()
         box.configure(yscrollcommand='')
+        if getattr(self, '_linked_controller', None):
+            self._linked_controller.watch_scroll(box)
         if gutter:
             if spacer is None:
                 spacer = tk.Frame(holder, width=gutter, bg=str(holder.cget('bg')))
@@ -1408,6 +1447,8 @@ class QuickTranslateManager:
         """A drag starts on `edge` (popup_layout.EDGES). The least it may shrink to is
         read now: the rows that must fit whole across, and a row of each box down."""
         self._user_rect = None              # set by this drag's motions, if it has any
+        if getattr(self, '_linked_controller', None):
+            self._linked_controller.clear()
         if self.popup is not None and self._layout is not None:
             least = self._layout.get('chrome', 0)
             for box in (self.popup_text, self.popup_furigana):
@@ -1589,6 +1630,63 @@ class QuickTranslateManager:
         if self._on_choose_source:
             self._on_choose_source(language)
 
+    def _linked_enabled(self):
+        getter = getattr(self.config, 'get_linked_reading_enabled', None)
+        return getter is not None and getter() is True
+
+    def _stop_linked_reading(self):
+        controller = getattr(self, '_linked_controller', None)
+        if controller is not None:
+            controller.close()
+            self._linked_controller = None
+
+    def _toggle_linked_reading(self):
+        self.config.set_linked_reading_enabled(not self._linked_enabled())
+        self._sync_linked_reading()
+        self.root.event_generate('<<LinkedReadingChanged>>', when='tail')
+
+    def _sync_linked_reading(self, _event=None):
+        """Apply the shared preference without regenerating or replacing text."""
+        if self.popup is None or not self.popup.winfo_exists() or self._linked_paused:
+            return
+        enabled = self._linked_enabled()
+        if (enabled and not self._current_alignment and not self._is_grammar
+                and not is_error_text(self._current_translation)):
+            value = reading_result(self._current_translation, None, self._current_original,
+                                   self._current_target_lang)
+            self._current_alignment = getattr(value, 'alignment', None)
+        if self.popup_linked_btn is not None:
+            self.popup_linked_btn.configure(
+                bg='#2e4446' if enabled else ICON_BG,
+                fg='#b7e3dc' if enabled else '#c4cbd4',
+                activebackground='#3a5557' if enabled else '#495057',
+                activeforeground='#ffffff')
+        status = ''
+        if enabled:
+            status = (('Approximate links' if self._current_alignment.get('method') == 'structure'
+                       else 'Hover to link sentences') if self._current_alignment else 'No reliable links')
+        if self._linked_status is not None:
+            self._linked_status.configure(text=status)
+        if self._linked_tooltip is not None:
+            self._linked_tooltip.text = (
+                ('Linked reading: On. ' + status + '.') if enabled else
+                'Linked reading: Off. Click to enable saved or local links.')
+        if not enabled:
+            self._stop_linked_reading()
+        elif (getattr(self, '_linked_controller', None) is None
+              and self._current_alignment and self.popup_furigana is not None
+              and self.popup_text is not None
+              and self.popup_furigana.get_plain() == self._current_original
+              and self.popup_text.get_plain() == self._current_translation):
+            self._linked_controller = LinkedReadingController(
+                self.root, self.popup_furigana, self.popup_text, self._current_alignment,
+                suspended=lambda: not self._linked_enabled() or self._grip_start is not None)
+
+    def _unbind_linked_setting(self):
+        if self._linked_setting_binding is not None:
+            self.root.unbind('<<LinkedReadingChanged>>', self._linked_setting_binding)
+            self._linked_setting_binding = None
+
     def _render_furigana(self, parent, furigana_text: str):
         """The original, with its readings, above the translation - read-only, under a
         small header that names it and, when it runs longer than
@@ -1606,11 +1704,15 @@ class QuickTranslateManager:
         header = ttk.Frame(parent)
         header.pack(side=TOP, fill=X, pady=(0, 2))
         self._bind_drag(header)
-        language = language_label(self._current_source_lang or lang_id.JAPANESE)
-        name = ttk.Label(header, text=f"Original ({language})", font=ORIGINAL_HEADER_FONT,
+        known = self._current_source_lang or (lang_id.JAPANESE if furigana_text else None)
+        language = language_label(known) if known else None
+        name = ttk.Label(header, text=f"Original ({language})" if language else 'Original', font=ORIGINAL_HEADER_FONT,
                          foreground=ATTRIBUTION_FG)
         name.pack(side=LEFT)
         self._bind_drag(name)
+        self._linked_status = ttk.Label(header, text='', font=ORIGINAL_HEADER_FONT,
+                                        foreground=ATTRIBUTION_FG)
+        self._linked_status.pack(side=LEFT, padx=(12, 0))
         # Packed by step 2, and only when the original is longer than its collapsed rows
         toggle = tk.Label(header, text="Show all", font=ORIGINAL_HEADER_FONT,
                           fg=ORIGINAL_TOGGLE_FG, bg=self._frame_bg(), cursor='hand2',
@@ -1620,8 +1722,12 @@ class QuickTranslateManager:
         self._original_header = header
 
         self._original_holder, self.popup_furigana, self._original_scrollbar = self._make_box(
-            parent, expand=False, bg='#2b2b2b')
-        self.popup_furigana.insert_notation(tk.END, furigana_text)
+            parent, expand=False, wrap=tk.WORD, bg='#2b2b2b')
+        if furigana_text:
+            self.popup_furigana.insert_notation(tk.END, furigana_text)
+        else:
+            insert_output(self.popup_furigana, tk.END, self._current_original,
+                          lang_hint=self._current_source_lang, enabled=self._ruby_enabled())
         self.popup_furigana.config(state='disabled')
 
     def _show_original_toggle(self, collapsible: bool) -> None:
@@ -1636,14 +1742,66 @@ class QuickTranslateManager:
             toggle.pack_forget()
 
     def _toggle_original(self, _event=None) -> str:
-        """Open the collapsed original, or collapse it again. The popup's corner stays."""
-        self._original_collapsed = not self._original_collapsed
-        if self.popup is not None and self._layout is not None and self._layout['done']:
-            self._fit_boxes(reposition=False, size=self._user_size)
+        """Fit both full texts using measured width/height, or restore compact mode."""
+        if self.popup is None or self._layout is None or not self._layout['done']:
+            return 'break'
+        if getattr(self, '_linked_controller', None):
+            self._linked_controller.clear()
+        if self._original_collapsed:
+            self._expand_pair()
+        else:
+            self._original_collapsed = True
+            saved = self._expanded_restore
+            self._expanded_restore = None
+            if saved:
+                width, height, x, y, layout_width, cap = saved
+                self._layout.update(width=layout_width, cap=cap)
+                self._fit_header(width)
+                self._fit_boxes(reposition=False, size=(width, height), position=(x, y))
+            else:
+                self._fit_boxes(reposition=False, size=self._user_size)
         return 'break'
+
+    def _expand_pair(self):
+        current = self.popup.winfo_width()
+        self._expanded_restore = (current, self.popup.winfo_height(), self.popup.winfo_x(),
+                                  self.popup.winfo_y(), self._layout['width'], self._layout['cap'])
+        area = get_monitor_work_area(self.popup.winfo_rootx(), self.popup.winfo_rooty())
+        work = popup_layout.WorkArea(*area) if area else self._layout['work']
+        self._layout['work'] = work
+        cap = max(1, min(round(work.height * 0.9), work.height - 2 * POPUP_SCREEN_MARGIN))
+        chrome = self._layout['chrome']
+        gutter = self._text_scrollbar.winfo_reqwidth()
+        # Reserve one consistent gutter during all probes; scrollbar insertion
+        # cannot change the width after the text has been measured.
+        for holder, box, scrollbar in ((self._text_holder, self.popup_text, self._text_scrollbar),
+                                        (self._original_holder, self.popup_furigana, self._original_scrollbar)):
+            if box is not None:
+                self._fit_box(holder, box, scrollbar, holder.winfo_height(), False, gutter)
+        measurements = []
+        for width in popup_layout.expansion_widths(current, self._required_width(), work):
+            self.popup.geometry(f'{width}x{cap}')
+            self.popup.update_idletasks()
+            need_t = self._content_px(self.popup_text) + self._insets(self.popup_text, 'y')
+            need_o = (self._content_px(self.popup_furigana) + self._insets(self.popup_furigana, 'y')
+                      if self.popup_furigana is not None else 0)
+            measurements.append((width, need_t, need_o))
+            if chrome + need_t + need_o <= cap:
+                break
+        width, height = popup_layout.choose_expansion(measurements, cap, chrome, round(current * 1.7))
+        x = min(max(work.left + POPUP_SCREEN_MARGIN, self._expanded_restore[2]),
+                work.right - POPUP_SCREEN_MARGIN - width)
+        y = min(max(work.top + POPUP_SCREEN_MARGIN, self._expanded_restore[3]),
+                work.bottom - POPUP_SCREEN_MARGIN - height)
+        self._original_collapsed = False
+        self._layout.update(width=width, cap=cap)
+        self._fit_header(width)
+        self._fit_boxes(reposition=False, size=(width, height), position=(x, y))
 
     def _start_move(self, event):
         """Record start position for dragging."""
+        if getattr(self, '_linked_controller', None):
+            self._linked_controller.clear()
         self._drag_x = event.x_root
         self._drag_y = event.y_root
 
@@ -1702,6 +1860,9 @@ class QuickTranslateManager:
         """
         if not self.popup_text or not self._btn_frame:
             return
+
+        self._linked_paused = True
+        self._stop_linked_reading()
 
         # I3 - an editable widget never holds ruby. edit_undo() cannot restore a
         # destroyed embedded window, and typing next to one would leave the
@@ -1786,6 +1947,8 @@ class QuickTranslateManager:
 
     def _show_replace_preview(self):
         """Transform popup to show replace preview with strikethrough original and translated text."""
+        self._linked_paused = True
+        self._stop_linked_reading()
         original = self._current_original
         translated = self._current_translation
 
@@ -1967,8 +2130,26 @@ class QuickTranslateManager:
             return
         self._on_open_dictionary(text_to_analyze, self._current_target_lang, self.popup)
 
+    def dismiss(self):
+        callback = getattr(self, '_on_dismiss', None)
+        if callback:
+            callback()
+        self.close()
+
     def close(self):
+        job = getattr(self, '_loading_job', None)
+        if job:
+            try:
+                self.root.after_cancel(job)
+            except tk.TclError:
+                pass
+        self._loading_job = None
         """Close the popup."""
+        self._stop_linked_reading()
+        self._unbind_linked_setting()
+        self.popup_linked_btn = None
+        self._linked_status = None
+        self._linked_tooltip = None
         # Stop loading animation
         self._loading_animation_running = False
         self._loading_label = None
@@ -2016,6 +2197,7 @@ class QuickTranslateManager:
             self._trial_frame = None
             self._grip = None
         self._layout = None
+        self._expanded_restore = None
         self._grip_start = None
         self._user_size = None
         self._user_rect = None

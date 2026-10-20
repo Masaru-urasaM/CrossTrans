@@ -70,6 +70,8 @@ from src.core.update_ui_manager import UpdateUIManager
 from src.core.trial_manager import TrialManager
 from src.ui.screenshot_handler import ScreenshotHandler
 from src.ui.dictionary_popup import DictionaryPopup
+from src.ui.main_linked_reading import MainLinkedReading
+from src.ui.translation_tasks import TranslationTaskRunner
 
 # ===== Reading pane (furigana under the main-window input box) =====
 # The input box itself must stay plain (an embedded ruby frame cannot survive
@@ -170,7 +172,8 @@ class TranslatorApp:
             on_open_settings_hotkeys_tab=self._show_settings_hotkeys_tab,
             on_re_translate=self._on_quick_translate_retranslate,
             on_custom_prompt_send=self._on_quick_translate_custom_prompt_send,
-            on_choose_source=self._on_quick_translate_choose_source
+            on_choose_source=self._on_quick_translate_choose_source,
+            on_dismiss=self._cancel_quick_translation
         )
 
         # Screenshot handler
@@ -182,7 +185,8 @@ class TranslatorApp:
             on_show_quick_translate=self.show_quick_translate,
             get_quick_translate_manager=lambda: self.quick_translate_manager,
             on_show_settings_tab=self._show_settings_tab,
-            get_selected_language=lambda: self.selected_language
+            get_selected_language=lambda: self.selected_language,
+            run_translation=self._start_translation_task
         )
 
         # Dictionary popup manager
@@ -295,6 +299,10 @@ class TranslatorApp:
         Args:
             language: Target language name, or "__screenshot__" for screenshot OCR
         """
+        if threading.current_thread() is not threading.main_thread():
+            self.root.after(0, lambda: self._on_hotkey_translate(language))
+            return
+
         # Check for special screenshot hotkey
         if language == "__screenshot__":
             self.root.after(0, self._on_screenshot_hotkey)
@@ -314,7 +322,7 @@ class TranslatorApp:
             self.quick_translate_manager.capture_mouse_position()
             self.root.after(0, lambda: self.quick_translate_manager.show_loading(
                 "Grammar", loading_text="Fixing grammar"))
-            self.translation_service.do_grammar_fix()
+            self._start_translation_task(self.translation_service.do_grammar_fix, 'Grammar')
             return
 
         # Normal language hotkey: merged translate-or-fix. If the selection is already in
@@ -325,10 +333,50 @@ class TranslatorApp:
         self.quick_translate_manager.capture_mouse_position()
 
         self.root.after(0, lambda: self.quick_translate_manager.show_loading(language))
-        self.translation_service.do_translate_or_fix(language)
+        self._start_translation_task(
+            lambda: self.translation_service.do_translate_or_fix(language), language)
+
+    def _translation_tasks(self):
+        runner = getattr(self, '_translation_task_runner', None)
+        if runner is None:
+            runner = self._translation_task_runner = TranslationTaskRunner(self.root)
+        return runner
+
+    def _reset_translation_controls(self, owner):
+        if owner is not getattr(self, 'popup', None):
+            return
+        self._main_pending_source = None
+        self._stop_translate_animation()
+        for name, text in (('translate_btn', f'Translate → {self.selected_language}'),
+                           ('fix_grammar_btn', 'Fix Grammar')):
+            button = getattr(self, name, None)
+            if button:
+                try:
+                    button.configure(state='normal', text=text)
+                except tk.TclError:
+                    pass
+
+    def _start_translation_task(self, operation, target_lang, on_result=None, owner=None):
+        def failed(error):
+            if owner is None:
+                self.show_quick_translate('', f'Error: {error}', target_lang, model_info='')
+            elif owner is self.popup and owner.winfo_exists():
+                self._reset_translation_controls(owner)
+                self._update_translation(f'Error: {error}')
+
+        return self._translation_tasks().start(
+            operation, on_result=on_result, on_error=failed,
+            on_cancel=(lambda: self._reset_translation_controls(owner)) if owner else None,
+            owner=owner)
+
+    def _cancel_quick_translation(self):
+        runner = getattr(self, '_translation_task_runner', None)
+        if runner and runner._owner is None:
+            runner.cancel()
 
     def _on_screenshot_hotkey(self):
         """Handle screenshot hotkey press (Win+Alt+S)."""
+        self._translation_tasks().cancel()
         self.screenshot_handler.handle_hotkey()
 
     def _cleanup_pending_screenshot(self):
@@ -376,6 +424,7 @@ class TranslatorApp:
 
     def close_quick_translate(self):
         """Close the quick translate popup."""
+        self._cancel_quick_translation()
         self.quick_translate_manager.close()
 
     def _on_quick_translate_copy(self):
@@ -399,13 +448,28 @@ class TranslatorApp:
             self.toast.show_warning("Nothing to re-translate")
             return
 
+        mode = self._quick_result_mode()
+
         # Show the loading animation in place of the current popup.
         self.quick_translate_manager.show_loading(target_lang)
 
         def worker():
-            self.translation_service.redo_translation(text, target_lang)
+            self.translation_service.redo_translation(text, target_lang,
+                                                       **({'mode': 'merged'} if mode == 'merged' else {}))
 
-        threading.Thread(target=worker, daemon=True).start()
+        self._start_translation_task(worker, target_lang)
+
+    def _quick_result_mode(self):
+        value = getattr(self, 'current_translated', '')
+        if not value:
+            return 'text'
+        data = getattr(value, 'alignment', None)
+        if isinstance(data, dict) and data.get('mode') in ('text', 'merged'):
+            return data['mode']
+        history = getattr(self.translation_service, 'history_manager', None)
+        finder = getattr(history, 'find_cached_entry', None)
+        entry = finder(self.current_original, self.current_target_lang, source_type='merged') if finder else None
+        return 'merged' if entry and entry.get('translated') == value else 'text'
 
     def _on_quick_translate_choose_source(self, language: str):
         """The popup's Japanese / Chinese row: translate again, with the answer stated.
@@ -420,15 +484,17 @@ class TranslatorApp:
         target_lang = self.current_target_lang
         if not text:
             return
+        mode = self._quick_result_mode()
         logging.info(f"[LangID] user chose source={language} chars={len(text)}")
         self.translation_service.remember_user_source(text, language)
         self.quick_translate_manager.show_loading(target_lang)
 
         def worker():
             self.translation_service.redo_translation(text, target_lang,
-                                                      source_language=language)
+                                                      source_language=language,
+                                                      **({'mode': 'merged'} if mode == 'merged' else {}))
 
-        threading.Thread(target=worker, daemon=True).start()
+        self._start_translation_task(worker, target_lang)
 
     def _on_quick_translate_custom_prompt_send(self, raw_prompt: str):
         """Send a freeform custom prompt from the popup edit box to the AI.
@@ -449,7 +515,7 @@ class TranslatorApp:
         def worker():
             self.translation_service.ask_freeform(raw_prompt, target_lang)
 
-        threading.Thread(target=worker, daemon=True).start()
+        self._start_translation_task(worker, target_lang)
 
     def _on_quick_translate_copy_and_replace(self):
         """Copy translated text and paste it into the source application.
@@ -642,6 +708,9 @@ class TranslatorApp:
 
         # Handle close button properly
         def on_popup_close():
+            runner = getattr(self, '_translation_task_runner', None)
+            if runner:
+                runner.cancel(owner=self.popup)
             try:
                 if self.popup and self.popup.winfo_exists():
                     self.popup.destroy()
@@ -677,12 +746,7 @@ class TranslatorApp:
 
         # Define on_popup_close reference for buttons
         def on_popup_close_btn():
-            try:
-                if self.popup and self.popup.winfo_exists():
-                    self.popup.destroy()
-            except tk.TclError:
-                pass  # Window already destroyed
-            self.popup = None
+            on_popup_close()
 
         # Translate button
         if HAS_TTKBOOTSTRAP:
@@ -922,6 +986,9 @@ class TranslatorApp:
         self.expand_btn.pack(side=tk.RIGHT)
 
         self._create_translation_box(content_frame, translated, target_lang)
+        self._main_linked = MainLinkedReading(self.root, self.popup, self.original_text,
+                                              self.trans_text, self.config, trans_header)
+        self._main_linked.set_result(translated, original, target_lang)
 
         # Enable DnD for popup window - delay to ensure window is fully realized
         self.popup.after(300, lambda: self._setup_drop_handling(self.popup))
@@ -977,6 +1044,9 @@ class TranslatorApp:
         if selection:
             index = selection[0]
             if index < len(self.filtered_languages):
+                runner = getattr(self, '_translation_task_runner', None)
+                if runner:
+                    runner.cancel(owner=self.popup)
                 self.selected_language = self.filtered_languages[index][0]
                 self._update_translate_button()
 
@@ -1008,6 +1078,12 @@ class TranslatorApp:
         """
         original = self.original_text.get('1.0', tk.END).strip()
 
+        runner = getattr(self, '_translation_task_runner', None)
+        if (source_language is None and runner and runner._owner is self.popup
+                and getattr(self, '_main_pending_source', None) is not None):
+            runner.cancel(owner=self.popup)
+            return
+
         # Check for attachments
         attachments = self.attachment_area.get_attachments() if (hasattr(self, 'attachment_area') and self.attachment_area) else []
         has_attachments = len(attachments) > 0
@@ -1027,7 +1103,11 @@ class TranslatorApp:
         if custom_prompt == placeholder:
             custom_prompt = ""
 
-        self.translate_btn.configure(state='disabled')
+        self._translation_tasks().cancel()
+        owner = self.popup
+        target_lang = self.selected_language
+        self._main_pending_source = original
+        self.translate_btn.configure(state='normal')
         self._start_translate_animation()
 
         def translate_thread():
@@ -1069,7 +1149,7 @@ class TranslatorApp:
                     if file_contents:
                         file_list_text += "Text files: " + ", ".join(file_contents.keys()) + "\n"
 
-                    base_instruction = f"Translate to {self.selected_language}."
+                    base_instruction = f"Translate to {target_lang}."
                     if custom_prompt:
                         base_instruction += f" {custom_prompt}"
 
@@ -1122,12 +1202,12 @@ Return your response in this EXACT format:
 
 ===TRANSLATION===
 **[filename1]:**
-[translated text in {self.selected_language}]
+[translated text in {target_lang}]
 
 **[filename2]:**
-[translated text in {self.selected_language}]
+[translated text in {target_lang}]
 
-IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Extract actual text from images (OCR), do not describe them."""
+IMPORTANT: Translate ALL text to {target_lang}. Process ALL files. Extract actual text from images (OCR), do not describe them."""
 
                     # Single API call with all images + file contents
                     result = self.translation_service.api_manager.translate_multimodal(
@@ -1154,7 +1234,7 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
                     # Save to history for multimodal translations
                     source_text = original if original else f"[{len(attachments)} attachment(s)]"
                     self.translation_service.history_manager.add_entry(
-                        source_text, translated, self.selected_language, source_type="multimodal"
+                        source_text, translated, target_lang, source_type="multimodal"
                     )
 
                 except Exception as e:
@@ -1162,15 +1242,20 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
             else:
                 # Standard text translation (no attachments)
                 translated = self.translation_service.translate_text(
-                    original, self.selected_language, custom_prompt,
-                    skip_cache=bool(source_language), source_language=source_language)
+                    original, target_lang, custom_prompt,
+                    skip_cache=bool(source_language), source_language=source_language,
+                    **({'allow_linked': True} if getattr(self.config, 'get_linked_reading_enabled',
+                                                        lambda: False)() is True else {}))
                 source_text = original
 
-            if self.popup:
-                self.popup.after(0, lambda: self._update_translation_with_original(
-                    translated, extracted_original, source_text=source_text))
+            return translated, extracted_original, source_text
 
-        threading.Thread(target=translate_thread, daemon=True).start()
+        def completed(result):
+            if owner is self.popup:
+                self._main_pending_source = None
+                self._update_translation_with_original(*result[:2], source_text=result[2])
+
+        self._start_translation_task(translate_thread, target_lang, completed, owner)
 
     def _update_translation(self, translated: str):
         """Update translation result in popup."""
@@ -1187,18 +1272,27 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
             self.toast.show_warning("No text to fix")
             return
 
+        self._translation_tasks().cancel()
+        owner = self.popup
+        self._main_pending_source = original
+        self._start_translate_animation()
         if hasattr(self, 'fix_grammar_btn'):
             self.fix_grammar_btn.configure(state='disabled', text="Fixing...")
 
         def fix_thread():
-            corrected = self.translation_service.fix_grammar(original)
-            if self.popup:
-                self.popup.after(0, lambda: self._update_grammar_result(corrected))
+            return self.translation_service.fix_grammar(original)
 
-        threading.Thread(target=fix_thread, daemon=True).start()
+        def completed(corrected):
+            if owner is self.popup:
+                self._reset_translation_controls(owner)
+                self._update_grammar_result(corrected)
+
+        self._start_translation_task(fix_thread, self.selected_language, completed, owner)
 
     def _update_grammar_result(self, corrected: str):
         """Write the grammar-fix result into the output box and reset the button."""
+        if getattr(self, '_main_linked', None):
+            self._main_linked.set_result('', '', self.selected_language)
         try:
             # A grammar fix keeps the source language: Japanese when the input's
             # characters or its verdict say so (J7), else no hint - kanji-only
@@ -1270,8 +1364,14 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         if self._reading_pane_alive():
             self._schedule_reading_refresh(delay_ms=1)
 
+        if getattr(self, '_main_linked', None):
+            self._main_linked.set_result(
+                translated, source_text if source_text is not None else
+                self.original_text.get('1.0', 'end-1c'), self.selected_language)
+
     def _start_translate_animation(self):
         """Start the translation button animation (dots + pulse)."""
+        self._stop_translate_animation()
         self._translate_animation_running = True
         self._translate_animation_step = 0
         self._translate_pulse_level = 0
@@ -1281,6 +1381,13 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
     def _stop_translate_animation(self):
         """Stop the translation button animation."""
         self._translate_animation_running = False
+        job = getattr(self, '_translate_animation_job', None)
+        if job:
+            try:
+                self.root.after_cancel(job)
+            except tk.TclError:
+                pass
+        self._translate_animation_job = None
         # Reset button style
         if hasattr(self, 'translate_btn') and self.translate_btn:
             try:
@@ -1301,10 +1408,10 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
             # Dots animation: use fixed-width patterns to prevent text shifting
             # Each pattern has same visual width (dots + spaces)
             dots_patterns = [
-                "⏳ Translating   ",  # 0 dots + 3 spaces
-                "⏳ Translating.  ",  # 1 dot + 2 spaces
-                "⏳ Translating.. ",  # 2 dots + 1 space
-                "⏳ Translating...",  # 3 dots + 0 spaces
+                "Cancel translation   ",
+                "Cancel translation.  ",
+                "Cancel translation.. ",
+                "Cancel translation...",
             ]
             text = dots_patterns[self._translate_animation_step % 4]
             self.translate_btn.configure(text=text)
@@ -1328,7 +1435,7 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
 
             # Schedule next frame (500ms for dots - slower animation)
             if self.popup and self.popup.winfo_exists():
-                self.popup.after(500, self._animate_translate_button)
+                self._translate_animation_job = self.popup.after(500, self._animate_translate_button)
 
         except tk.TclError:
             # Widget destroyed
@@ -1433,6 +1540,10 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
             self.original_text.edit_modified(False)
         except tk.TclError:
             return
+        pending = getattr(self, '_main_pending_source', None)
+        runner = getattr(self, '_translation_task_runner', None)
+        if pending is not None and runner and self.original_text.get('1.0', 'end-1c').strip() != pending:
+            runner.cancel(owner=self.popup)
         self._schedule_reading_refresh()
 
     def _schedule_reading_refresh(self, delay_ms: int = READING_PANE_DEBOUNCE_MS):
@@ -1638,13 +1749,17 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
         """Load a history item into the translator."""
         if not self.popup:
             return
+        runner = getattr(self, '_translation_task_runner', None)
+        if runner:
+            runner.cancel(owner=self.popup)
             
         self.original_text.delete('1.0', tk.END)
         self.original_text.insert('1.0', item.get('original', ''))
         
         self._select_language_in_list(item.get('target_lang', 'English'))
         
-        self._update_translation(item.get('translated', ''))
+        value = self.translation_service.history_manager.reading_result(item)
+        self._update_translation_with_original(value, source_text=item.get('original', ''))
 
     def _setup_drop_handling(self, popup_window):
         """Setup drag-and-drop handling for the popup window."""
@@ -1816,6 +1931,9 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
             while True:
                 # Queue item format: (original, translated, target_lang, trial_info, furigana_text)
                 result = self.translation_service.translation_queue.get_nowait()
+                task = getattr(result, 'task', None)
+                if task and (not task.is_current() or task.remaining() <= 0):
+                    continue
                 furigana_text = None
                 is_grammar = False
                 if len(result) == 6:
@@ -1830,8 +1948,9 @@ IMPORTANT: Translate ALL text to {self.selected_language}. Process ALL files. Ex
                     original, translated, target_lang = result
                     trial_info = None
                 if self.running:
+                    credit = {'model_info': result.attribution or ''} if task else {}
                     self.show_quick_translate(original, translated, target_lang, trial_info,
-                                              furigana_text, is_grammar=is_grammar)
+                                              furigana_text, is_grammar=is_grammar, **credit)
         except queue.Empty:
             pass
         except Exception as e:

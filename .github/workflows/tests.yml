@@ -54,7 +54,7 @@ jobs:
 
       - name: Check the run actually ran
         if: always()
-        # --min-total sits a little under the suite's size (1,390 on 2026-10-16),
+        # --min-total sits a little under the suite's size (1,947 on 2026-10-20),
         # so a test file that quietly stops being collected fails the build.
         # Raise it as the suite grows; never lower it to make a run pass.
         # Skips expected here: nine tests need fugashi + UniDic, which
@@ -63,7 +63,7 @@ jobs:
         # 2026-10-16). A new test that needs either must raise --max-skipped
         # here, naming itself.
         run: |
-          python tools/check_test_counts.py junit.xml --min-total 1350
+          python tools/check_test_counts.py junit.xml --min-total 1900
 
       - name: Keep the report
         if: always()

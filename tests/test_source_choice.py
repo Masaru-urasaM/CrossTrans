@@ -310,6 +310,7 @@ class TestPopupChoiceIsKept:
         monkeypatch.setattr('threading.Thread', _SyncThread)
         app = TranslatorApp.__new__(TranslatorApp)
         app.quick_translate_manager = MagicMock()
+        app.root = MagicMock()
         app.translation_service = MagicMock()
         app.current_original, app.current_target_lang = "汽車", "English"
         app._on_quick_translate_choose_source(JAPANESE)

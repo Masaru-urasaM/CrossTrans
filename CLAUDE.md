@@ -357,7 +357,7 @@ without a usable display and 312 of the tests need one, so a runner with no desk
 session would skip half the suite and still pass. `tools/check_test_counts.py` reads
 the JUnit XML and fails the build when more tests were skipped than a healthy run
 explains (`DEFAULT_MAX_SKIPPED`), or when suspiciously few were collected at all.
-Raise the ceiling only for a skip you can name. The floor, `--min-total` (1350 since K9), sits a
+Raise the ceiling only for a skip you can name. The floor, `--min-total` (1900 since the v1.9.21 release), sits a
 little under the suite's size: raise it as the suite grows, never lower it to make a run pass.
 
 **A test run stays off the developer's session** (K12, Decision 32; `tests/quiet_session.py`,
@@ -509,8 +509,8 @@ before reading the geometry: `update_idletasks()` alone does not lay out a newly
   than the rows that must fit whole (`_required_width()`), never wider than 90% of the work area.
 - **Height**: at most 60% of the monitor's work area (`POPUP_HEIGHT_CAP_SHARE`), or the height the
   user dragged a popup to. `popup_layout.allocate()`: the translation first. The original is
-  collapsed to 3 rows by default; "Show all" gives it all the room but the translation's first 3
-  rows (a 40% share left it unchanged on a 1024x768 screen - CI caught it).
+  collapsed to 3 rows by default; "Show all" expands both panes with measured width/height probes
+  up to 90% work height (Decisions 38, 42).
 - **Each box sits in its own holder** (`_make_box`: `pack_propagate(False)`, a height in pixels).
   Two boxes both packed `expand=True` split leftover height arbitrarily (measured: -14/+14 and
   +156/-156 px). A capped box packs its scrollbar beside the text; a box that is not capped while
@@ -522,8 +522,8 @@ before reading the geometry: `update_idletasks()` alone does not lay out a newly
 - **Header**: the credit (cut with an ellipsis by `popup_layout.elide`) and the close button
   (`CLOSE_GLYPH`), packed first so it is never the one squeezed out. Every state has it there; the
   bars no longer carry a close button.
-- **Action bar**: Copy and Replace (+⚙) as words; Re-translate, Dictionary, Open Translator and
-  Custom Prompt as icons (`ICON_FONTS`: Segoe Fluent Icons, else Segoe MDL2 Assets) with a
+- **Action bar**: Copy and Replace (+⚙) as words; Re-translate, Dictionary, Custom Prompt and
+  Linked reading as icons; Open Translator is isolated at the far right. Icons (`ICON_FONTS`: Segoe Fluent Icons, else Segoe MDL2 Assets) with a
   `Tooltip` - `WS_EX_NOACTIVATE` applied on `<Map>` (set any earlier, the bit is lost: D20).
   `button.action_name` names an icon button for code and
   tests; without an icon font the words come back. `_update_dict_button_state()` unbinds
@@ -560,6 +560,45 @@ before reading the geometry: `update_idletasks()` alone does not lay out a newly
 - **`TODO.md`** for this work - findings S1-S10, questions Q1-Q9 (all answered as recommended),
   phases P0-P5 - was deleted on completion; code and docs that cite it mean
   `git show 57d739f:TODO.md`. Before and after: ROADMAP_DONE "P", Decision 34.
+
+
+## Linked Reading and Translation Tasks (v1.9.21)
+
+- **Default OFF / experimental:** Settings -> Hotkeys and popup/main toggles share
+  `linked_reading_enabled`. Eligible text uses source IDs in the same generation;
+  never add a repair/alignment request. The 6000-character/120-unit guards limit
+  structured links, not translation input. Code/JSON-like, trial, OCR, files and
+  freeform paths retain their ordinary prompts.
+- `translation_alignment.py` owns segmentation, protocol validation and per-result
+  `AlignedText` metadata. Bind maps to exact source/output/target/mode hashes; keep
+  merged/text cache namespaces separate. History restores exact maps or conservative
+  local Approximate links. Structural policy v2 rejects unequal/global uncertain pairs.
+- `linked_reading.py`, `main_linked_reading.py` and RubyText preserve canonical/ruby
+  offsets, Copy and selection priority. Edits suspend links; exact Undo can restore
+  them. Reveal a counterpart only when fully outside its viewport. Source visibility
+  never depends on the linking or furigana switches.
+- `translation_task.py` owns one monotonic **20-second** deadline through retries,
+  key/model fallback, bounded HTTP waiting and interruptible backoff. Terminal
+  `TranslationStopped` exceptions must bypass rotation. Guard History/verdict/credit
+  writes against abandoned tasks; snapshot identity/credit without changing queue
+  tuple lengths. Clipboard selection capture is separately serialized.
+- `ui/translation_tasks.py` keeps work off UI/hotkey loops and publishes only the
+  newest intent across main/quick/grammar/OCR. Loading has close/Escape cancellation;
+  pending main Translate becomes Cancel translation. Input/target/History/window
+  changes cancel pending main work. Remove previous animation timer IDs.
+- Cancellation abandons client waiting; it cannot promise provider cancellation,
+  refunded tokens or separate quota. `generation_result.py` rejects explicit
+  incomplete/filtered stops before successful cache writes and logs numeric usage
+  only. Read all final Google/Anthropic text parts, excluding thinking.
+- Only Groq's exact GPT-OSS 120B/20B IDs on api.groq.com use the documented 65536
+  completion ceiling and low reasoning. Do not generalize these options to other
+  providers. Broader quality and full long-document live validation remain D22.
+- Original explicitly uses native word wrap; keep RubyText's global character
+  default/legacy pure layout model unchanged. Popup geometry reads actual Tk pixels.
+  Show all probes both panes at bounded widths/up to 90% work height, restoring
+  compact geometry afterward. Open Translator stays isolated at the far right.
+- Completed work: ROADMAP_DONE L; rationale: Decisions 36-42; concise measurements:
+  docs/linked_reading_evaluation.md. TODO/ROADMAP contain active work only.
 
 ## Replace Button (Copy & Replace)
 

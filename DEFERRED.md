@@ -196,3 +196,27 @@ with them, and the suite's count never goes down without the user's word.
 **Options**: (1) remove both and their nine tests; (2) keep them for a future surface that must
 be sized before it is built. **Trigger**: the next change to `ruby_text.py`'s sizing code, or the
 user's word.
+
+---
+
+
+### D22 - Broader linked-reading and long-document validation
+
+**Found:** 2026-10-19. **Status:** Optional evidence work; the user accepted and
+authorized v1.9.21 release on 2026-10-20 with Linked reading experimental/default OFF.
+
+- Initial prototype: 21/48 expanded API failures; ten successful pairs had median
+  1.505x latency and 2.013x completion tokens. A literal-JSON escaping defect was
+  observed; code/JSON-like input now uses ordinary translation. These samples do
+  not establish provider-wide accuracy or long-document overhead.
+- On the user's long document, baseline Groq exhausted 3072 completion tokens
+  (3070 reasoning); the explicit-65536 comparison hit quota 429. No successful
+  complete 39-paragraph or low-reasoning live retranslation has been claimed.
+- Legacy links are approximate; unequal structures have no reliable map. The
+  6000-character/120-unit protocol guards are engineering limits, not empirically
+  measured translation limits. Local cancellation does not guarantee provider
+  cancellation, refunds or independent quota for the next request.
+
+**Trigger:** a requested wider rollout/model scope or a reproducible quality issue.
+Obtain explicit authorization before paid validation; never add automatic repair
+calls. Evidence: [linked-reading evaluation](docs/linked_reading_evaluation.md).

@@ -656,6 +656,10 @@ class RubyText(tk.Text):
         self._window_labels: Dict[str, Tuple[tk.Label, List[tk.Label]]] = {}
         self._window_colors: Dict[str, Tuple[str, str, str]] = {}
         self._selected_frames: Set[str] = set()
+        self._linked_frames: Set[str] = set()
+        self._linked_bg = None
+        self._linked_animation = None
+        self._plain_map = None
         self._lifted_lines: Set[int] = set()
         self._layout: Optional[LayoutModel] = None
 
@@ -729,6 +733,7 @@ class RubyText(tk.Text):
                 if mark:
                     self.mark_unset(mark)
         self._segments.extend(segments)
+        self._plain_map = None
         self._refresh_lift()
 
     def _insert_pair(self, index, base: str, ruby: str,
@@ -867,6 +872,7 @@ class RubyText(tk.Text):
         with self._editable():
             self.insert(index, text, tags)
         self._segments.append(RubySegment(text, None))
+        self._plain_map = None
         self._refresh_lift()
 
     def set_ruby(self, text: str, lang_hint: Optional[str] = None,
@@ -892,6 +898,7 @@ class RubyText(tk.Text):
 
     def clear(self) -> None:
         """Delete all content. Tk destroys the embedded frames for us."""
+        self._cancel_link_animation()
         with self._editable():
             self.delete('1.0', tk.END)
         self._segments.clear()
@@ -900,6 +907,9 @@ class RubyText(tk.Text):
         self._window_labels.clear()
         self._window_colors.clear()
         self._selected_frames.clear()
+        self._linked_frames.clear()
+        self._plain_map = None
+        self.tag_remove('linked_reading', '1.0', tk.END)
         self._lifted_lines.clear()
 
     # ------------------------------------------------------------------ #
@@ -988,23 +998,29 @@ class RubyText(tk.Text):
 
         if selected == self._selected_frames:
             return                             # a drag fires this constantly
+        changed = selected ^ self._selected_frames
         self._selected_frames = selected
+        self._paint_link_frames(changed)
 
+    def _paint_link_frames(self, keys):
+        from src.constants import LINKED_READING_BG
         select_bg, select_fg = self._selection_colors()
         if select_bg is None:                  # pragma: no cover - defensive
             return
-        for frame in self._frames:
-            key = str(frame)
+        for key in keys:
             colors = self._window_colors.get(key)
             if colors is None:                 # pragma: no cover - defensive
                 continue
             background, base_fg, ruby_fg = colors
-            if key in selected:
+            if key in self._selected_frames:
                 background = select_bg
                 if select_fg:
                     base_fg = ruby_fg = select_fg
-            reading, bases = self.pair_labels(frame)
+            elif key in self._linked_frames:
+                background = self._linked_bg or LINKED_READING_BG
+            reading, bases = self._window_labels[key]
             try:
+                frame = self.nametowidget(key)
                 frame.configure(bg=background)
                 if reading is not None:
                     reading.configure(bg=background, fg=ruby_fg)
@@ -1012,6 +1028,131 @@ class RubyText(tk.Text):
                     label.configure(bg=background, fg=base_fg)
             except tk.TclError:                # pragma: no cover - defensive
                 continue
+
+    def prepare_plain_map(self):
+        """Map Python character offsets to Tk indices once per content revision."""
+        if self._plain_map is not None:
+            return self._plain_map
+        starts, ends, reverse, windows, plain = [], [], {}, [], []
+        wide = int(self.tk.call('string', 'length', '\U0001f642')) == 2
+        for kind, value, index in self.dump('1.0', 'end-1c', text=True, window=True):
+            line, col = map(int, index.split('.'))
+            if kind == 'window':
+                base = self._window_base.get(value, '')
+                finish = self.index(index + '+1c')
+                start = len(starts)
+                windows.append((start, start + len(base), value))
+                reverse[index] = start
+                for ch in base:
+                    starts.append(index)
+                    ends.append(finish)
+                    plain.append(ch)
+            elif kind == 'text':
+                for ch in value:
+                    at = f'{line}.{col}'
+                    reverse[at] = len(starts)
+                    if ch == '\n':
+                        line, col = line + 1, 0
+                    else:
+                        width = 2 if wide and ord(ch) > 0xFFFF else 1
+                        if width == 2:
+                            reverse[f'{line}.{col + 1}'] = len(starts)
+                        col += width
+                    starts.append(at)
+                    ends.append(f'{line}.{col}')
+                    plain.append(ch)
+        self._plain_map = starts, ends, reverse, windows, ''.join(plain)
+        return self._plain_map
+
+    def plain_offset_at(self, x_root, y_root):
+        starts, ends, reverse, windows, plain = self.prepare_plain_map()
+        x, y = x_root - self.winfo_rootx(), y_root - self.winfo_rooty()
+        if not (0 <= x < self.winfo_width() and 0 <= y < self.winfo_height()):
+            return None
+        index = self.index(f'@{x},{y}')
+        offset = reverse.get(index)
+        bounds = self.bbox(index)
+        if offset is None or bounds is None or plain[offset].isspace():
+            return None
+        bx, by, width, height = bounds
+        return offset if bx <= x < bx + width and by <= y < by + height else None
+
+    def _cancel_link_animation(self):
+        if self._linked_animation is not None:
+            try:
+                self._root().after_cancel(self._linked_animation)
+            except tk.TclError:
+                pass
+            self._linked_animation = None
+
+    def _fade_link_background(self, step=1):
+        from src.constants import (LINKED_READING_BG, LINKED_READING_FADE_MS,
+                                   LINKED_READING_FADE_STEPS)
+        self._linked_animation = None
+        if not self.winfo_exists():
+            return
+        # Ease out using native tags: no overlay can obscure selection or ruby.
+        progress = 1 - (1 - step / LINKED_READING_FADE_STEPS) ** 3
+        start, end = self.winfo_rgb(self.cget('bg')), self.winfo_rgb(LINKED_READING_BG)
+        channels = [round((a + (b - a) * progress) / 257) for a, b in zip(start, end)]
+        self._linked_bg = '#' + ''.join(f'{channel:02x}' for channel in channels)
+        self.tag_configure('linked_reading', background=self._linked_bg)
+        self._paint_link_frames(self._linked_frames)
+        if step < LINKED_READING_FADE_STEPS:
+            self._linked_animation = self._root().after(
+                LINKED_READING_FADE_MS // LINKED_READING_FADE_STEPS,
+                lambda: self._fade_link_background(step + 1))
+
+    def highlight_plain_range(self, span=None, *, animate=False):
+        from src.constants import LINKED_READING_BG
+        self._cancel_link_animation()
+        self.tag_remove('linked_reading', '1.0', tk.END)
+        frames = set()
+        self._linked_bg = LINKED_READING_BG
+        if span is not None:
+            starts, ends, reverse, windows, plain = self.prepare_plain_map()
+            a, b = span
+            if 0 <= a < b <= len(starts):
+                # A tagged newline paints to the pane's right edge. Keep each
+                # visible run tight to its content, including indented lists.
+                offset = a
+                for line in plain[a:b].split('\n'):
+                    first = len(line) - len(line.lstrip())
+                    last = len(line.rstrip())
+                    if first < last:
+                        self.tag_add('linked_reading', starts[offset + first], ends[offset + last - 1])
+                    offset += len(line) + 1
+                self.tag_configure('linked_reading', background=LINKED_READING_BG,
+                                   foreground='', borderwidth=0, relief='flat')
+                self.tag_raise('linked_reading')
+                self.tag_raise('sel')
+                frames = {key for start, end, key in windows if start < b and a < end}
+        changed = frames ^ self._linked_frames
+        self._linked_frames = frames
+        self._paint_link_frames(changed | frames)
+        if animate and self.tag_ranges('linked_reading'):
+            self._fade_link_background()
+
+    def see_plain_range(self, span):
+        starts, ends, reverse, windows, plain = self.prepare_plain_map()
+        a, b = span
+        if 0 <= a < b <= len(starts):
+            # A long group may extend beyond both viewport edges. Requiring
+            # both endpoints to be visible repeatedly jumps back to its start.
+            top = self.index('@0,0')
+            bottom = self.index(f'@{self.winfo_width() - 1},{self.winfo_height() - 1}')
+            if (self.compare(ends[b - 1], '>', top)
+                    and self.compare(starts[a], '<=', bottom)):
+                return
+            self.see(starts[a])
+
+    def linked_event_parts(self):
+        """All surfaces that can receive pointer events, including ruby labels."""
+        parts = [self]
+        for frame in self._frames:
+            reading, bases = self.pair_labels(frame)
+            parts.extend([frame, reading, *bases])
+        return [part for part in parts if part is not None]
 
     # ------------------------------------------------------------------ #
     # Sizing

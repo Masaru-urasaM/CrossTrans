@@ -288,6 +288,7 @@ class _SyncThread:
 def make_app():
     from src.app import TranslatorApp
     app = TranslatorApp.__new__(TranslatorApp)
+    app.root = MagicMock()
     app.quick_translate_manager = MagicMock()
     app.translation_service = MagicMock()
     app.translation_service.last_attribution = None

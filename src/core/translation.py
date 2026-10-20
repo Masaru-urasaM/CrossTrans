@@ -14,6 +14,8 @@ import keyboard
 from src.constants import COOLDOWN, TRIAL_MODE_ENABLED, TRIAL_MODEL, TRIAL_PROXY_URL
 from src.core import furigana
 from src.core.text_cleanup import strip_thinking_tags
+from src.core.translation_alignment import (AlignedText, attach_alignment, build_prompt,
+                                             eligible, parse_answer)
 from src.core.clipboard import ClipboardManager
 from src.core.dictionary_prompt import build_dictionary_prompt, extract_context
 from src.core import lang_id
@@ -24,6 +26,8 @@ from src.core.history import HistoryManager
 from src.core.provider_health import ProviderHealthManager
 from src.core.quota_manager import QuotaManager
 from src.core.trial_api import TrialAPIClient, TrialAPIError
+from src.core.translation_task import (TranslationQueue, active_write, check_current,
+                                       current_task, TranslationStopped)
 from config import Config
 
 
@@ -39,6 +43,7 @@ class TranslationService:
     # them across restarts (source_verdict()).
     SOURCE_VERDICTS_MAX = 64
     _source_verdicts_lock = threading.Lock()
+    _selection_lock = threading.Lock()
 
     def __init__(self, config: Config,
                  notification_callback: Optional[Callable[[str], None]] = None) -> None:
@@ -46,7 +51,7 @@ class TranslationService:
         self.api_manager: AIAPIManager = AIAPIManager()
         self.last_translation_time: float = 0
         self.last_grammar_fix_time: float = 0
-        self.translation_queue: queue.Queue[Tuple[str, str, str, Optional[Dict]]] = queue.Queue()
+        self.translation_queue: queue.Queue[Tuple[str, str, str, Optional[Dict]]] = TranslationQueue()
         self.notification_callback: Optional[Callable[[str], None]] = notification_callback
         self.history_manager: HistoryManager = HistoryManager(config)
         self.health_manager: ProviderHealthManager = ProviderHealthManager(config)
@@ -173,7 +178,8 @@ class TranslationService:
     def translate_text(self, text: str, target_language: str,
                        custom_prompt: Optional[str] = None,
                        skip_cache: bool = False,
-                       source_language: Optional[str] = None) -> str:
+                       source_language: Optional[str] = None,
+                       allow_linked: bool = False) -> str:
         """Translate text to target language using AI API.
 
         Args:
@@ -197,9 +203,9 @@ class TranslationService:
             cached = self.history_manager.find_cached_entry(text, target_language)
             if cached is not None:
                 logging.info("Cache hit - returning stored translation, skipping API call")
-                self.last_attribution = self._cached_attribution(cached)
+                self._set_attribution(self._cached_attribution(cached))
                 self.last_source_language = cached.get('source_verdict') or None
-                return cached['translated']
+                return self._linked_cached(cached, text, target_language, 'text')
         self.last_source_language = None
 
         if has_custom_prompt:
@@ -238,6 +244,8 @@ Rules (DO NOT include these in your response):
             if has_custom_prompt:
                 # The user's own instructions are sent exactly as written.
                 result, verdict = self._strip_thinking_tags(self._call_model(prompt)), None
+            elif allow_linked and self._linked_enabled(text):
+                result, verdict = self._call_linked(text, target_language, 'text', source_language)
             else:
                 result, verdict = self._call_with_source(prompt, text, source_language)
             self._remember_source_verdict(text, verdict)
@@ -249,7 +257,8 @@ Rules (DO NOT include these in your response):
                 text, result, target_language,
                 source_type='custom' if has_custom_prompt else 'text',
                 model_used=self.last_attribution or 'Auto',
-                source_lang=verdict or '', source_verdict=verdict or '')
+                source_lang=verdict or '', source_verdict=verdict or '',
+                **self._alignment_history_args(result))
             return result
         except TrialAPIError as e:
             return f"Error: {str(e)}"
@@ -260,7 +269,7 @@ Rules (DO NOT include these in your response):
             return f"Error: {error_msg}"
 
     def translate_or_fix(self, text: str, target_language: str,
-                         skip_cache: bool = False) -> str:
+                         skip_cache: bool = False, source_language: Optional[str] = None) -> str:
         """Translate text to target_language, OR grammar-fix it in place when it is
         already in that language — the model decides via ONE merged prompt.
 
@@ -291,9 +300,9 @@ Rules (DO NOT include these in your response):
                                                             source_type='merged')
             if cached is not None:
                 logging.info("Merged cache hit - returning stored result, skipping API call")
-                self.last_attribution = self._cached_attribution(cached)
+                self._set_attribution(self._cached_attribution(cached))
                 self.last_source_language = cached.get('source_verdict') or None
-                return cached['translated']
+                return self._linked_cached(cached, text, target_language, 'merged')
         self.last_source_language = None
 
         prompt = f"""You are a translation-and-grammar fixer tool. Decide automatically between two modes based on the
@@ -322,7 +331,11 @@ STRICT RULES (DO NOT include these rules in your response):
    translate it. In translate mode, output ONLY {target_language}."""
 
         try:
-            result, verdict = self._call_with_source(prompt, text)
+            if self._linked_enabled(text):
+                result, verdict = self._call_linked(text, target_language, 'merged', source_language)
+            else:
+                result, verdict = self._call_with_source(prompt, text,
+                    **({'source_language': source_language} if source_language else {}))
             self._remember_source_verdict(text, verdict)
 
             # Store under the 'merged' namespace so repeat requests are cached but never
@@ -330,7 +343,8 @@ STRICT RULES (DO NOT include these rules in your response):
             self.history_manager.add_entry(
                 text, result, target_language, source_type='merged',
                 model_used=self.last_attribution or 'Auto',
-                source_lang=verdict or '', source_verdict=verdict or '')
+                source_lang=verdict or '', source_verdict=verdict or '',
+                **self._alignment_history_args(result))
             return result
         except TrialAPIError as e:
             return f"Error: {str(e)}"
@@ -339,6 +353,28 @@ STRICT RULES (DO NOT include these rules in your response):
             if "API_KEY_INVALID" in error_msg or "API key not valid" in error_msg:
                 return "Error: Invalid API key. Please check your API key in Settings."
             return f"Error: {error_msg}"
+
+    def _linked_enabled(self, text: str) -> bool:
+        config = getattr(self, 'config', None)
+        return (config is not None and config.get('linked_reading_enabled', False) is True
+                and not self._is_trial_mode and eligible(text))
+
+    @staticmethod
+    def _alignment_history_args(result: str) -> dict:
+        data = getattr(result, 'alignment', None)
+        return {'alignment': data} if data else {}
+
+    def _linked_cached(self, entry: dict, source: str, target: str, mode: str) -> str:
+        if self._linked_enabled(source):
+            return self.history_manager.reading_result(entry)
+        return attach_alignment(entry['translated'], entry.get('alignment'), source, target, mode)
+
+    def _call_linked(self, text: str, target: str, mode: str, known=None):
+        raw = self._call_model(build_prompt(text, target, mode=mode, known=known))
+        parsed = parse_answer(raw, text, target, mode=mode, known=known)
+        logging.info(f"[LinkedReading] status={parsed.status} chars={len(text)}")
+        result = AlignedText(parsed.text, parsed.metadata) if parsed.metadata else parsed.text
+        return result, parsed.verdict
 
     def dictionary_lookup(self, text, target_language: str,
                           source_language: Optional[str] = None,
@@ -473,6 +509,7 @@ STRICT RULES (DO NOT include these rules in your response):
                 store = self.__dict__.setdefault('_source_verdicts', OrderedDict())
         return store
 
+    @active_write
     def _remember_source_verdict(self, text: str, verdict: Optional[str]) -> None:
         """Record a call's verdict: as `last_source_language`, and for the text."""
         self.last_source_language = verdict
@@ -543,6 +580,13 @@ STRICT RULES (DO NOT include these rules in your response):
         finder = getattr(self.history_manager, 'find_source_verdict', None)
         return finder(text) if finder else None
 
+    @active_write
+    def _set_attribution(self, attribution):
+        self.last_attribution = attribution
+        task = current_task()
+        if task:
+            task.attribution = attribution
+
     def _call_model(self, prompt: str) -> str:
         """Send one prompt to whichever backend is active and record who answered.
 
@@ -557,10 +601,10 @@ STRICT RULES (DO NOT include these rules in your response):
         """
         if self._is_trial_mode and self.trial_client:
             result = self._translate_trial(prompt)
-            self.last_attribution = f"{TRIAL_MODEL} (Trial mode)"
+            self._set_attribution(f"{TRIAL_MODEL} (Trial mode)")
             return result
         result = self.api_manager.translate(prompt)
-        self.last_attribution = self.api_manager.last_attribution
+        self._set_attribution(self.api_manager.last_attribution)
         return result
 
     @staticmethod
@@ -597,26 +641,37 @@ STRICT RULES (DO NOT include these rules in your response):
         result = self.trial_client.translate(prompt)
 
         # Decrement quota on success
+        check_current()
         self.quota_manager.use_quota()
 
         return result
 
     def get_selected_text(self) -> Optional[str]:
         """Get currently selected text by simulating Ctrl+C."""
+        with self._selection_lock:
+            check_current()
+            return self._capture_selected_text()
+
+    def _capture_selected_text(self) -> Optional[str]:
         original_clipboard = ClipboardManager.save_clipboard()
 
         for attempt in range(3):
             try:
+                check_current()
                 ClipboardManager.set_text("")
                 time.sleep(0.05)
 
+                check_current()
                 keyboard.press_and_release('ctrl+c')
                 time.sleep(0.15 + (attempt * 0.1))
 
+                check_current()
                 new_text = ClipboardManager.get_text()
                 if new_text and new_text.strip():
                     return new_text
 
+            except TranslationStopped:
+                raise
             except Exception as e:
                 logging.warning(f"Attempt {attempt + 1} failed: {e}")
 
@@ -690,7 +745,7 @@ STRICT RULES (DO NOT include these rules in your response):
             self.translation_queue.put(("", error_msg, target_language, None))
 
     def redo_translation(self, text: str, target_language: str,
-                         source_language: Optional[str] = None) -> None:
+                         source_language: Optional[str] = None, mode: str = 'text') -> None:
         """Force a fresh API translation of already-known text (bypass cache).
 
         Used by the Quick Translate popup "Re-translate" button when a cached or
@@ -718,8 +773,12 @@ STRICT RULES (DO NOT include these rules in your response):
                 return
 
             # Force a real API call, bypassing the history-backed cache.
-            translated = self.translate_text(text, target_language, skip_cache=True,
-                                             source_language=source_language)
+            translated = (self.translate_or_fix(text, target_language, skip_cache=True,
+                          **({'source_language': source_language} if source_language else {}))
+                          if mode == 'merged' else
+                          self.translate_text(text, target_language, skip_cache=True,
+                                             source_language=source_language,
+                                             **({'allow_linked': True} if self._linked_enabled(text) else {})))
 
             # Generate furigana offline if enabled and source is Japanese (plain path).
             furigana_text = None

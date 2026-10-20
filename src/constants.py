@@ -17,6 +17,7 @@ REMOTE_CONFIG_CACHE_TTL = 86400  # 24 hours in seconds
 
 # ============== TIMING ==============
 COOLDOWN = 2.0  # Translation cooldown in seconds
+TRANSLATION_TIMEOUT_SECONDS = 20.0  # Whole request, including retries and fallback
 
 # ============== FURIGANA ==============
 # Every tuning knob for the Japanese reading guides, in one place. The engine
@@ -80,6 +81,11 @@ POPUP_LAYOUT_WATCHDOG_MS = 300      # the popup is shown by then even if measuri
 POPUP_REVEAL_DELAY_MS = 30          # after the final size, for Tk to redraw before it is seen
 POPUP_GRIP_PREVIEW_MS = 150         # a grip drag paused this long lays the popup out at its size
 POPUP_FRONT_MS = 500                # on top this long after it appears, then free to go behind
+
+LINKED_READING_DELAY_MS = 200
+LINKED_READING_BG = '#35434b'
+LINKED_READING_FADE_MS = 96
+LINKED_READING_FADE_STEPS = 6
 
 # ============== AVAILABLE LANGUAGES ==============
 # Format: (English name, ISO code, Native name)

@@ -176,7 +176,8 @@ class TestShortResultsAreSmall:
     def test_a_short_result_gets_a_small_popup(self, manager, tk_root, key):
         needs_icons(manager)
         put_up(manager, tk_root, cases.case(key))
-        assert manager.popup.winfo_width() <= 420
+        # Open Translator now has its own trailing gap at the far right.
+        assert manager.popup.winfo_width() <= 460
 
 
 class TestHeightAndPlace:

@@ -100,12 +100,14 @@ class ScreenshotHandler:
         self._get_quick_translate_manager: Optional[Callable] = None
         self._on_show_settings_tab: Optional[Callable] = None
         self._get_selected_language: Optional[Callable] = None
+        self._run_translation: Optional[Callable] = None
 
     def configure_callbacks(self,
                            on_show_quick_translate: Optional[Callable] = None,
                            get_quick_translate_manager: Optional[Callable] = None,
                            on_show_settings_tab: Optional[Callable] = None,
-                           get_selected_language: Optional[Callable] = None):
+                           get_selected_language: Optional[Callable] = None,
+                           run_translation: Optional[Callable] = None):
         """Configure callback functions.
 
         Args:
@@ -118,6 +120,7 @@ class ScreenshotHandler:
         self._get_quick_translate_manager = get_quick_translate_manager
         self._on_show_settings_tab = on_show_settings_tab
         self._get_selected_language = get_selected_language
+        self._run_translation = run_translation
 
     def handle_hotkey(self) -> None:
         """Handle screenshot hotkey press (Win+Alt+S).
@@ -245,7 +248,7 @@ class ScreenshotHandler:
                 # popup shows has to be carried over by hand. Without this the
                 # note would name whatever model answered the *previous*
                 # translation.
-                self.translation_service.last_attribution =                     self.translation_service.api_manager.last_attribution
+                self.translation_service._set_attribution(self.translation_service.api_manager.last_attribution)
 
                 # Parse result
                 original, source_language, translated = parse_ocr_result(result)
@@ -271,7 +274,7 @@ class ScreenshotHandler:
                 trial_info = self.translation_service.get_trial_info()
 
                 # Show result in popup (image path preserved for "Open Translator")
-                if self._on_show_quick_translate:
+                if self._on_show_quick_translate and not self._run_translation:
                     self.root.after(0, lambda: self._on_show_quick_translate(
                         original, translated, target_lang, trial_info, furigana_text))
 
@@ -284,8 +287,12 @@ class ScreenshotHandler:
                     source_lang=source_language or '',
                     source_verdict=source_language or ''
                 )
+                return (original, translated, target_lang, trial_info, furigana_text,
+                        self.translation_service.api_manager.last_attribution)
 
             except Exception as e:
+                if self._run_translation:
+                    raise
                 logging.error(f"Screenshot translation failed: {e}")
                 # Close loading animation FIRST (must use after() - we're in background thread)
                 if self._get_quick_translate_manager:
@@ -298,4 +305,10 @@ class ScreenshotHandler:
                 # Cleanup on error
                 self.cleanup_pending_screenshot()
 
-        threading.Thread(target=process_screenshot, daemon=True).start()
+        if self._run_translation:
+            def completed(result):
+                if self._on_show_quick_translate:
+                    self._on_show_quick_translate(*result[:5], model_info=result[5] or '')
+            self._run_translation(process_screenshot, target_lang, completed)
+        else:
+            threading.Thread(target=process_screenshot, daemon=True).start()

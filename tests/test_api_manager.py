@@ -211,7 +211,7 @@ class TestRateLimitHandling:
     """Tests for rate limit and retry logic."""
 
     @patch('urllib.request.urlopen')
-    @patch('time.sleep')
+    @patch('src.core.api_manager.pause')
     def test_rate_limit_retry(self, mock_sleep, mock_urlopen, mock_openai_response):
         """Test exponential backoff on rate limit."""
         manager = AIAPIManager()
@@ -233,8 +233,8 @@ class TestRateLimitHandling:
         result = manager.translate("Hello")
 
         assert result == "Translated text here"
-        # Should have slept once (exponential backoff)
-        mock_sleep.assert_called()
+        # Backoff must be interruptible by cancellation and the shared deadline.
+        mock_sleep.assert_called_once_with(1)
 
 
 class TestMultimodal:

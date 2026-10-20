@@ -133,9 +133,11 @@ class TestOutputAnnotation:
         assert manager.popup_furigana.has_ruby is True
         assert manager.popup_furigana.get_plain() == JP_SENTENCE
 
-    def test_no_source_block_without_a_notation(self, manager):
+    def test_source_without_a_notation_is_still_shown_as_plain_text(self, manager):
         manager.show(EN_SENTENCE, "English", None, "Bonjour")
-        assert manager.popup_furigana is None
+        assert manager.popup_furigana is not None
+        assert manager.popup_furigana.get_plain() == 'Bonjour'
+        assert manager.popup_furigana.has_ruby is False
 
 
 # --------------------------------------------------------------------------- #

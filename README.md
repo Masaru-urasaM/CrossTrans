@@ -1,6 +1,6 @@
 # CrossTrans
 
-![Version](https://img.shields.io/badge/version-1.9.20-blue.svg)
+![Version](https://img.shields.io/badge/version-1.9.21-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-yellow.svg)
 ![License](https://img.shields.io/badge/license-AGPL%20v3-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-informational.svg)
@@ -33,6 +33,7 @@
 - **Zero Context Switching** — Translation popup appears right at your cursor, in-place. No need to open a browser tab, copy-paste, or switch windows
 - **Replace in Source** — One-click replace selected text with the translation, right in the source app
 - **Dictionary Mode** — Click words for definitions, pronunciation, synonyms, antonyms, examples
+- **Linked Reading (Experimental)** - Optional sentence highlights between source and translation, including cached results and History. Enable in Settings -> Hotkeys or with the chain button.
 - **Furigana Everywhere** — Japanese reading guides: hiragana above kanji on every surface that shows Japanese, generated offline
 - **Free Trial Mode** — Daily free translations without API key
 - **15 AI Providers** — Google, OpenAI, Anthropic, DeepSeek, Groq, and more (many offer free tiers)

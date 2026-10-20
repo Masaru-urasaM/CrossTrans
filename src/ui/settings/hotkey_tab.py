@@ -109,6 +109,7 @@ class HotkeyTabMixin:
         ttk.Separator(hotkey_container).pack(fill=X, pady=20)
         ttk.Label(hotkey_container, text="Furigana Mode", font=('Segoe UI', 10, 'bold')).pack(anchor=W, pady=(0, 10))
         self._create_furigana_section(hotkey_container)
+        self._create_linked_reading_section(hotkey_container)
 
         # 6. Fix Grammar section
         ttk.Separator(hotkey_container).pack(fill=X, pady=20)
@@ -257,6 +258,28 @@ class HotkeyTabMixin:
                        "under the input box",
                   wraplength=560, justify=LEFT,
                   font=('Segoe UI', 8), foreground='#888888').pack(anchor=W)
+
+    def _create_linked_reading_section(self, parent):
+        ttk.Separator(parent).pack(fill=X, pady=15)
+        self.linked_reading_var = tk.BooleanVar(value=self.config.get_linked_reading_enabled())
+        root = parent._root()
+        def changed():
+            self.config.set_linked_reading_enabled(self.linked_reading_var.get())
+            root.event_generate('<<LinkedReadingChanged>>', when='tail')
+        button = ttk.Checkbutton(parent, text="Linked reading (experimental)",
+                                 variable=self.linked_reading_var, command=changed)
+        button.pack(anchor=W, padx=5)
+        token = root.bind('<<LinkedReadingChanged>>', lambda _event:
+                          self.linked_reading_var.set(self.config.get_linked_reading_enabled()), add='+')
+        def cleanup(event):
+            if event.widget is button:
+                root.unbind('<<LinkedReadingChanged>>', token)
+        button.bind('<Destroy>', cleanup, add='+')
+        ttk.Label(parent, text="Highlight matching passages in the quick popup and main translator, including History. "
+                  "Eligible text translations include links in the same request and may use more tokens. "
+                  "Older results use approximate local links; trial mode uses local links only.",
+                  wraplength=540, justify=LEFT, foreground='#888888',
+                  font=('Segoe UI', 9)).pack(anchor=W, padx=5, pady=(5, 10))
 
     def _on_furigana_toggle(self):
         """Handle Furigana Mode toggle - auto-save immediately."""

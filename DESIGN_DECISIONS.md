@@ -1,7 +1,77 @@
-# CrossTrans — Design Decisions
+# CrossTrans - Design Decisions
 
-Significant architecture / library / data-model decisions. Prevents re-proposing rejected
-approaches. Newest first.
+Newest first. Stable decision IDs are retained; historical details remain in Git.
+
+---
+
+### Decision 42 - Native word wrapping only for the popup Original pane
+
+**Date:** 2026-10-20. **Status:** Implemented; user accepted.
+Set `wrap=tk.WORD` at the Original constructor only. Keep RubyText's global default
+and legacy pure layout model unchanged; popup sizing uses actual Tk pixels.
+No text rewriting or extra requests. More rows/right-edge gaps are expected;
+over-wide tokens may break to fit. Native word/ruby/link/resize tests passed.
+
+---
+
+### Decision 41 - Twenty-second deadline and latest intent wins
+
+**Date:** 2026-10-20. **Status:** Implemented; supersedes Decision 40's timeout/reasoning.
+One monotonic 20-second budget covers retries/fallback. UI/hotkey threads stay free;
+new main/quick/grammar/OCR work replaces old work. Guard UI/History/verdict writes,
+snapshot credit, preserve queue tuple lengths, serialize clipboard capture and cancel
+animation timers. Groq GPT-OSS uses low reasoning. Client cancellation does not
+promise provider cancellation/refunds; full long-document live validation is D22.
+
+---
+
+### Decision 40 - Explicit Groq GPT-OSS completion ceiling
+
+**Date:** 2026-10-20. **Status:** Implemented; timeout/reasoning superseded by Decision 41.
+On the supplied input, omitted output budget returned `length` at 3072 completion
+tokens, including 3070 reasoning tokens. The 65536 comparison received quota 429.
+Use the documented 65536 ceiling only for exact Groq GPT-OSS 120B/20B IDs on
+api.groq.com. Do not infer limits from source characters or claim the old stop reason.
+Sources: https://console.groq.com/docs/models and https://console.groq.com/docs/api-reference.
+
+---
+
+### Decision 39 - Refuse global links and incomplete generations
+
+**Date:** 2026-10-20. **Status:** Implemented.
+Structural policy v2 rejects unequal structures and a single uncertain document-wide
+pair. Reveal only counterpart groups fully outside the viewport. Check finish reasons
+before parsing/saving; terminal incomplete results never retry/rotate. Log numeric
+usage only and join all final Google/Anthropic text blocks, excluding thinking.
+
+---
+
+### Decision 38 - Links across surfaces and two-pane expansion
+
+**Date:** 2026-10-20. **Status:** Implemented; structural fallback narrowed by Decision 39.
+Keep merged/text cache namespaces separate and metadata bound to exact results.
+Use an adapter for editable main input; edits invalidate links, exact Undo restores
+them. Legacy links are approximate/local. Expand both panes with bounded real-width
+probes and up to 90% work height; isolate Open Translator at the far right.
+
+---
+
+### Decision 37 - Finish opt-in linked reading on the user's instruction
+
+**Date:** 2026-10-19. **Status:** Implemented; final build accepted/release authorized 2026-10-20.
+Default OFF. Eligible source IDs arrive in the translation's single response; no
+repair/alignment request. The 6000-character/120-unit guards gate this protocol only.
+Preserve plain text, ruby offsets, selection priority and existing queue shapes.
+Unsupported sources retain ordinary translation. Broader quality evidence remains D22.
+
+---
+
+### Decision 36 - Single-request prototype did not pass its initial rollout gate
+
+**Date:** 2026-10-19. **Status:** Historical finding; user authorized opt-in implementation in Decision 37.
+Small-sample correspondence worked, but API failures, literal-JSON escaping and
+high measured overhead prevented broad validation. Do not present this as a universal
+quality/latency result or add a paid second-request fallback. See DEFERRED D22.
 
 ---
 

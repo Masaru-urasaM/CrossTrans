@@ -8,6 +8,7 @@ import threading
 import urllib.request
 import urllib.error
 import logging
+from urllib.parse import urlsplit
 from typing import Optional, List, Dict, Any, Callable, TYPE_CHECKING
 
 import base64
@@ -16,6 +17,11 @@ from src.core.remote_config import get_config
 from src.core.multimodal import MultimodalProcessor
 from src.core.text_cleanup import strip_thinking_tags
 from src.core.ssl_pinning import get_ssl_context_for_url
+from src.constants import TRANSLATION_TIMEOUT_SECONDS
+from src.core.translation_task import (TranslationStopped, active_write, bounded_io,
+                                       check_current, current_task, pause, request_budget)
+from src.core.generation_result import (IncompleteGenerationError, check_generation_result,
+                                        google_text, anthropic_text)
 
 # Default models to try for each provider when model is "Auto"
 # Ordered by preference (best models first)
@@ -49,9 +55,11 @@ DEFAULT_MODELS_BY_PROVIDER = {
     # 509 completion tokens against gpt-oss's 134, with <think> inline in content, so
     # it depends on strip_thinking_tags() and costs 4x the tokens. qwen3.8-27b also
     # answered 429 'Request too large ... on output' on one of two attempts.
-    # NB the OpenAI-compatible path sends NO max_tokens (see
-    # _call_generic_openai_style) - the hard limit there is its timeout=10, not a
-    # token budget. Only _call_anthropic caps output, at 1024.
+    # Groq GPT-OSS now requests its documented output maximum explicitly: an
+    # omitted budget returned length at 3072 tokens on the user's long input,
+    # with 3070 spent on reasoning (2026-10-20). See _openai_generation_settings.
+    # Other existing budgets: Google REST 4096, Anthropic text 1024 (multimodal
+    # 4096), trial 4096. A normal stop still cannot prove semantic completeness.
     'Groq': ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
     'xAI': ['grok-4.20-0309-non-reasoning', 'grok-4.3'],
     'Mistral': ['mistral-large-latest', 'mistral-small-latest'],
@@ -91,6 +99,19 @@ DEFAULT_MODELS_BY_PROVIDER = {
 
 if TYPE_CHECKING:
     from src.core.provider_health import ProviderHealthManager
+
+
+def _openai_generation_settings(base_url: str, model_name: str, default_timeout: int):
+    """Use the documented Groq GPT-OSS ceiling rather than a small server default."""
+    if (urlsplit(base_url).hostname == 'api.groq.com'
+            and model_name in ('openai/gpt-oss-120b', 'openai/gpt-oss-20b')):
+        # https://console.groq.com/docs/models (checked 2026-10-20): both models
+        # allow 65536 completion tokens, shared by reasoning and final content.
+        # This is a ceiling, not a target length or a source-character estimate.
+        # The provider still enforces its combined context and account quotas.
+        # The user requires the whole operation to finish within 20 seconds.
+        return {'max_completion_tokens': 65536, 'reasoning_effort': 'low'}, int(TRANSLATION_TIMEOUT_SECONDS)
+    return {}, default_timeout
 
 
 class AIAPIManager:
@@ -245,6 +266,7 @@ class AIAPIManager:
 
         return 'Google'  # Ultimate fallback
 
+    @request_budget
     def _make_request_with_retry(self, url: str, data: dict, headers: dict,
                                   response_parser: Callable[[dict], str],
                                   timeout: int = 10, max_retries: int = 3) -> str:
@@ -267,6 +289,7 @@ class AIAPIManager:
         ssl_context = get_ssl_context_for_url(url)
 
         for attempt in range(max_retries):
+            check_current()
             req = urllib.request.Request(
                 url,
                 data=json.dumps(data).encode('utf-8'),
@@ -275,16 +298,22 @@ class AIAPIManager:
             )
 
             try:
-                with urllib.request.urlopen(req, timeout=timeout, context=ssl_context) as response:
-                    result = json.loads(response.read().decode('utf-8'))
-                    return response_parser(result)
+                socket_timeout = min(timeout, current_task().remaining())
+
+                def read_response():
+                    with urllib.request.urlopen(req, timeout=socket_timeout, context=ssl_context) as response:
+                        return json.loads(response.read().decode('utf-8'))
+
+                result = bounded_io(read_response)
+                check_generation_result(result)
+                return response_parser(result)
 
             except urllib.error.HTTPError as e:
                 if e.code == 429:  # Rate limit
                     if attempt < max_retries - 1:
                         wait_time = 2 ** attempt  # 1s, 2s, 4s
                         logging.warning(f"Rate limit hit, waiting {wait_time}s before retry...")
-                        time.sleep(wait_time)
+                        pause(wait_time)
                         continue
                     else:
                         raise Exception(f"Rate limit exceeded after {max_retries} retries")
@@ -296,7 +325,7 @@ class AIAPIManager:
                     if attempt < max_retries - 1:
                         wait_time = 2 ** attempt
                         logging.warning(f"Server error {e.code}, waiting {wait_time}s before retry...")
-                        time.sleep(wait_time)
+                        pause(wait_time)
                         continue
                     else:
                         raise Exception(f"Server error {e.code} after {max_retries} retries")
@@ -307,7 +336,7 @@ class AIAPIManager:
                 if attempt < max_retries - 1:
                     wait_time = 2 ** attempt
                     logging.warning(f"Network error, waiting {wait_time}s before retry: {e}")
-                    time.sleep(wait_time)
+                    pause(wait_time)
                     continue
                 else:
                     raise Exception(f"Network error after {max_retries} retries: {e}")
@@ -345,6 +374,8 @@ class AIAPIManager:
             "messages": messages,
             "temperature": 0.3
         }
+        generation_options, timeout = _openai_generation_settings(base_url, model_name, 10)
+        data.update(generation_options)
 
         # OpenAI response parser
         def parse_openai_response(result: dict) -> str:
@@ -355,7 +386,7 @@ class AIAPIManager:
             data=data,
             headers=headers,
             response_parser=parse_openai_response,
-            timeout=10
+            timeout=timeout
         )
 
     def _call_anthropic(self, api_key: str, model_name: str, prompt: str,
@@ -393,7 +424,7 @@ class AIAPIManager:
 
         # Anthropic response parser
         def parse_anthropic_response(result: dict) -> str:
-            return result['content'][0]['text'].strip()
+            return anthropic_text(result)
 
         return self._make_request_with_retry(
             url=url,
@@ -442,7 +473,7 @@ class AIAPIManager:
             if 'candidates' in result and result['candidates']:
                 candidate = result['candidates'][0]
                 if 'content' in candidate and 'parts' in candidate['content']:
-                    return candidate['content']['parts'][0]['text'].strip()
+                    return google_text(result)
             raise Exception("Invalid response format from Google API")
 
         return self._make_request_with_retry(
@@ -494,7 +525,7 @@ class AIAPIManager:
             if 'candidates' in result and result['candidates']:
                 candidate = result['candidates'][0]
                 if 'content' in candidate and 'parts' in candidate['content']:
-                    return candidate['content']['parts'][0]['text'].strip()
+                    return google_text(result)
             raise Exception("Invalid response format from Google API")
 
         return self._make_request_with_retry(
@@ -514,16 +545,23 @@ class AIAPIManager:
         value. Callers that care snapshot it right after their own call rather
         than reading it later (see TranslationService.last_attribution).
         """
+        task = current_task()
+        if task and task.attribution:
+            return task.attribution
         if not self.last_model:
             return None
         if not self.last_provider:
             return self.last_model
         return f"{self.last_model} ({self.last_provider})"
 
+    @active_write
     def _record_attribution(self, model_name: str, provider: str) -> None:
         """Remember the model+provider that just answered successfully."""
         self.last_model = model_name
         self.last_provider = provider
+        task = current_task()
+        if task:
+            task.attribution = f'{model_name} ({provider})'
 
     def _generate_content(self, provider: str, api_key: str, model_name: str,
                            prompt: str, image_path: Optional[str] = None) -> str:
@@ -733,6 +771,8 @@ class AIAPIManager:
                                              file_contents=file_contents)
                 logging.info(f"[ModelRotation] Cached model {cached} succeeded!")
                 return result
+            except (IncompleteGenerationError, TranslationStopped):
+                raise
             except Exception as e:
                 logging.warning(f"[ModelRotation] Cached model {cached} failed: {e}")
                 self._record_failed_model(api_key, provider, cached)
@@ -769,6 +809,8 @@ class AIAPIManager:
                 logging.info(f"[ModelRotation] Model {candidate} succeeded!")
                 self._cache_rotation_working_model(api_key, provider, candidate)
                 return result
+            except (IncompleteGenerationError, TranslationStopped):
+                raise
             except Exception as e:
                 logging.warning(f"[ModelRotation] Model {candidate} failed: {e}")
                 self._record_failed_model(api_key, provider, candidate)
@@ -796,6 +838,8 @@ class AIAPIManager:
                 result = self._generate_content(provider, api_key, cached_model, prompt)
                 logging.info(f"[Auto-Model] Cached model {cached_model} worked!")
                 return result
+            except (IncompleteGenerationError, TranslationStopped):
+                raise
             except Exception as e:
                 logging.warning(f"[Auto-Model] Cached model {cached_model} failed: {e}")
                 # Clear cache and try all models
@@ -815,12 +859,15 @@ class AIAPIManager:
                 self._working_models_cache[key_prefix] = model
                 logging.info(f"[Auto-Model] Model {model} works! Cached for future use.")
                 return result
+            except (IncompleteGenerationError, TranslationStopped):
+                raise
             except Exception as e:
                 logging.warning(f"[Auto-Model] Model {model} failed: {e}")
                 continue
 
         return None
 
+    @request_budget
     def translate(self, prompt: str) -> str:
         """Translate text using configured keys with smart fallback."""
         if not self.api_configs:
@@ -906,6 +953,8 @@ class AIAPIManager:
 
                 return result
 
+            except (IncompleteGenerationError, TranslationStopped):
+                raise
             except Exception as e:
                 # Record failure
                 if self.health_manager:
@@ -930,6 +979,7 @@ class AIAPIManager:
 
         raise Exception("All API keys failed.\n" + "\n".join(errors))
 
+    @request_budget
     def translate_image(self, prompt: str, image_path: str) -> str:
         """Translate/Analyze image using configured keys with smart fallback."""
         if not self.api_configs:
@@ -993,6 +1043,8 @@ class AIAPIManager:
 
                 return result
 
+            except (IncompleteGenerationError, TranslationStopped):
+                raise
             except Exception as e:
                 # Record failure
                 if self.health_manager:
@@ -1014,6 +1066,7 @@ class AIAPIManager:
 
         raise Exception("All vision APIs failed.\n" + "\n".join(errors))
 
+    @request_budget
     def translate_multimodal(self, prompt: str,
                               image_paths: Optional[List[str]] = None,
                               file_contents: Optional[Dict[str, str]] = None) -> str:
@@ -1096,6 +1149,8 @@ class AIAPIManager:
 
                 return result
 
+            except (IncompleteGenerationError, TranslationStopped):
+                raise
             except Exception as e:
                 # Record failure
                 if self.health_manager:
@@ -1190,6 +1245,8 @@ class AIAPIManager:
             "messages": messages,
             "temperature": 0.3
         }
+        generation_options, timeout = _openai_generation_settings(base_url, model_name, 60)
+        data.update(generation_options)
 
         # OpenAI response parser
         def parse_openai_response(result: dict) -> str:
@@ -1200,7 +1257,7 @@ class AIAPIManager:
             data=data,
             headers=headers,
             response_parser=parse_openai_response,
-            timeout=60  # Longer timeout for multi-image processing
+            timeout=timeout
         )
 
     def _call_anthropic_multimodal(self, api_key: str, model_name: str, prompt: str,
@@ -1244,7 +1301,7 @@ class AIAPIManager:
 
         # Anthropic response parser
         def parse_anthropic_response(result: dict) -> str:
-            return result['content'][0]['text'].strip()
+            return anthropic_text(result)
 
         return self._make_request_with_retry(
             url=url,
