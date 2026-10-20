@@ -52,6 +52,8 @@ class Config:
         "fix_grammar_hotkey_enabled": False,  # Register global Win+Alt+G hotkey (off by default - collides with Xbox Game Bar; the button + language hotkeys always work)
         "autostart": False,
         "check_updates": False,  # Default to False
+        "auto_check_updates": True,
+        "update_reminders": {},
         "theme": "darkly",
         "history": [],
         "history_enabled": True,
@@ -504,12 +506,23 @@ class Config:
         self.save()
 
     def get_auto_check_updates(self) -> bool:
-        """Get whether to auto-check updates on startup."""
-        return self._config.get('auto_check_updates', False)
+        """Check automatically unless the user explicitly disabled it."""
+        return self._config.get('auto_check_updates', True)
 
     def set_auto_check_updates(self, enabled: bool):
         """Set auto-check updates on startup."""
         self._config['auto_check_updates'] = enabled
+        self.save()
+
+    def get_update_reminders(self) -> dict:
+        """Return an isolated copy of local reminder preferences."""
+        value = self._config.get('update_reminders', {})
+        return dict(value) if isinstance(value, dict) else {}
+
+    def set_update_reminders(self, **changes):
+        preferences = self.get_update_reminders()
+        preferences.update(changes)
+        self._config['update_reminders'] = preferences
         self.save()
 
     # Trial mode settings

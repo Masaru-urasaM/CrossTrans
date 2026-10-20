@@ -3,6 +3,17 @@
 Completed work only. Active tasks: [ROADMAP.md](ROADMAP.md).
 Implementation rules: [CLAUDE.md](CLAUDE.md) and [DESIGN_DECISIONS.md](DESIGN_DECISIONS.md).
 
+## v1.9.21 asset refresh - Update offers (2026-10-20)
+
+Repaired automatic notifications; added daily checks, persisted Later/Skip, Settings/tray
+entries, UI-thread delivery and explicit idle restart. EXE digest verification uses GitHub
+asset metadata. Decision 43 records the policy; the user requested the same-version refresh.
+Verification: 1989 passed, one intentional clipboard skip; 43 focused update tests and
+seven mutation checks passed. Live read-only GitHub metadata matched the v1.9.21 EXE/hash.
+The CI collection floor is now 1950.
+Delivery: refreshed `CrossTrans_v1.9.21.exe` and `SHA256SUMS.txt` in the existing release;
+71 packaged project modules match source, with the furigana dictionary/codecs bundled.
+
 ## v1.9.21 - Completed and user-accepted (2026-10-20)
 
 | Task | Delivered |

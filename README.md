@@ -265,7 +265,7 @@ Right-click CT tray icon → **Open Translator**, or click from popup.
 
 #### General
 - Auto-start with Windows
-- Check for updates on startup
+- Check for updates automatically at startup and every 24 hours; choose Update, Later or Skip this version. Explicit restart applies downloaded updates.
 - Enable/disable translation history
 - Theme selection
 

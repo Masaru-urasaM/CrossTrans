@@ -8,6 +8,7 @@ No pending changes.
 
 ### Added
 
+- Background update offers at startup and every 24 hours, with Update / Later / Skip this version, persistent choices and Settings/tray entry points. Auto-check defaults ON and preserves explicit opt-outs (2026-10-20 asset refresh).
 - Optional Linked reading across quick popup, main translator, cache and History; shared toggles and subtle sentence highlights. Experimental, default OFF.
 - Evidence-based Japanese/Chinese source choices, Japanese OCR originals and readings, and an optional accurate-furigana language pack.
 
@@ -19,13 +20,16 @@ No pending changes.
 
 ### Fixed
 
+- Repaired update notification calls. Offers do not take focus and wait for active translations. Checks/downloads deliver UI work through queues, reject stale results and handle closing Settings safely. Downloaded updates wait for explicit idle restart.
+- Use the EXE asset's GitHub SHA-256 digest, with legacy release-note fallback; cancellation also works without Content-Length.
 - Missing Original text, stale cached links, unreliable whole-document highlighting and disruptive linked scrolling.
 - Output-limit responses no longer become successful cached translations; all final Google/Anthropic text blocks are read.
 - Second-instance activation, persistent frozen-app logs, hidden-root dialogs, wheel ownership and packaged reading resources.
 
 ### Verification and limits
 
-- 1946 local tests passed, one intentional clipboard skip; native UI, mutation and packaged-code checks passed. CI collection floor: 1900.
+- Refreshed asset: 1989 local tests passed, one intentional clipboard skip; 43 focused update tests and seven update mutation checks passed. All 71 packaged project modules match source. CI collection floor: 1950.
+- Existing v1.9.21 installations must download the refreshed EXE manually: the version number is unchanged.
 - Linked reading quality/overhead varies by model. Local cancellation cannot guarantee provider cancellation or refunded quota. Details: DEFERRED D22 and docs/linked_reading_evaluation.md.
 
 ## [1.9.20] - Model credit, History fixed, ruby like Word (2026-09-02)

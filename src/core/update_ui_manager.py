@@ -8,6 +8,9 @@ import os
 import sys
 import logging
 import threading
+import queue
+import time
+import tkinter as tk
 from typing import Optional
 
 from src.constants import VERSION
@@ -15,9 +18,11 @@ from src.ui.toast import ToastType
 from src.utils.updates import (
     AutoUpdater,
     STARTUP_UPDATE_DELAY,
-    UPDATE_TOAST_DURATION,
+    UPDATE_THREAD_TIMEOUT,
     THREAD_NAMES
 )
+from src.core.update_policy import UPDATE_INTERVAL_SECONDS, should_notify, reminder_changes
+from src.ui.update_notice import UpdateNotice
 
 
 class UpdateUIManager:
@@ -46,6 +51,30 @@ class UpdateUIManager:
         self._pending_update_success_version: Optional[str] = None
         self._pending_update_error: Optional[str] = None
         self._pending_update_path: Optional[str] = None
+        self.available_version = None
+        self.available_updater = None
+        self.ready_update = None
+        self._on_state_changed = None
+        self._on_open_update = None
+        self._is_busy = lambda: False
+        self._answers = queue.Queue()
+        self._commands = queue.SimpleQueue()
+        self._callbacks = []
+        self._request_id = 0
+        self._checking = False
+        self._started = False
+        self._stopped = False
+        self._poll_id = None
+        self._notice = None
+        self._pending_open = False
+        self._next_check = 0
+        self._check_deadline = 0
+
+    def configure_callbacks(self, on_state_changed=None, on_open_update=None, is_busy=None):
+        self._on_state_changed = on_state_changed
+        self._on_open_update = on_open_update
+        if is_busy:
+            self._is_busy = is_busy
 
     def check_update_status(self) -> None:
         """Check if previous update succeeded or failed.
@@ -154,32 +183,138 @@ class UpdateUIManager:
             self.root.after(1000, lambda: self._show_update_failed_dialog(error_msg, pending_path))
 
     def startup_update_check(self) -> None:
-        """Silent update check on startup (non-intrusive).
+        """Start the UI-thread pump, including when automatic checks are disabled."""
+        if self._started or self._stopped:
+            return
+        self._started = True
+        self._next_check = time.monotonic() + STARTUP_UPDATE_DELAY
+        self._poll_id = self.root.after(250, self._tick)
 
-        Checks for updates in background thread after app initialization.
-        Shows toast notification if update available.
-        """
-        def check_updates():
-            import time
-            time.sleep(STARTUP_UPDATE_DELAY)  # Wait for app to fully load
+    def auto_check_changed(self):
+        """Apply Settings changes immediately without restarting the app."""
+        self._next_check = time.monotonic() + STARTUP_UPDATE_DELAY
+        if not self.config.get_auto_check_updates():
+            self._close_notice()
 
-            logging.info("Auto-checking for updates on startup...")
-            updater = AutoUpdater()
-            result = updater.check_update()
+    def request_check(self, callback=None):
+        """Join one check in flight. Workers only publish to a queue, never Tk."""
+        if self._stopped:
+            return
+        self.startup_update_check()
+        if callback:
+            self._callbacks.append(callback)
+        if self._checking:
+            return
+        self._checking = True
+        self._request_id += 1
+        request_id = self._request_id
+        self._check_deadline = time.monotonic() + UPDATE_THREAD_TIMEOUT
+        self._next_check = time.monotonic() + UPDATE_INTERVAL_SECONDS
 
-            if result.get('has_update'):
-                new_version = result['version']
-                logging.info(f"Update available: {new_version}")
-                # Show non-intrusive toast notification
-                self.root.after(0, lambda: self._show_update_toast(new_version))
-            else:
-                logging.info("No update available on startup check")
+        def worker():
+            updater = None
+            try:
+                updater = AutoUpdater()
+                result = updater.check_update()
+            except Exception as error:
+                logging.exception('[Update] Check failed')
+                result = {'error': str(error), 'has_update': False}
+            self._answers.put((request_id, result, updater))
 
-        threading.Thread(
-            target=check_updates,
-            daemon=True,
-            name=THREAD_NAMES['startup']
-        ).start()
+        threading.Thread(target=worker, daemon=True, name=THREAD_NAMES['check']).start()
+
+    def _tick(self):
+        self._poll_id = None
+        if self._stopped:
+            return
+        try:
+            while not self._commands.empty():
+                self._commands.get_nowait()
+                self._pending_open = True
+            while True:
+                try:
+                    request_id, result, updater = self._answers.get_nowait()
+                except queue.Empty:
+                    break
+                if self._checking and request_id == self._request_id:
+                    self._finish_check(result, updater)
+            if self._checking and time.monotonic() >= self._check_deadline:
+                self._finish_check({'error': 'Update check timed out', 'has_update': False}, None)
+            if self.config.get_auto_check_updates():
+                if not self._checking and time.monotonic() >= self._next_check:
+                    self.request_check()
+                self._maybe_notify()
+            if self._pending_open and not self._is_busy():
+                self._pending_open = False
+                self.request_update()
+        except tk.TclError:
+            self.stop()
+            return
+        finally:
+            if not self._stopped:
+                self._poll_id = self.root.after(250 if self._checking else 1000, self._tick)
+
+    def _finish_check(self, result, updater):
+        self._checking = False
+        callbacks, self._callbacks = self._callbacks, []
+        if result.get('error'):
+            logging.warning('[Update] %s', result['error'])
+        else:
+            self.available_version = result.get('version') if result.get('has_update') else None
+            self.available_updater = updater if self.available_version else None
+            self._close_notice()
+            if callbacks and self.available_version:
+                self.config.set_update_reminders(**reminder_changes(
+                    'shown', self.available_version, time.time()))
+            if self._on_state_changed:
+                self._on_state_changed()
+        for callback in callbacks:
+            try:
+                callback(result, updater)
+            except Exception:
+                logging.exception('[Update] Result callback failed')
+
+    def _maybe_notify(self):
+        if not self.available_version or self._notice or self._is_busy():
+            return
+        if self.ready_update and self.ready_update[0] == self.available_version:
+            return
+        if should_notify(self.available_version, self.config.get_update_reminders(), time.time()):
+            self._show_update_toast(self.available_version)
+
+    def _close_notice(self):
+        notice, self._notice = self._notice, None
+        if notice:
+            notice.close()
+
+    def _notice_action(self, action, version):
+        self._close_notice()
+        if action == 'update':
+            self.request_update()
+        else:
+            self.config.set_update_reminders(**reminder_changes(action, version, time.time()))
+
+    def request_update(self):
+        """Only a user action opens Settings; never interrupt an active translation."""
+        if self._stopped:
+            return
+        self._close_notice()
+        if self._is_busy():
+            self._pending_open = True
+        elif self.available_version and self._on_open_update:
+            self._on_open_update(self.available_version, self.available_updater)
+
+    def post_update_request(self):
+        """The tray thread must not call Tk, including after()."""
+        self._commands.put(None)
+
+    def stop(self):
+        self._stopped = True
+        self._callbacks.clear()
+        self._close_notice()
+        if self._poll_id:
+            self.root.after_cancel(self._poll_id)
+            self._poll_id = None
 
     def _show_update_success_toast(self, version: str) -> None:
         """Show success toast after update.
@@ -188,8 +323,8 @@ class UpdateUIManager:
             version: The version that was successfully installed
         """
         self.toast.show(
-            "Update Successful",
             f"CrossTrans has been updated to v{version}",
+            ToastType.SUCCESS,
             duration=5000
         )
 
@@ -216,8 +351,8 @@ class UpdateUIManager:
 
             if result['success']:
                 self.toast.show(
-                    "Update Scheduled",
                     "Update will be applied when you restart Windows.",
+                    ToastType.INFO,
                     duration=5000
                 )
                 # Clean up pending file marker
@@ -232,7 +367,6 @@ class UpdateUIManager:
                         pass
             else:
                 self.toast.show(
-                    "Scheduling Failed",
                     result.get('message', 'Could not schedule update'),
                     duration=5000,
                     toast_type=ToastType.ERROR
@@ -245,15 +379,8 @@ class UpdateUIManager:
             webbrowser.open(f"https://github.com/{GITHUB_REPO}/releases/latest")
 
     def _show_update_toast(self, new_version: str) -> None:
-        """Show non-intrusive update notification as toast.
-
-        Args:
-            new_version: Version number of the available update (e.g., "1.9.7")
-        """
-        from src.ui.toast import show_toast
-        show_toast(
-            self.root,
-            "Update Available",
-            f"CrossTrans v{new_version} is available!\nOpen Settings to update.",
-            duration=UPDATE_TOAST_DURATION
-        )
+        """Offer Update / Later / Skip without a grab or focus change."""
+        self._close_notice()
+        self._notice = UpdateNotice(self.root, new_version,
+                                    lambda action: self._notice_action(action, new_version))
+        self.config.set_update_reminders(**reminder_changes('shown', new_version, time.time()))

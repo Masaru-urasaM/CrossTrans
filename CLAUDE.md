@@ -73,6 +73,26 @@ self.screenshot_handler.configure_callbacks(
 
 ## Auto-Update System (Important)
 
+### Automatic offers (Decision 43, v1.9.21 asset refresh)
+
+- `UpdateUIManager` owns a single-flight check and a UI-thread queue pump. Check after
+  3 seconds at startup and every 24 hours while running; explicit manual checks bypass
+  reminder suppression and join any check already in flight. Timeout/late replies cannot
+  overwrite a newer check. Workers never call Tk, including `after()`.
+- Auto-check is ON when no preference exists; an explicitly saved OFF remains OFF.
+  Settings applies changes immediately. `update_policy.py` keeps version-specific Later
+  (24 hours), Skip, and last-shown timestamps in `Config.update_reminders`, surviving restarts.
+- `UpdateNotice` offers Update / Later / Skip without a modal grab, transient hidden owner,
+  or focus change. Windows `WS_EX_NOACTIVATE` prevents activation on mapping. Offers wait
+  for an idle translation runner; the tray thread queues user actions without touching Tk.
+- Settings and the tray retain an available-update entry after Later/Skip. Download uses
+  the checked updater snapshot. Closing Settings cancels its download; progress/result
+  delivery stays on Tk's thread. A downloaded update survives reopening Settings within
+  the same app session. Only an explicit Restart button installs it, and active translation
+  blocks restart. Read GitHub's EXE asset digest first, with legacy release-note SHA fallback.
+- Regressions: `tests/test_update_notifications.py`, `tests/test_update_notifications_ui.py`
+  and `tests/test_update_metadata.py`. UI tests use the private desktop, never the user's tray.
+
 Key points:
 
 ### Update flow (EXE mode):
@@ -357,7 +377,7 @@ without a usable display and 312 of the tests need one, so a runner with no desk
 session would skip half the suite and still pass. `tools/check_test_counts.py` reads
 the JUnit XML and fails the build when more tests were skipped than a healthy run
 explains (`DEFAULT_MAX_SKIPPED`), or when suspiciously few were collected at all.
-Raise the ceiling only for a skip you can name. The floor, `--min-total` (1900 since the v1.9.21 release), sits a
+Raise the ceiling only for a skip you can name. The floor, `--min-total` (1950 since update-offer regressions), sits a
 little under the suite's size: raise it as the suite grows, never lower it to make a run pass.
 
 **A test run stays off the developer's session** (K12, Decision 32; `tests/quiet_session.py`,

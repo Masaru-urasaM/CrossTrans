@@ -41,7 +41,8 @@ class SettingsWindow(
     - UpdateManagerMixin: Update checking and downloading functionality
     """
 
-    def __init__(self, parent, config, on_save_callback=None, on_api_change_callback=None):
+    def __init__(self, parent, config, on_save_callback=None, on_api_change_callback=None,
+                 update_manager=None, is_translation_busy=None):
         """Initialize the Settings window.
 
         Args:
@@ -58,6 +59,18 @@ class SettingsWindow(
         self.api_rows = []
         self.recording_language = None
         self.updater = AutoUpdater()
+        self.is_translation_busy = is_translation_busy or (lambda: False)
+        self._download_active = False
+        self._download_poll_id = None
+        self._owns_update_manager = update_manager is None
+        if update_manager is None:
+            from src.core.update_ui_manager import UpdateUIManager
+            from src.ui.toast import ToastManager
+            update_manager = UpdateUIManager(parent, config, ToastManager(parent))
+            update_manager.configure_callbacks(
+                on_state_changed=self.refresh_update_state, on_open_update=self.offer_update,
+                is_busy=self.is_translation_busy)
+        self.update_manager = update_manager
 
         # Lazy loading: Track which tabs have been loaded
         self._tab_loaded = {
@@ -87,10 +100,12 @@ class SettingsWindow(
 
         # Make window modal and handle close properly
         self.window.protocol("WM_DELETE_WINDOW", self.window.destroy)
+        self.window.bind('<Destroy>', self._close_update_work, add='+')
         self.window.focus_force()
 
         try:
             self._create_widgets()
+            self.refresh_update_state()
         except Exception as e:
             logging.exception(f"Error creating settings widgets: {e}")
 

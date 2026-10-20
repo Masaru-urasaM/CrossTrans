@@ -12,6 +12,12 @@ class TranslationTaskRunner:
         self.tasks = TranslationTasks()
         self._cleanup = None
         self._owner = None
+        self._pending_task = None
+
+    @property
+    def busy(self):
+        task = self._pending_task
+        return bool(task and task.is_current() and task.remaining() > 0)
 
     def cancel(self, owner=None):
         if owner is not None and owner is not self._owner:
@@ -20,12 +26,14 @@ class TranslationTaskRunner:
             self.tasks.current.cancel()
         cleanup, self._cleanup = self._cleanup, None
         self._owner = None
+        self._pending_task = None
         if cleanup:
             cleanup()
 
     def start(self, operation, on_result=None, on_error=None, on_cancel=None, owner=None):
         self.cancel()
         task = self.tasks.begin()
+        self._pending_task = task
         self._cleanup = on_cancel
         self._owner = owner
         answers = queue.Queue()
@@ -41,6 +49,8 @@ class TranslationTaskRunner:
 
         def poll():
             if not task.is_current():
+                if self._pending_task is task:
+                    self._pending_task = None
                 return
             if owner is not None:
                 try:
@@ -61,6 +71,7 @@ class TranslationTaskRunner:
                 self.root.after(min(25, max(1, int(task.remaining() * 1000))), poll)
                 return
             self._cleanup = None
+            self._pending_task = None
             if successful:
                 if on_result:
                     on_result(value)

@@ -205,8 +205,13 @@ class TranslatorApp:
         self.tray_manager.configure_callbacks(
             on_show_main_window=self.show_main_window,
             on_show_settings=self.show_settings,
-            on_quit=self.quit_app
+            on_quit=self.quit_app,
+            on_update=self.update_manager.post_update_request
         )
+        self.update_manager.configure_callbacks(
+            on_state_changed=self._update_state_changed,
+            on_open_update=self._open_available_update,
+            is_busy=self._updates_are_busy)
 
         # Drop handler
         self.drop_handler = DropHandler(self.root)
@@ -218,9 +223,8 @@ class TranslatorApp:
         self._translate_pulse_direction = 1  # 1 = brightening, -1 = dimming
         self._translate_pulse_level = 0
 
-        # Check for updates on startup if enabled
-        if self.config.get_auto_check_updates():
-            self.update_manager.startup_update_check()
+        # Start the pump for automatic checks and user-initiated update actions.
+        self.update_manager.startup_update_check()
 
         # Schedule daily API key re-check if trial mode is forced
         self.trial_manager.schedule_recheck()
@@ -1823,7 +1827,9 @@ IMPORTANT: Translate ALL text to {target_lang}. Process ALL files. Extract actua
             # Refresh tray menu to show/hide screenshot hotkey based on vision capability
             self._refresh_tray_menu()
 
-        self.settings_window = SettingsWindow(self.root, self.config, on_settings_save, on_api_change)
+        self.settings_window = SettingsWindow(
+            self.root, self.config, on_settings_save, on_api_change,
+            update_manager=self.update_manager, is_translation_busy=self._translation_is_busy)
 
         # Ensure new window appears on top (same pattern as re-focusing existing window)
         self.settings_window.window.attributes('-topmost', True)
@@ -1835,6 +1841,26 @@ IMPORTANT: Translate ALL text to {target_lang}. Process ALL files. Extract actua
     def _refresh_tray_menu(self):
         """Refresh tray menu to reflect updated hotkeys."""
         self.tray_manager.refresh_menu()
+
+    def _translation_is_busy(self):
+        runner = getattr(self, '_translation_task_runner', None)
+        return bool(runner and runner.busy)
+
+    def _updates_are_busy(self):
+        settings = self.settings_window
+        return (self._translation_is_busy()
+                or bool(settings and settings._download_active)
+                or self.root.grab_current() is not None)
+
+    def _update_state_changed(self):
+        self.tray_manager.set_update_available(self.update_manager.available_version)
+        if self.settings_window:
+            self.settings_window.refresh_update_state()
+
+    def _open_available_update(self, version, updater):
+        self.show_settings()
+        self.settings_window.notebook.select(self.settings_window._tab_frames['general'])
+        self.settings_window.offer_update(version, updater)
 
     def _refresh_attachment_area(self):
         """Refresh attachment area based on current API capabilities.
@@ -1885,6 +1911,7 @@ IMPORTANT: Translate ALL text to {target_lang}. Process ALL files. Extract actua
         """Quit the application with proper cleanup."""
         logging.info("Quitting application...")
         self.running = False
+        self.update_manager.stop()
 
         # Cleanup hotkeys
         try:

@@ -4,6 +4,21 @@ Newest first. Stable decision IDs are retained; historical details remain in Git
 
 ---
 
+### Decision 43 - Quiet, persistent update offers with explicit installation
+
+**Date:** 2026-10-20. **Status:** Implemented; included in the v1.9.21 asset refresh.
+Keep the existing EXE installer and introduce one controller for automatic/manual checks.
+Use a 24-hour cadence and version-specific persisted Later/Skip choices, while retaining
+manual entry points. New/unset preferences enable auto-check; explicit opt-outs survive.
+Nonactivating notifications and queue-based UI delivery avoid focus loss and worker/Tk
+races. An active translation blocks offers/restart. Download completion never restarts
+automatically; Settings retains the checked updater and downloaded file for this session.
+Use GitHub's EXE digest before the older release-note hash, without another API request.
+The user requested replacing the v1.9.21 release assets without a version bump. Record
+the patch source commit in release notes; same-version installations update manually.
+
+---
+
 ### Decision 42 - Native word wrapping only for the popup Original pane
 
 **Date:** 2026-10-20. **Status:** Implemented; user accepted.

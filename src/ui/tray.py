@@ -47,11 +47,14 @@ class TrayManager:
         self._on_show_main_window: Optional[Callable[[], None]] = None
         self._on_show_settings: Optional[Callable[[], None]] = None
         self._on_quit: Optional[Callable[[], None]] = None
+        self._on_update: Optional[Callable[[], None]] = None
+        self._update_version = None
 
     def configure_callbacks(self,
                             on_show_main_window: Optional[Callable[[], None]] = None,
                             on_show_settings: Optional[Callable[[], None]] = None,
-                            on_quit: Optional[Callable[[], None]] = None):
+                            on_quit: Optional[Callable[[], None]] = None,
+                            on_update: Optional[Callable[[], None]] = None):
         """Configure callback functions for tray menu actions.
 
         Args:
@@ -62,6 +65,7 @@ class TrayManager:
         self._on_show_main_window = on_show_main_window
         self._on_show_settings = on_show_settings
         self._on_quit = on_quit
+        self._on_update = on_update
 
     def _create_icon_image(self) -> Image.Image:
         """Create the tray icon image.
@@ -101,6 +105,10 @@ class TrayManager:
             MenuItem('Settings', lambda: self._on_show_settings() if self._on_show_settings else None),
             MenuItem('\u2500' * 13, lambda: None, enabled=False),
         ]
+        if self._update_version:
+            menu_items.insert(2, MenuItem(
+                f'Update available: v{self._update_version}',
+                lambda: self._on_update() if self._on_update else None))
 
         # Add all hotkeys (default + custom) from config
         all_hotkeys = self.config.get_all_hotkeys()
@@ -156,6 +164,10 @@ class TrayManager:
         if self.tray_icon:
             menu_items = self._build_menu_items()
             self.tray_icon.menu = Menu(*menu_items)
+
+    def set_update_available(self, version):
+        self._update_version = version
+        self.refresh_menu()
 
     def stop(self):
         """Stop and cleanup the tray icon."""

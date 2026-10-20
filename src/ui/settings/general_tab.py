@@ -40,17 +40,18 @@ class GeneralTabMixin:
         # Check for updates on startup (auto-save on toggle)
         self.auto_check_var = tk.BooleanVar(value=self.config.get_auto_check_updates())
         if HAS_TTKBOOTSTRAP:
-            ttk.Checkbutton(parent, text="Check for updates on startup",
+            ttk.Checkbutton(parent, text="Check for updates automatically (startup and every 24 hours)",
                             variable=self.auto_check_var,
                             command=self._on_auto_check_changed,
                             bootstyle="round-toggle-success").pack(anchor=W, pady=5)
         else:
-            ttk.Checkbutton(parent, text="Check for updates on startup",
+            ttk.Checkbutton(parent, text="Check for updates automatically (startup and every 24 hours)",
                             variable=self.auto_check_var,
                             command=self._on_auto_check_changed).pack(anchor=W, pady=5)
 
         # Check for updates button
         update_frame = ttk.Frame(parent)
+        self.update_check_frame = update_frame
         update_frame.pack(anchor=W, pady=(10, 0), fill=X)
 
         if HAS_TTKBOOTSTRAP:
@@ -64,6 +65,12 @@ class GeneralTabMixin:
 
         self.update_status_label = ttk.Label(update_frame, text="", font=('Segoe UI', 9))
         self.update_status_label.pack(side=tk.LEFT, padx=(10, 0))
+
+        self.update_offer_frame = ttk.Frame(parent)
+        self.update_offer_label = ttk.Label(self.update_offer_frame, font=('Segoe UI', 10, 'bold'))
+        self.update_offer_label.pack(side=tk.LEFT, padx=(0, 12))
+        self.update_offer_button = ttk.Button(self.update_offer_frame, text='View update')
+        self.update_offer_button.pack(side=tk.LEFT)
 
         # Restore Defaults button
         ttk.Separator(parent).pack(fill=X, pady=15)
@@ -118,6 +125,7 @@ class GeneralTabMixin:
         """Handle auto-check setting change - auto-save immediately."""
         enabled = self.auto_check_var.get()
         self.config.set_auto_check_updates(enabled)
+        self.update_manager.auto_check_changed()
         logging.info(f"Auto-check updates on startup: {enabled}")
 
     def _restore_defaults(self):
@@ -136,9 +144,10 @@ class GeneralTabMixin:
 
         # Restore general settings and auto-save
         self.autostart_var.set(False)
-        self.auto_check_var.set(False)
+        self.auto_check_var.set(True)
         self.config.set_autostart(False)
-        self.config.set_auto_check_updates(False)
+        self.config.set_auto_check_updates(True)
+        self.update_manager.auto_check_changed()
 
         logging.info("Restored defaults and auto-saved")
 

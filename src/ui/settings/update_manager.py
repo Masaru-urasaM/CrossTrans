@@ -1,13 +1,10 @@
-"""
-Update management functionality for Settings window.
-"""
-import sys
+"""User-initiated update checks and cancellable downloads, with UI-thread delivery."""
 import logging
+import queue
+import sys
 import threading
-import webbrowser
-
 import tkinter as tk
-from tkinter import BOTH, X
+import webbrowser
 
 try:
     import ttkbootstrap as ttk
@@ -18,293 +15,206 @@ except ImportError:
     HAS_TTKBOOTSTRAP = False
 
 from src.constants import VERSION, GITHUB_REPO
-from src.utils.updates import (
-    AutoUpdater,
-    DownloadCancelledException,
-    classify_error_type,
-    UPDATE_THREAD_TIMEOUT,
-    RELEASE_NOTES_MAX_LENGTH,
-    PROGRESS_WINDOW_SIZE,
-    THREAD_NAMES
-)
+from src.utils.updates import DownloadCancelledException, classify_error_type, RELEASE_NOTES_MAX_LENGTH
 
 
 class UpdateManagerMixin:
-    """Mixin class providing update management functionality."""
+    def _updates_alive(self):
+        try:
+            return bool(self.window.winfo_exists())
+        except tk.TclError:
+            return False
 
-    def _check_for_updates_click(self) -> None:
-        """Handle Check for Updates button - runs full update flow with proper error handling."""
-        self.check_update_btn.config(state='disabled')
-        self.update_status_label.config(text="Checking for updates...", foreground='gray')
-
-        # Create thread-safe exception container
-        exception_holder = {'error': None}
-
-        def run_update_flow():
-            try:
-                # Step 1: Check for update
-                from datetime import datetime
-                logging.info(f"[UPDATE] User initiated update check at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (Current version: {VERSION})")
-                result = self.updater.check_update()
-
-                # Log result for debugging
-                logging.info(f"Update check result: {result}")
-
-                if result.get('error'):
-                    error_msg = result['error']
-                    logging.error(f"Update check error: {error_msg}")
-                    # Record failed check for telemetry with classified error type
-                    error_type = classify_error_type(error_msg)
-                    self.config.record_update_check(success=False, error_type=error_type)
-                    self.window.after(0, lambda: self._update_status(
-                        f"Error: {error_msg}", 'red'))
-                    return
-
-                if not result.get('has_update'):
-                    current_version = result.get('version', VERSION)
-                    logging.info(f"No update available. Current: {current_version}")
-                    # Record successful check for telemetry
-                    self.config.record_update_check(success=True)
-                    self.window.after(0, lambda: self._update_status(
-                        f"You're up to date (v{current_version})", 'green'))
-                    return
-
-                # Has update - ask user
-                new_version = result['version']
-                logging.info(f"Update available: {new_version}")
-                # Record successful check for telemetry (update available)
-                self.config.record_update_check(success=True)
-                self.window.after(0, lambda: self._confirm_update(new_version))
-
-            except Exception as e:
-                # Catch any unhandled exceptions
-                logging.error(f"Unexpected error in update flow: {e}", exc_info=True)
-                exception_holder['error'] = str(e)
-                self.window.after(0, lambda: self._update_status(
-                    f"Unexpected error: {str(e)}", 'red'))
-
-        # Use non-daemon thread to ensure exceptions are captured
-        thread = threading.Thread(
-            target=run_update_flow,
-            daemon=False,
-            name=THREAD_NAMES['check']
-        )
-        thread.start()
-
-        # Monitor thread health with timeout
-        def monitor_thread():
-            thread.join(timeout=UPDATE_THREAD_TIMEOUT)
-            if thread.is_alive():
-                logging.error("Update check thread timeout!")
-                self.window.after(0, lambda: self._update_status(
-                    "Update check timed out", 'red'))
-
-        threading.Thread(
-            target=monitor_thread,
-            daemon=True,
-            name=THREAD_NAMES['monitor']
-        ).start()
-
-    def _confirm_update(self, new_version: str) -> None:
-        """Ask user to confirm update with release notes displayed.
-
-        Shows different dialogs based on whether running from source or EXE:
-        - Source: Opens browser to GitHub releases page
-        - EXE: Offers to download and install update automatically
-
-        Args:
-            new_version: Version number of available update (e.g., "1.9.7")
-        """
-        is_exe = getattr(sys, 'frozen', False)
-
-        # Get release notes from updater
-        release_notes = getattr(self.updater, 'release_notes', '')
-        if release_notes:
-            # Truncate if too long
-            if len(release_notes) > RELEASE_NOTES_MAX_LENGTH:
-                release_notes = release_notes[:RELEASE_NOTES_MAX_LENGTH] + "..."
-            notes_text = f"\n\nWhat's new:\n{release_notes}\n"
-        else:
-            notes_text = "\n"
-
-        if not is_exe:
-            # Running from source - open download page
-            message = (f"New version v{new_version} available!\n"
-                       f"Current: v{VERSION}\n"
-                       f"{notes_text}"
-                       f"You're running from source.\n"
-                       f"Open download page?")
-
-            if HAS_TTKBOOTSTRAP:
-                answer = Messagebox.yesno(
-                    message,
-                    title="Update Available", parent=self.window)
-                if answer == "Yes":
-                    webbrowser.open(f"https://github.com/{GITHUB_REPO}/releases/latest")
-            else:
-                from tkinter import messagebox
-                if messagebox.askyesno("Update Available", message, parent=self.window):
-                    webbrowser.open(f"https://github.com/{GITHUB_REPO}/releases/latest")
-            self._update_status(f"v{new_version} available", 'green')
+    def refresh_update_state(self):
+        """Keep a persistent entry point even after a reminder was dismissed."""
+        if not self._updates_alive() or not hasattr(self, 'update_offer_frame'):
             return
+        version = self.update_manager.available_version
+        ready = self.update_manager.ready_update
+        if ready:
+            text = f'v{ready[0]} downloaded. Restart when you are ready.'
+            action = self._install_ready_update
+            label = 'Restart to update'
+        elif version:
+            text = f'Update available: v{version}'
+            action = self.update_manager.request_update
+            label = 'View update'
+        else:
+            self.update_offer_frame.pack_forget()
+            return
+        self.update_offer_label.configure(text=text)
+        self.update_offer_button.configure(text=label, command=action)
+        self.update_offer_frame.pack(anchor='w', fill='x', pady=(8, 0),
+                                     after=self.update_check_frame)
 
-        # Running as exe - offer auto-update
-        message = (f"New version v{new_version} available!\n"
-                   f"Current: v{VERSION}\n"
-                   f"{notes_text}"
-                   f"Download and install now?")
+    def _check_for_updates_click(self):
+        if self._download_active:
+            return
+        self.check_update_btn.configure(state='disabled')
+        self.update_status_label.configure(text='Checking for updates...', foreground='gray')
+        self.update_manager.request_check(self._show_check_result)
 
+    def _show_check_result(self, result, updater):
+        if not self._updates_alive():
+            return
+        error = result.get('error')
+        self.config.record_update_check(success=not bool(error),
+                                        error_type=classify_error_type(error) if error else None)
+        if error:
+            self._update_status(f'Error: {error}', 'red')
+        elif not result.get('has_update'):
+            self._update_status(f"You're up to date (v{VERSION})", 'green')
+        else:
+            self._update_status(f"v{result['version']} available", 'green')
+            if not self.is_translation_busy():
+                self.offer_update(result['version'], updater)
+
+    def offer_update(self, version, updater):
+        if not self._updates_alive() or self._download_active:
+            return
+        if self.is_translation_busy():
+            self._update_status('Update available. Finish or cancel the translation first.', 'gray')
+            return
+        if self.update_manager.ready_update:
+            self.refresh_update_state()
+            return
+        if updater is None:
+            self._check_for_updates_click()
+            return
+        self.updater = updater
+        self._confirm_update(version)
+
+    def _confirm_update(self, version):
+        notes = getattr(self.updater, 'release_notes', '')[:RELEASE_NOTES_MAX_LENGTH]
+        message = f'New version v{version} available!\nCurrent: v{VERSION}'
+        if notes:
+            message += f"\n\nWhat's new:\n{notes}\n"
+        is_exe = getattr(sys, 'frozen', False)
+        message += '\nDownload update now?' if is_exe else '\nRunning from source. Open download page?'
         if HAS_TTKBOOTSTRAP:
-            answer = Messagebox.yesno(
-                message,
-                title="Update Available", parent=self.window)
-            if answer != "Yes":
-                self._update_status(f"v{new_version} available", 'green')
-                return
+            accepted = Messagebox.yesno(message, title='Update Available', parent=self.window) == 'Yes'
         else:
             from tkinter import messagebox
-            if not messagebox.askyesno("Update Available", message, parent=self.window):
-                self._update_status(f"v{new_version} available", 'green')
-                return
-
-        # User accepted - start download
-        self._start_update_download(new_version)
-
-    def _start_update_download(self, new_version: str) -> None:
-        """Download update with progress dialog.
-
-        Args:
-            new_version: Version number being downloaded (e.g., "1.9.7")
-        """
-        # Create progress window
-        self.progress_win = tk.Toplevel(self.window)
-        self.progress_win.title("Updating")
-        self.progress_win.geometry(PROGRESS_WINDOW_SIZE)
-        self.progress_win.resizable(False, False)
-        self.progress_win.transient(self.window)
-        self.progress_win.grab_set()
-
-        # Center
-        self.progress_win.update_idletasks()
-        x = self.window.winfo_x() + (self.window.winfo_width() - 350) // 2
-        y = self.window.winfo_y() + (self.window.winfo_height() - 150) // 2
-        self.progress_win.geometry(f"+{x}+{y}")
-
-        frame = ttk.Frame(self.progress_win, padding=15)
-        frame.pack(fill=BOTH, expand=True)
-
-        self.progress_text = ttk.Label(frame, text=f"Downloading v{new_version}...")
-        self.progress_text.pack(anchor=tk.W)
-
-        if HAS_TTKBOOTSTRAP:
-            self.progress_bar = ttk.Progressbar(frame, length=320, bootstyle="success-striped")
+            accepted = messagebox.askyesno('Update Available', message, parent=self.window)
+        if not accepted:
+            self._update_status(f'v{version} available', 'green')
+        elif is_exe:
+            self._start_update_download(version)
         else:
-            self.progress_bar = ttk.Progressbar(frame, length=320)
-        self.progress_bar.pack(fill=X, pady=10)
+            webbrowser.open(f'https://github.com/{GITHUB_REPO}/releases/latest')
 
-        # Add cancel button
-        cancel_btn = ttk.Button(frame, text="Cancel", command=self._cancel_download)
-        cancel_btn.pack(pady=5)
-
-        # Thread-safe cancellation event
+    def _start_update_download(self, version):
+        if self._download_active:
+            return
+        self._download_active = True
+        self.check_update_btn.configure(state='disabled')
         self.download_cancel_event = threading.Event()
+        cancelled = self.download_cancel_event
+        answers = queue.Queue()
+        updater = self.updater
+        self.progress_win = tk.Toplevel(self.window)
+        self.progress_win.title('Downloading update')
+        self.progress_win.resizable(False, False)
+        self.progress_win.protocol('WM_DELETE_WINDOW', self._cancel_download)
+        frame = ttk.Frame(self.progress_win, padding=18)
+        frame.pack(fill='both', expand=True)
+        self.progress_text = ttk.Label(frame, text=f'Downloading v{version}...')
+        self.progress_text.pack(anchor='w')
+        self.progress_bar = ttk.Progressbar(frame, length=320, maximum=100)
+        self.progress_bar.pack(fill='x', pady=12)
+        ttk.Button(frame, text='Cancel', command=self._cancel_download).pack()
 
-        def download_thread():
-            def on_progress(percent):
-                if self.download_cancel_event.is_set():
-                    logging.info("Download cancelled by user")
-                    raise DownloadCancelledException("User cancelled download")
-                self.window.after(0, lambda p=percent: self._set_progress(p))
-
+        def worker():
+            def progress(percent):
+                if cancelled.is_set():
+                    raise DownloadCancelledException('User cancelled download')
+                answers.put(('progress', percent))
             try:
-                result = self.updater.download(on_progress)
-                if not self.download_cancel_event.is_set():
-                    self.window.after(0, lambda: self._on_download_done(result, new_version))
+                result = updater.download(progress)
             except DownloadCancelledException:
-                logging.info("Download cancelled by user")
-                self.window.after(0, lambda: self._update_status("Download cancelled", 'gray'))
-            except Exception as e:
-                logging.error(f"Download error: {e}", exc_info=True)
-                self.window.after(0, lambda: self._update_status(f"Download failed: {e}", 'red'))
-            finally:
-                if hasattr(self, 'progress_win') and self.progress_win.winfo_exists():
+                result = {'success': False, 'cancelled': True}
+            except Exception as error:
+                logging.exception('[Update] Download failed')
+                result = {'success': False, 'error': str(error)}
+            answers.put(('done', result))
+
+        def poll():
+            self._download_poll_id = None
+            if not self._updates_alive():
+                cancelled.set()
+                return
+            latest_progress = None
+            done = None
+            while True:
+                try:
+                    kind, value = answers.get_nowait()
+                except queue.Empty:
+                    break
+                if kind == 'progress':
+                    latest_progress = value
+                else:
+                    done = value
+            if latest_progress is not None and not cancelled.is_set():
+                self._set_progress(latest_progress)
+            if done is not None:
+                self._download_active = False
+                if self.progress_win.winfo_exists():
                     self.progress_win.destroy()
+                if cancelled.is_set() or done.get('cancelled'):
+                    self._update_status('Download cancelled', 'gray')
+                else:
+                    self._on_download_done(done, version, updater)
+            else:
+                self._download_poll_id = self.window.after(100, poll)
 
-        threading.Thread(
-            target=download_thread,
-            daemon=False,
-            name=THREAD_NAMES['download']
-        ).start()
+        threading.Thread(target=worker, daemon=True, name='UpdateDownload').start()
+        self._download_poll_id = self.window.after(100, poll)
 
-    def _cancel_download(self) -> None:
-        """Cancel ongoing download by setting thread-safe cancellation event."""
-        from datetime import datetime
-        version_info = getattr(self.updater, 'latest_version', 'unknown')
-        logging.info(
-            f"[UPDATE] User cancelled download at {datetime.now().strftime('%H:%M:%S')} "
-            f"(Target version: {version_info}, Thread: {threading.current_thread().name})"
-        )
+    def _cancel_download(self):
         if hasattr(self, 'download_cancel_event'):
             self.download_cancel_event.set()
-        if hasattr(self, 'progress_text'):
-            self.progress_text.config(text="Cancelling...")
-
-    def _set_progress(self, percent: int) -> None:
-        """Update progress bar with download percentage.
-
-        Args:
-            percent: Download progress percentage (0-100)
-        """
-        if hasattr(self, 'progress_bar') and hasattr(self, 'progress_win') and self.progress_win.winfo_exists():
-            self.progress_bar['value'] = percent
-            self.progress_text.config(text=f"Downloading... {percent}%")
-
-    def _on_download_done(self, result: dict, new_version: str) -> None:
-        """Handle download completion and prompt for installation.
-
-        Args:
-            result: Download result dict with 'success' and optional 'error' keys
-            new_version: Version number that was downloaded (e.g., "1.9.7")
-        """
         if hasattr(self, 'progress_win') and self.progress_win.winfo_exists():
-            self.progress_win.destroy()
+            self.progress_text.configure(text='Cancelling...')
 
+    def _set_progress(self, percent):
+        if self.progress_win.winfo_exists():
+            self.progress_bar.configure(value=percent)
+            self.progress_text.configure(text=f'Downloading... {percent}%')
+
+    def _on_download_done(self, result, version, updater=None):
         if not result.get('success'):
             self._update_status(f"Download failed: {result.get('error', 'Unknown')}", 'red')
             return
+        self.update_manager.ready_update = (version, updater or self.updater)
+        self._update_status('Download complete. Choose Restart to update when ready.', 'green')
+        self.refresh_update_state()
 
-        # Download success - ask to restart
-        if HAS_TTKBOOTSTRAP:
-            answer = Messagebox.yesno(
-                f"v{new_version} downloaded!\n\n"
-                f"Restart now to apply update?",
-                title="Ready to Install", parent=self.window)
-            if answer == "Yes":
-                self.updater.install_and_restart()
-            else:
-                self._update_status("Restart app to apply update", '#0066cc')
-        else:
-            from tkinter import messagebox
-            if messagebox.askyesno("Ready to Install",
-                f"v{new_version} downloaded!\n\n"
-                f"Restart now to apply update?", parent=self.window):
-                self.updater.install_and_restart()
-            else:
-                self._update_status("Restart app to apply update", '#0066cc')
+    def _install_ready_update(self):
+        if self.is_translation_busy():
+            self._update_status('Finish or cancel the translation before restarting.', 'gray')
+            return
+        ready = self.update_manager.ready_update
+        if ready:
+            result = ready[1].install_and_restart()
+            if result and not result.get('success'):
+                self._update_status(f"Install failed: {result.get('error', 'Unknown')}", 'red')
 
-    def _update_status(self, text: str, color: str) -> None:
-        """Update status label and re-enable button. Change button text to 'Retry' on error.
+    def _close_update_work(self, event):
+        if event.widget is not self.window:
+            return
+        self._download_active = False
+        if hasattr(self, 'download_cancel_event'):
+            self.download_cancel_event.set()
+        if self._download_poll_id:
+            self.window.after_cancel(self._download_poll_id)
+            self._download_poll_id = None
+        if self._owns_update_manager:
+            self.update_manager.stop()
 
-        Args:
-            text: Status message to display
-            color: Foreground color for the message ('green', 'red', 'gray', etc.)
-        """
-        self.check_update_btn.config(state='normal')
-        self.update_status_label.config(text=text, foreground=color)
-
-        # If error, change button text to "Retry"
-        if 'error' in text.lower() or 'failed' in text.lower() or 'timed out' in text.lower():
-            self.check_update_btn.config(text="Retry Update Check")
-            logging.info("Update check failed - retry available")
-        else:
-            self.check_update_btn.config(text="Check for Updates")
+    def _update_status(self, text, color):
+        if not self._updates_alive():
+            return
+        self.check_update_btn.configure(state='disabled' if self._download_active else 'normal')
+        self.update_status_label.configure(text=text, foreground=color)
+        failed = any(word in text.lower() for word in ('error', 'failed', 'timed out'))
+        self.check_update_btn.configure(text='Retry Update Check' if failed else 'Check for updates')

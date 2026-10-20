@@ -1,6 +1,6 @@
 # CrossTrans - TODO
 
-No active tasks. The user accepted the completed v1.9.21 work on 2026-10-20.
+No active tasks. Completed implementation and the v1.9.21 asset refresh are recorded below.
 
 - Completed work: [ROADMAP_DONE.md](ROADMAP_DONE.md).
 - Release changes: [CHANGELOG.md](CHANGELOG.md).

@@ -226,9 +226,13 @@ class AutoUpdater:
                         logging.info(f"New version available: {latest}")
 
                         # Find exe asset
+                        asset_sha256 = None
                         for asset in data.get('assets', []):
                             if asset['name'].lower().endswith('.exe'):
                                 self.exe_url = asset['browser_download_url']
+                                digest = re.fullmatch(r'sha256:([0-9a-fA-F]{64})',
+                                                      asset.get('digest') or '')
+                                asset_sha256 = digest.group(1) if digest else None
                                 logging.info(f"Found EXE asset: {self.exe_url}")
                                 break
 
@@ -244,7 +248,10 @@ class AutoUpdater:
 
                         # Try to extract SHA256 from release notes
                         sha256_match = re.search(r'SHA256:?\s*([0-9a-fA-F]{64})', self.release_notes, re.IGNORECASE)
-                        if sha256_match:
+                        if asset_sha256:
+                            self.expected_sha256 = asset_sha256
+                            logging.info('Using GitHub EXE asset SHA256: %s', asset_sha256)
+                        elif sha256_match:
                             self.expected_sha256 = sha256_match.group(1)
                             logging.info(f"Found SHA256 checksum in release notes: {self.expected_sha256}")
                         else:
@@ -398,8 +405,8 @@ class AutoUpdater:
                         f.write(chunk)
                         downloaded += len(chunk)
 
-                        if progress_callback and total > 0:
-                            progress_callback(int(downloaded * 100 / total))
+                        if progress_callback:
+                            progress_callback(min(100, int(downloaded * 100 / total)) if total > 0 else 0)
 
             logging.info(f"Download completed: {downloaded} bytes")
 
