@@ -410,8 +410,17 @@ def sized(tk_root):
     mgr.close()
 
 
+@pytest.fixture
+def room_for_grip_growth(sized, monkeypatch):
+    """Raw drag-delta tests need room; separate tests verify monitor clamping."""
+    mgr, _ = sized
+    monkeypatch.setattr(mgr, '_screen_at',
+                        lambda _x, _y: popup_layout.WorkArea(0, 0, 4096, 2160))
+
+
 class TestGrip:
-    def test_dragging_the_grip_resizes_and_is_remembered(self, sized, tk_root):
+    def test_dragging_the_grip_resizes_and_is_remembered(self, sized, tk_root,
+                                                        room_for_grip_growth):
         mgr, config = sized
         put_up(mgr, tk_root, cases.case('C'))
         width, height = mgr.popup.winfo_width(), mgr.popup.winfo_height()
@@ -482,7 +491,8 @@ class TestGripDragsAnOutline:
         monkeypatch.setattr(mgr, '_fit_boxes', counted)
         return calls
 
-    def test_while_dragging_only_the_outline_moves(self, sized, tk_root, no_pause):
+    def test_while_dragging_only_the_outline_moves(self, sized, tk_root, no_pause,
+                                                  room_for_grip_growth):
         mgr, config = sized
         put_up(mgr, tk_root, cases.case('C'))
         width, height = mgr.popup.winfo_width(), mgr.popup.winfo_height()
@@ -512,7 +522,7 @@ class TestGripDragsAnOutline:
         assert layouts == [mgr._user_size]
 
     def test_a_pause_shows_the_popup_at_the_outlines_size(self, sized, tk_root, monkeypatch,
-                                                          layouts):
+                                                          layouts, room_for_grip_growth):
         monkeypatch.setattr(quick_translate, 'POPUP_GRIP_PREVIEW_MS', 20)
         mgr, config = sized
         put_up(mgr, tk_root, cases.case('C'))

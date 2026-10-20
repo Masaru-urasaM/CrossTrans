@@ -376,6 +376,9 @@ pytest's capture one could not read `init.tcl`.
 stale bytecode, and "no test ran" is not a kill). A survivor is a question - an equivalent
 mutant, a selector that misses the test, or a missing test - not something to shrug off.
 
+Resize tests asserting an unclamped drag delta must supply a roomy monitor;
+keep separate tests for screen-edge clamping (CI uses a smaller display).
+
 ## Run
 
 ```bash
